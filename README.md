@@ -1,98 +1,91 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# 🐾 PetCard API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+[![CI](https://github.com/PetCardOrg/petcard-api/actions/workflows/ci.yml/badge.svg)](https://github.com/PetCardOrg/petcard-api/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Backend do ecossistema PetCard. API REST construída com NestJS para gestão inteligente da saúde de animais de estimação.
 
-## Description
+**Projeto de TCC** — Ciência da Computação (2026)
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Ecossistema PetCard
 
-## Project setup
+Este repositório faz parte de um conjunto de 5 repos:
 
-```bash
-$ npm install
-```
+| Repositório                                                    | Descrição                          |
+| -------------------------------------------------------------- | ---------------------------------- |
+| **petcard-api**                                                | ← Você está aqui                   |
+| [petcard-web](https://github.com/PetCardOrg/petcard-web)       | Painel do Veterinário (React.js)   |
+| [petcard-mobile](https://github.com/PetCardOrg/petcard-mobile) | App do Tutor (React Native / Expo) |
+| [petcard-shared](https://github.com/PetCardOrg/petcard-shared) | DTOs e tipos compartilhados        |
+| [petcard-docs](https://github.com/PetCardOrg/petcard-docs)     | Documentação e gestão do projeto   |
 
-## Compile and run the project
+## Stack
 
-```bash
-# development
-$ npm run start
+| Camada         | Tecnologia                   |
+| -------------- | ---------------------------- |
+| Framework      | NestJS 10 + Node.js 20 LTS   |
+| Linguagem      | TypeScript 5.x (strict mode) |
+| Banco de Dados | PostgreSQL 16 + PostGIS 3.4  |
+| ORM            | Prisma 6                     |
+| Cache          | Redis 7                      |
+| Fila           | RabbitMQ 3                   |
+| Autenticação   | Auth0 (OAuth 2.0 + JWT)      |
+| Storage        | AWS S3                       |
+| Notificações   | Firebase Cloud Messaging     |
 
-# watch mode
-$ npm run start:dev
+## Pré-requisitos
 
-# production mode
-$ npm run start:prod
-```
+- Node.js >= 20 LTS
+- npm >= 10
+- Docker e Docker Compose
+- Conta Auth0 (dev tenant)
 
-## Run tests
+## Instalação
 
 ```bash
-# unit tests
-$ npm run test
+# 1. Clone o repositório
+git clone https://github.com/PetCardOrg/petcard-api.git
+cd petcard-api
 
-# e2e tests
-$ npm run test:e2e
+# 2. Instale as dependências
+npm install
 
-# test coverage
-$ npm run test:cov
+# 3. Configure as variáveis de ambiente
+cp .env.example .env
+# Edite o .env com suas credenciais
+
+# 4. Suba os serviços de infraestrutura
+docker compose -f docker/docker-compose.yml up -d
+
+# 5. Execute as migrations do banco
+npx prisma migrate dev
+
+# 6. Inicie o servidor
+npm run start:dev
+# API disponível em http://localhost:3000
 ```
 
-## Deployment
+## Scripts
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+| Comando             | Descrição                              |
+| ------------------- | -------------------------------------- |
+| `npm run start:dev` | Inicia em modo desenvolvimento (watch) |
+| `npm run build`     | Build de produção                      |
+| `npm run test`      | Executa testes unitários               |
+| `npm run test:e2e`  | Executa testes end-to-end              |
+| `npm run test:cov`  | Relatório de cobertura                 |
+| `npm run lint`      | Executa ESLint                         |
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+## Infraestrutura Local (Docker)
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
+O `docker-compose.yml` sobe os seguintes serviços:
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+| Serviço              | Porta                    | Credenciais          |
+| -------------------- | ------------------------ | -------------------- |
+| PostgreSQL + PostGIS | 5432                     | petcard / petcard123 |
+| Redis                | 6379                     | —                    |
+| RabbitMQ             | 5672 (AMQP) / 15672 (UI) | petcard / petcard123 |
 
-## Resources
+## Contribuição
 
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Leia o [CONTRIBUTING.md](https://github.com/PetCardOrg/petcard-docs/blob/main/CONTRIBUTING.md) no repositório petcard-docs.
