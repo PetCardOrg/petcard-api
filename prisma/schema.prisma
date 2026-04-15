@@ -7,15 +7,33 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  TUTOR
+  VET
+}
+
+enum Species {
+  DOG
+  CAT
+  BIRD
+  OTHER
+}
+
+enum Sex {
+  MALE
+  FEMALE
+}
+
 model Tutor {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  phone     String?
-  avatarUrl String?  @map("avatar_url")
-  authId    String   @unique @map("auth_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id               String   @id @default(uuid())
+  auth0Id          String   @unique @map("auth0_id")
+  name             String
+  email            String   @unique
+  phone            String?
+  profileImageUrl  String?  @map("profile_image_url")
+  role             Role     @default(TUTOR)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   pets Pet[]
 
@@ -23,18 +41,71 @@ model Tutor {
 }
 
 model Pet {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   name      String
-  species   String
+  species   Species
   breed     String?
-  sex       String
+  sex       Sex
   birthDate DateTime? @map("birth_date")
+  weight    Float?
   photoUrl  String?   @map("photo_url")
   tutorId   String    @map("tutor_id")
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
-  tutor Tutor @relation(fields: [tutorId], references: [id])
+  tutor              Tutor               @relation(fields: [tutorId], references: [id])
+  vaccineRecords     VaccineRecord[]
+  dewormingRecords   DewormingRecord[]
+  medicationRecords  MedicationRecord[]
 
   @@map("pet")
+}
+
+model VaccineRecord {
+  id               String    @id @default(uuid())
+  petId            String    @map("pet_id")
+  vaccineName      String    @map("vaccine_name")
+  appliedAt        DateTime  @map("applied_at")
+  nextDoseAt       DateTime? @map("next_dose_at")
+  veterinarianName String?   @map("veterinarian_name")
+  notes            String?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@map("vaccine_record")
+}
+
+model DewormingRecord {
+  id               String    @id @default(uuid())
+  petId            String    @map("pet_id")
+  productName      String    @map("product_name")
+  appliedAt        DateTime  @map("applied_at")
+  nextDoseAt       DateTime? @map("next_dose_at")
+  veterinarianName String?   @map("veterinarian_name")
+  notes            String?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@map("deworming_record")
+}
+
+model MedicationRecord {
+  id             String    @id @default(uuid())
+  petId          String    @map("pet_id")
+  medicationName String    @map("medication_name")
+  dosage         String
+  frequency      String
+  startDate      DateTime  @map("start_date")
+  endDate        DateTime? @map("end_date")
+  notes          String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@map("medication_record")
 }
