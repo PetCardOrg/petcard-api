@@ -19,12 +19,19 @@ describe('PetService', () => {
   let tutorService: { findByAuth0Id: jest.Mock };
 
   const tutor = { id: 'tutor-1', auth0Id: 'auth0|abc' };
+  const now = new Date('2025-01-15T12:00:00Z');
   const pet = {
     id: 'pet-1',
     name: 'Rex',
     species: Species.DOG,
+    breed: null,
     sex: Sex.MALE,
+    birthDate: new Date('2022-03-10'),
+    weight: null,
+    photoUrl: null,
     tutorId: 'tutor-1',
+    createdAt: now,
+    updatedAt: now,
   };
 
   beforeEach(async () => {
@@ -69,7 +76,14 @@ describe('PetService', () => {
         sex: Sex.MALE,
         tutorId: 'tutor-1',
       });
-      expect(result).toBe(pet);
+      expect(result).toMatchObject({
+        id: 'pet-1',
+        name: 'Rex',
+        species: Species.DOG,
+        sex: Sex.MALE,
+        birth_date: '2022-03-10',
+        tutor_id: 'tutor-1',
+      });
     });
   });
 
@@ -82,7 +96,7 @@ describe('PetService', () => {
       expect(prisma.pet.findMany).toHaveBeenCalledWith({
         where: { tutorId: 'tutor-1' },
       });
-      expect(result).toEqual([pet]);
+      expect(result[0]).toMatchObject({ id: 'pet-1', name: 'Rex' });
     });
   });
 
@@ -92,11 +106,14 @@ describe('PetService', () => {
 
       const result = await service.findOne('pet-1', 'auth0|abc', false);
 
-      expect(result).toBe(pet);
+      expect(result).toMatchObject({ id: 'pet-1', name: 'Rex' });
     });
 
     it('should deny access to non-owner tutors', async () => {
-      prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'other' });
+      prisma.pet.findUnique.mockResolvedValue({
+        ...pet,
+        tutorId: 'other',
+      });
 
       await expect(
         service.findOne('pet-1', 'auth0|abc', false),
@@ -104,7 +121,10 @@ describe('PetService', () => {
     });
 
     it('should allow any vet to read the pet', async () => {
-      prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'other' });
+      prisma.pet.findUnique.mockResolvedValue({
+        ...pet,
+        tutorId: 'other',
+      });
 
       const result = await service.findOne('pet-1', 'auth0|vet', true);
 
@@ -124,7 +144,10 @@ describe('PetService', () => {
   describe('update', () => {
     it('should update owned pets', async () => {
       prisma.pet.findUnique.mockResolvedValue(pet);
-      prisma.pet.update.mockResolvedValue({ ...pet, name: 'Rex II' });
+      prisma.pet.update.mockResolvedValue({
+        ...pet,
+        name: 'Rex II',
+      });
 
       const result = await service.update('pet-1', 'auth0|abc', {
         name: 'Rex II',

@@ -86,7 +86,20 @@ describe('MedicationService', () => {
       where: { petId: 'pet-1' },
       orderBy: { startDate: 'desc' },
     });
-    expect(result).toEqual([record]);
+    expect(result).toEqual([
+      {
+        id: 'med-1',
+        pet_id: 'pet-1',
+        medication_name: 'Amoxicillin',
+        dosage: '500mg',
+        frequency: '8h',
+        start_date: '2026-01-01',
+        end_date: undefined,
+        notes: undefined,
+        created_at: record.createdAt,
+        updated_at: record.updatedAt,
+      },
+    ]);
   });
 
   it('should throw when updating a missing record', async () => {

@@ -4,9 +4,33 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Pet } from '@prisma/client';
-import { CreatePetDto, UpdatePetDto } from '@petcardorg/shared';
+import {
+  CreatePetDto,
+  PetResponseDto,
+  Sex,
+  Species,
+  UpdatePetDto,
+} from '@petcardorg/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TutorService } from '../tutor/tutor.service';
+
+function toResponseDto(pet: Pet): PetResponseDto {
+  return {
+    id: pet.id,
+    name: pet.name,
+    species: pet.species as unknown as Species,
+    breed: pet.breed ?? undefined,
+    sex: pet.sex as unknown as Sex,
+    birth_date: pet.birthDate
+      ? pet.birthDate.toISOString().split('T')[0]
+      : undefined,
+    weight: pet.weight ?? undefined,
+    photo_url: pet.photoUrl ?? undefined,
+    tutor_id: pet.tutorId,
+    created_at: pet.createdAt,
+    updated_at: pet.updatedAt,
+  };
+}
 
 type PetInput = Omit<CreatePetDto, 'tutor_id'>;
 
@@ -17,9 +41,9 @@ export class PetService {
     private readonly tutorService: TutorService,
   ) {}
 
-  async create(auth0Id: string, dto: PetInput): Promise<Pet> {
+  async create(auth0Id: string, dto: PetInput): Promise<PetResponseDto> {
     const tutor = await this.tutorService.findByAuth0Id(auth0Id);
-    return this.prisma.pet.create({
+    const pet = await this.prisma.pet.create({
       data: {
         name: dto.name,
         species: dto.species,
@@ -31,14 +55,22 @@ export class PetService {
         tutorId: tutor.id,
       },
     });
+    return toResponseDto(pet);
   }
 
-  async findAllForTutor(auth0Id: string): Promise<Pet[]> {
+  async findAllForTutor(auth0Id: string): Promise<PetResponseDto[]> {
     const tutor = await this.tutorService.findByAuth0Id(auth0Id);
-    return this.prisma.pet.findMany({ where: { tutorId: tutor.id } });
+    const pets = await this.prisma.pet.findMany({
+      where: { tutorId: tutor.id },
+    });
+    return pets.map(toResponseDto);
   }
 
-  async findOne(id: string, auth0Id: string, isVet: boolean): Promise<Pet> {
+  async findOne(
+    id: string,
+    auth0Id: string,
+    isVet: boolean,
+  ): Promise<PetResponseDto> {
     const pet = await this.prisma.pet.findUnique({ where: { id } });
     if (!pet) {
       throw new NotFoundException(`Pet with id ${id} not found`);
@@ -49,16 +81,16 @@ export class PetService {
         throw new ForbiddenException('You do not own this pet');
       }
     }
-    return pet;
+    return toResponseDto(pet);
   }
 
   async update(
     id: string,
     auth0Id: string,
     dto: Omit<UpdatePetDto, 'tutor_id'>,
-  ): Promise<Pet> {
+  ): Promise<PetResponseDto> {
     await this.assertOwnership(id, auth0Id);
-    return this.prisma.pet.update({
+    const pet = await this.prisma.pet.update({
       where: { id },
       data: {
         name: dto.name,
@@ -70,6 +102,7 @@ export class PetService {
         photoUrl: dto.photo_url,
       },
     });
+    return toResponseDto(pet);
   }
 
   async remove(id: string, auth0Id: string): Promise<void> {
