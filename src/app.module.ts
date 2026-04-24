@@ -5,6 +5,7 @@ import { AppService } from './app.service';
 import { authConfig } from './config/auth.config';
 import { awsConfig } from './config/aws.config';
 import { AuthModule } from './modules/auth/auth.module';
+import { CardModule } from './modules/card/card.module';
 import { DewormingModule } from './modules/health/deworming/deworming.module';
 import { MedicationModule } from './modules/health/medication/medication.module';
 import { VaccineModule } from './modules/health/vaccine/vaccine.module';
@@ -21,6 +22,7 @@ import { PrismaModule } from './prisma/prisma.module';
     }),
     PrismaModule,
     AuthModule,
+    CardModule,
     TutorModule,
     PetModule,
     VaccineModule,
