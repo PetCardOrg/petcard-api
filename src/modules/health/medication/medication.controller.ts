@@ -9,9 +9,9 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { MedicationRecord } from '@prisma/client';
 import {
   CreateMedicationRecordDto,
+  MedicationRecordResponseDto,
   UpdateMedicationRecordDto,
 } from '@petcardorg/shared';
 import { Auth } from '../../auth/decorators/auth.decorator';
@@ -30,7 +30,7 @@ export class MedicationController {
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateMedicationRecordDto,
-  ): Promise<MedicationRecord> {
+  ): Promise<MedicationRecordResponseDto> {
     const isVet = user.permissions?.includes(Role.VET) ?? false;
     return this.medicationService.create(petId, user.sub, isVet, dto);
   }
@@ -40,7 +40,7 @@ export class MedicationController {
   async findAll(
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
-  ): Promise<MedicationRecord[]> {
+  ): Promise<MedicationRecordResponseDto[]> {
     const isVet = user.permissions?.includes(Role.VET) ?? false;
     return this.medicationService.findAllForPet(petId, user.sub, isVet);
   }
@@ -51,7 +51,7 @@ export class MedicationController {
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
     @Body() dto: UpdateMedicationRecordDto,
-  ): Promise<MedicationRecord> {
+  ): Promise<MedicationRecordResponseDto> {
     const isVet = user.permissions?.includes(Role.VET) ?? false;
     return this.medicationService.update(id, user.sub, isVet, dto);
   }

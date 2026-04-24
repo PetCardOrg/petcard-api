@@ -3,11 +3,28 @@ import { VaccineRecord } from '@prisma/client';
 import {
   CreateVaccineRecordDto,
   UpdateVaccineRecordDto,
+  VaccineRecordResponseDto,
 } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PetService } from '../../pet/pet.service';
 
 type VaccineInput = Omit<CreateVaccineRecordDto, 'pet_id'>;
+
+function toResponseDto(record: VaccineRecord): VaccineRecordResponseDto {
+  return {
+    id: record.id,
+    pet_id: record.petId,
+    vaccine_name: record.vaccineName,
+    applied_at: record.appliedAt.toISOString().split('T')[0],
+    next_dose_at: record.nextDoseAt
+      ? record.nextDoseAt.toISOString().split('T')[0]
+      : undefined,
+    veterinarian_name: record.veterinarianName ?? undefined,
+    notes: record.notes ?? undefined,
+    created_at: record.createdAt,
+    updated_at: record.updatedAt,
+  };
+}
 
 @Injectable()
 export class VaccineService {
@@ -21,9 +38,9 @@ export class VaccineService {
     auth0Id: string,
     isVet: boolean,
     dto: VaccineInput,
-  ): Promise<VaccineRecord> {
+  ): Promise<VaccineRecordResponseDto> {
     await this.petService.assertAccess(petId, auth0Id, isVet);
-    return this.prisma.vaccineRecord.create({
+    const record = await this.prisma.vaccineRecord.create({
       data: {
         petId,
         vaccineName: dto.vaccine_name,
@@ -33,18 +50,20 @@ export class VaccineService {
         notes: dto.notes,
       },
     });
+    return toResponseDto(record);
   }
 
   async findAllForPet(
     petId: string,
     auth0Id: string,
     isVet: boolean,
-  ): Promise<VaccineRecord[]> {
+  ): Promise<VaccineRecordResponseDto[]> {
     await this.petService.assertAccess(petId, auth0Id, isVet);
-    return this.prisma.vaccineRecord.findMany({
+    const records = await this.prisma.vaccineRecord.findMany({
       where: { petId },
       orderBy: { appliedAt: 'desc' },
     });
+    return records.map(toResponseDto);
   }
 
   async update(
@@ -52,10 +71,10 @@ export class VaccineService {
     auth0Id: string,
     isVet: boolean,
     dto: Omit<UpdateVaccineRecordDto, 'pet_id'>,
-  ): Promise<VaccineRecord> {
+  ): Promise<VaccineRecordResponseDto> {
     const record = await this.getRecord(id);
     await this.petService.assertAccess(record.petId, auth0Id, isVet);
-    return this.prisma.vaccineRecord.update({
+    const updated = await this.prisma.vaccineRecord.update({
       where: { id },
       data: {
         vaccineName: dto.vaccine_name,
@@ -65,6 +84,7 @@ export class VaccineService {
         notes: dto.notes,
       },
     });
+    return toResponseDto(updated);
   }
 
   async remove(id: string, auth0Id: string): Promise<void> {

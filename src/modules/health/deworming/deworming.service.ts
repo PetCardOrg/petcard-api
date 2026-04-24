@@ -2,12 +2,29 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { DewormingRecord } from '@prisma/client';
 import {
   CreateDewormingRecordDto,
+  DewormingRecordResponseDto,
   UpdateDewormingRecordDto,
 } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PetService } from '../../pet/pet.service';
 
 type DewormingInput = Omit<CreateDewormingRecordDto, 'pet_id'>;
+
+function toResponseDto(record: DewormingRecord): DewormingRecordResponseDto {
+  return {
+    id: record.id,
+    pet_id: record.petId,
+    product_name: record.productName,
+    applied_at: record.appliedAt.toISOString().split('T')[0],
+    next_dose_at: record.nextDoseAt
+      ? record.nextDoseAt.toISOString().split('T')[0]
+      : undefined,
+    veterinarian_name: record.veterinarianName ?? undefined,
+    notes: record.notes ?? undefined,
+    created_at: record.createdAt,
+    updated_at: record.updatedAt,
+  };
+}
 
 @Injectable()
 export class DewormingService {
@@ -21,9 +38,9 @@ export class DewormingService {
     auth0Id: string,
     isVet: boolean,
     dto: DewormingInput,
-  ): Promise<DewormingRecord> {
+  ): Promise<DewormingRecordResponseDto> {
     await this.petService.assertAccess(petId, auth0Id, isVet);
-    return this.prisma.dewormingRecord.create({
+    const record = await this.prisma.dewormingRecord.create({
       data: {
         petId,
         productName: dto.product_name,
@@ -33,18 +50,20 @@ export class DewormingService {
         notes: dto.notes,
       },
     });
+    return toResponseDto(record);
   }
 
   async findAllForPet(
     petId: string,
     auth0Id: string,
     isVet: boolean,
-  ): Promise<DewormingRecord[]> {
+  ): Promise<DewormingRecordResponseDto[]> {
     await this.petService.assertAccess(petId, auth0Id, isVet);
-    return this.prisma.dewormingRecord.findMany({
+    const records = await this.prisma.dewormingRecord.findMany({
       where: { petId },
       orderBy: { appliedAt: 'desc' },
     });
+    return records.map(toResponseDto);
   }
 
   async update(
@@ -52,10 +71,10 @@ export class DewormingService {
     auth0Id: string,
     isVet: boolean,
     dto: Omit<UpdateDewormingRecordDto, 'pet_id'>,
-  ): Promise<DewormingRecord> {
+  ): Promise<DewormingRecordResponseDto> {
     const record = await this.getRecord(id);
     await this.petService.assertAccess(record.petId, auth0Id, isVet);
-    return this.prisma.dewormingRecord.update({
+    const updated = await this.prisma.dewormingRecord.update({
       where: { id },
       data: {
         productName: dto.product_name,
@@ -65,6 +84,7 @@ export class DewormingService {
         notes: dto.notes,
       },
     });
+    return toResponseDto(updated);
   }
 
   async remove(id: string, auth0Id: string): Promise<void> {
