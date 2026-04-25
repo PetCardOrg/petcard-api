@@ -1,6 +1,7 @@
 import {
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Pet } from '@prisma/client';
@@ -12,7 +13,9 @@ import {
   UpdatePetDto,
 } from '@petcardorg/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CardService } from '../card/card.service';
 import { TutorService } from '../tutor/tutor.service';
+import { UploadService } from '../upload/upload.service';
 
 function toResponseDto(pet: Pet): PetResponseDto {
   return {
@@ -26,6 +29,7 @@ function toResponseDto(pet: Pet): PetResponseDto {
       : undefined,
     weight: pet.weight ?? undefined,
     photo_url: pet.photoUrl ?? undefined,
+    qr_code_url: pet.qrCodeUrl ?? undefined,
     tutor_id: pet.tutorId,
     created_at: pet.createdAt,
     updated_at: pet.updatedAt,
@@ -36,9 +40,13 @@ type PetInput = Omit<CreatePetDto, 'tutor_id'>;
 
 @Injectable()
 export class PetService {
+  private readonly logger = new Logger(PetService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tutorService: TutorService,
+    private readonly cardService: CardService,
+    private readonly uploadService: UploadService,
   ) {}
 
   async create(auth0Id: string, dto: PetInput): Promise<PetResponseDto> {
@@ -55,7 +63,38 @@ export class PetService {
         tutorId: tutor.id,
       },
     });
+
+    const qrCodeUrl = await this.generateAndUploadQrCode(pet.id);
+
+    if (qrCodeUrl) {
+      const updated = await this.prisma.pet.update({
+        where: { id: pet.id },
+        data: { qrCodeUrl },
+      });
+      return toResponseDto(updated);
+    }
+
     return toResponseDto(pet);
+  }
+
+  async regenerateQrCode(
+    petId: string,
+    auth0Id: string,
+  ): Promise<PetResponseDto> {
+    await this.assertOwnership(petId, auth0Id);
+
+    const qrCodeUrl = await this.generateAndUploadQrCode(petId);
+
+    if (!qrCodeUrl) {
+      throw new Error('Failed to generate and upload QR Code');
+    }
+
+    const updated = await this.prisma.pet.update({
+      where: { id: petId },
+      data: { qrCodeUrl },
+    });
+
+    return toResponseDto(updated);
   }
 
   async findAllForTutor(auth0Id: string): Promise<PetResponseDto[]> {
@@ -135,5 +174,19 @@ export class PetService {
       return pet;
     }
     return this.assertOwnership(petId, auth0Id);
+  }
+
+  private async generateAndUploadQrCode(petId: string): Promise<string | null> {
+    try {
+      const buffer = await this.cardService.generatePetQrCode(petId);
+      const key = `qr-codes/${petId}.png`;
+      return await this.uploadService.uploadBuffer(buffer, key, 'image/png');
+    } catch (error) {
+      this.logger.error(
+        `Failed to generate/upload QR Code for pet ${petId}`,
+        error instanceof Error ? error.stack : error,
+      );
+      return null;
+    }
   }
 }
