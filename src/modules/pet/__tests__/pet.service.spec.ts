@@ -2,7 +2,9 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Sex, Species } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { CardService } from '../../card/card.service';
 import { TutorService } from '../../tutor/tutor.service';
+import { UploadService } from '../../upload/upload.service';
 import { PetService } from '../pet.service';
 
 describe('PetService', () => {
@@ -17,6 +19,8 @@ describe('PetService', () => {
     };
   };
   let tutorService: { findByAuth0Id: jest.Mock };
+  let cardService: { generatePetQrCode: jest.Mock };
+  let uploadService: { uploadBuffer: jest.Mock };
 
   const tutor = { id: 'tutor-1', auth0Id: 'auth0|abc' };
   const now = new Date('2025-01-15T12:00:00Z');
@@ -29,6 +33,7 @@ describe('PetService', () => {
     birthDate: new Date('2022-03-10'),
     weight: null,
     photoUrl: null,
+    qrCodeUrl: null,
     tutorId: 'tutor-1',
     createdAt: now,
     updatedAt: now,
@@ -45,12 +50,26 @@ describe('PetService', () => {
       },
     };
     tutorService = { findByAuth0Id: jest.fn().mockResolvedValue(tutor) };
+    cardService = {
+      generatePetQrCode: jest
+        .fn()
+        .mockResolvedValue(Buffer.from('fake-qr-png')),
+    };
+    uploadService = {
+      uploadBuffer: jest
+        .fn()
+        .mockResolvedValue(
+          'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
+        ),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PetService,
         { provide: PrismaService, useValue: prisma },
         { provide: TutorService, useValue: tutorService },
+        { provide: CardService, useValue: cardService },
+        { provide: UploadService, useValue: uploadService },
       ],
     }).compile();
 
@@ -60,6 +79,11 @@ describe('PetService', () => {
   describe('create', () => {
     it('should create a pet linked to the authenticated tutor', async () => {
       prisma.pet.create.mockResolvedValue(pet);
+      prisma.pet.update.mockResolvedValue({
+        ...pet,
+        qrCodeUrl:
+          'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
+      });
 
       const result = await service.create('auth0|abc', {
         name: 'Rex',
@@ -84,6 +108,87 @@ describe('PetService', () => {
         birth_date: '2022-03-10',
         tutor_id: 'tutor-1',
       });
+    });
+
+    it('should generate and upload QR Code and persist qrCodeUrl', async () => {
+      prisma.pet.create.mockResolvedValue(pet);
+      prisma.pet.update.mockResolvedValue({
+        ...pet,
+        qrCodeUrl:
+          'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
+      });
+
+      const result = await service.create('auth0|abc', {
+        name: 'Rex',
+        species: Species.DOG,
+        sex: Sex.MALE,
+      });
+
+      expect(cardService.generatePetQrCode).toHaveBeenCalledWith('pet-1');
+      expect(uploadService.uploadBuffer).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        'qr-codes/pet-1.png',
+        'image/png',
+      );
+      expect(prisma.pet.update).toHaveBeenCalledWith({
+        where: { id: 'pet-1' },
+        data: {
+          qrCodeUrl:
+            'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
+        },
+      });
+      expect(result.qr_code_url).toBe(
+        'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
+      );
+    });
+
+    it('should create the pet even if QR Code upload fails', async () => {
+      prisma.pet.create.mockResolvedValue(pet);
+      cardService.generatePetQrCode.mockRejectedValue(new Error('S3 down'));
+
+      const result = await service.create('auth0|abc', {
+        name: 'Rex',
+        species: Species.DOG,
+        sex: Sex.MALE,
+      });
+
+      expect(result.id).toBe('pet-1');
+      expect(result.qr_code_url).toBeUndefined();
+      expect(prisma.pet.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('regenerateQrCode', () => {
+    it('should regenerate QR Code for an owned pet', async () => {
+      prisma.pet.findUnique.mockResolvedValue(pet);
+      prisma.pet.update.mockResolvedValue({
+        ...pet,
+        qrCodeUrl:
+          'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
+      });
+
+      const result = await service.regenerateQrCode('pet-1', 'auth0|abc');
+
+      expect(cardService.generatePetQrCode).toHaveBeenCalledWith('pet-1');
+      expect(uploadService.uploadBuffer).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        'qr-codes/pet-1.png',
+        'image/png',
+      );
+      expect(result.qr_code_url).toBe(
+        'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
+      );
+    });
+
+    it('should throw ForbiddenException when another tutor tries to regenerate', async () => {
+      prisma.pet.findUnique.mockResolvedValue({
+        ...pet,
+        tutorId: 'other-tutor',
+      });
+
+      await expect(
+        service.regenerateQrCode('pet-1', 'auth0|abc'),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 
