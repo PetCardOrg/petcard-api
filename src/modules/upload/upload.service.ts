@@ -73,6 +73,34 @@ export class UploadService {
     return `https://${this.bucket}.s3.${this.region}.amazonaws.com/${key}`;
   }
 
+  async uploadBuffer(
+    buffer: Buffer,
+    key: string,
+    contentType: string,
+  ): Promise<string> {
+    if (!this.s3Client || !this.bucket) {
+      throw new InternalServerErrorException(
+        'S3 storage is not configured on the server',
+      );
+    }
+
+    try {
+      await this.s3Client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          Body: buffer,
+          ContentType: contentType,
+        }),
+      );
+    } catch (error) {
+      this.logger.error('Failed to upload buffer to S3', error as Error);
+      throw new InternalServerErrorException('Failed to upload file');
+    }
+
+    return `https://${this.bucket}.s3.${this.region}.amazonaws.com/${key}`;
+  }
+
   async deleteFile(fileUrl: string): Promise<void> {
     if (!this.s3Client || !this.bucket) {
       throw new InternalServerErrorException(
