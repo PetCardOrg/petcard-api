@@ -10,8 +10,21 @@ export class CardService {
       token,
     });
 
+    return this.generateBuffer(payload);
+  }
+
+  async generatePetQrCode(petId: string): Promise<Buffer> {
+    const payload = JSON.stringify({
+      uuid: randomUUID(),
+      petId,
+    });
+
+    return this.generateBuffer(payload);
+  }
+
+  private async generateBuffer(data: string): Promise<Buffer> {
     try {
-      return await QRCode.toBuffer(payload, {
+      return await QRCode.toBuffer(data, {
         type: 'png',
         width: 400,
         margin: 2,

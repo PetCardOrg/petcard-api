@@ -7,5 +7,6 @@ import { CardService } from './card.service';
   imports: [AuthModule],
   controllers: [CardController],
   providers: [CardService],
+  exports: [CardService],
 })
 export class CardModule {}

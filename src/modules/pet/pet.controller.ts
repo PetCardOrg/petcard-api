@@ -64,4 +64,13 @@ export class PetController {
   ): Promise<void> {
     return this.petService.remove(id, user.sub);
   }
+
+  @Post(':id/qr-code')
+  @Auth(Role.TUTOR)
+  async regenerateQrCode(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<PetResponseDto> {
+    return this.petService.regenerateQrCode(id, user.sub);
+  }
 }
