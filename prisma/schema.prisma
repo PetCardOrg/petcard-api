@@ -49,7 +49,6 @@ model Pet {
   birthDate DateTime? @map("birth_date")
   weight    Float?
   photoUrl   String?   @map("photo_url")
-  qrCodeUrl  String?   @map("qr_code_url")
   tutorId    String    @map("tutor_id")
   createdAt  DateTime  @default(now()) @map("created_at")
   updatedAt  DateTime  @updatedAt @map("updated_at")

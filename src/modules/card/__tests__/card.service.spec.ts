@@ -1,6 +1,7 @@
 import { InternalServerErrorException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as QRCode from 'qrcode';
+import { PrismaService } from '../../../prisma/prisma.service';
 import { CardService } from '../card.service';
 
 jest.mock('qrcode');
@@ -8,10 +9,19 @@ jest.mock('qrcode');
 describe('CardService', () => {
   let service: CardService;
   const mockedQRCode = jest.mocked(QRCode);
+  const prismaMock = {
+    carteiraDigital: {
+      upsert: jest.fn(),
+      update: jest.fn(),
+    },
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CardService],
+      providers: [
+        CardService,
+        { provide: PrismaService, useValue: prismaMock },
+      ],
     }).compile();
 
     service = module.get<CardService>(CardService);
