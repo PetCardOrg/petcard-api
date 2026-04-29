@@ -14,16 +14,22 @@ describe('PetService', () => {
       create: jest.Mock;
       findMany: jest.Mock;
       findUnique: jest.Mock;
+      findUniqueOrThrow: jest.Mock;
       update: jest.Mock;
       delete: jest.Mock;
     };
   };
   let tutorService: { findByAuth0Id: jest.Mock };
-  let cardService: { generatePetQrCode: jest.Mock };
+  let cardService: {
+    issueTokenForPet: jest.Mock;
+    generateQrCode: jest.Mock;
+    setCardQrCodeUrl: jest.Mock;
+  };
   let uploadService: { uploadBuffer: jest.Mock };
 
   const tutor = { id: 'tutor-1', auth0Id: 'auth0|abc' };
   const now = new Date('2025-01-15T12:00:00Z');
+  const QR_URL = 'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png';
   const pet = {
     id: 'pet-1',
     name: 'Rex',
@@ -33,10 +39,20 @@ describe('PetService', () => {
     birthDate: new Date('2022-03-10'),
     weight: null,
     photoUrl: null,
-    qrCodeUrl: null,
     tutorId: 'tutor-1',
     createdAt: now,
     updatedAt: now,
+    carteiraDigital: null,
+  };
+  const petWithCard = {
+    ...pet,
+    carteiraDigital: {
+      id: 'card-1',
+      petId: 'pet-1',
+      token: 'tok-123',
+      qrCodeUrl: QR_URL,
+      createdAt: now,
+    },
   };
 
   beforeEach(async () => {
@@ -45,22 +61,19 @@ describe('PetService', () => {
         create: jest.fn(),
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        findUniqueOrThrow: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
       },
     };
     tutorService = { findByAuth0Id: jest.fn().mockResolvedValue(tutor) };
     cardService = {
-      generatePetQrCode: jest
-        .fn()
-        .mockResolvedValue(Buffer.from('fake-qr-png')),
+      issueTokenForPet: jest.fn().mockResolvedValue('tok-123'),
+      generateQrCode: jest.fn().mockResolvedValue(Buffer.from('fake-qr-png')),
+      setCardQrCodeUrl: jest.fn().mockResolvedValue(undefined),
     };
     uploadService = {
-      uploadBuffer: jest
-        .fn()
-        .mockResolvedValue(
-          'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
-        ),
+      uploadBuffer: jest.fn().mockResolvedValue(QR_URL),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -79,11 +92,7 @@ describe('PetService', () => {
   describe('create', () => {
     it('should create a pet linked to the authenticated tutor', async () => {
       prisma.pet.create.mockResolvedValue(pet);
-      prisma.pet.update.mockResolvedValue({
-        ...pet,
-        qrCodeUrl:
-          'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
-      });
+      prisma.pet.findUniqueOrThrow.mockResolvedValue(petWithCard);
 
       const result = await service.create('auth0|abc', {
         name: 'Rex',
@@ -110,13 +119,9 @@ describe('PetService', () => {
       });
     });
 
-    it('should generate and upload QR Code and persist qrCodeUrl', async () => {
+    it('should generate and upload QR Code and persist qrCodeUrl on the carteira', async () => {
       prisma.pet.create.mockResolvedValue(pet);
-      prisma.pet.update.mockResolvedValue({
-        ...pet,
-        qrCodeUrl:
-          'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
-      });
+      prisma.pet.findUniqueOrThrow.mockResolvedValue(petWithCard);
 
       const result = await service.create('auth0|abc', {
         name: 'Rex',
@@ -124,27 +129,25 @@ describe('PetService', () => {
         sex: Sex.MALE,
       });
 
-      expect(cardService.generatePetQrCode).toHaveBeenCalledWith('pet-1');
+      expect(cardService.issueTokenForPet).toHaveBeenCalledWith('pet-1');
+      expect(cardService.generateQrCode).toHaveBeenCalledWith('tok-123');
       expect(uploadService.uploadBuffer).toHaveBeenCalledWith(
         expect.any(Buffer),
         'qr-codes/pet-1.png',
         'image/png',
       );
-      expect(prisma.pet.update).toHaveBeenCalledWith({
-        where: { id: 'pet-1' },
-        data: {
-          qrCodeUrl:
-            'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
-        },
-      });
-      expect(result.qr_code_url).toBe(
-        'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
+      expect(cardService.setCardQrCodeUrl).toHaveBeenCalledWith(
+        'pet-1',
+        QR_URL,
       );
+      expect(prisma.pet.update).not.toHaveBeenCalled();
+      expect(result.qr_code_url).toBe(QR_URL);
     });
 
     it('should create the pet even if QR Code upload fails', async () => {
       prisma.pet.create.mockResolvedValue(pet);
-      cardService.generatePetQrCode.mockRejectedValue(new Error('S3 down'));
+      prisma.pet.findUniqueOrThrow.mockResolvedValue(pet);
+      cardService.issueTokenForPet.mockRejectedValue(new Error('DB down'));
 
       const result = await service.create('auth0|abc', {
         name: 'Rex',
@@ -161,23 +164,19 @@ describe('PetService', () => {
   describe('regenerateQrCode', () => {
     it('should regenerate QR Code for an owned pet', async () => {
       prisma.pet.findUnique.mockResolvedValue(pet);
-      prisma.pet.update.mockResolvedValue({
-        ...pet,
-        qrCodeUrl:
-          'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
-      });
+      prisma.pet.findUniqueOrThrow.mockResolvedValue(petWithCard);
 
       const result = await service.regenerateQrCode('pet-1', 'auth0|abc');
 
-      expect(cardService.generatePetQrCode).toHaveBeenCalledWith('pet-1');
+      expect(cardService.issueTokenForPet).toHaveBeenCalledWith('pet-1');
+      expect(cardService.generateQrCode).toHaveBeenCalledWith('tok-123');
       expect(uploadService.uploadBuffer).toHaveBeenCalledWith(
         expect.any(Buffer),
         'qr-codes/pet-1.png',
         'image/png',
       );
-      expect(result.qr_code_url).toBe(
-        'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png',
-      );
+      expect(prisma.pet.update).not.toHaveBeenCalled();
+      expect(result.qr_code_url).toBe(QR_URL);
     });
 
     it('should throw ForbiddenException when another tutor tries to regenerate', async () => {
@@ -194,29 +193,42 @@ describe('PetService', () => {
 
   describe('findAllForTutor', () => {
     it('should return only pets owned by the tutor', async () => {
-      prisma.pet.findMany.mockResolvedValue([pet]);
+      prisma.pet.findMany.mockResolvedValue([petWithCard]);
 
       const result = await service.findAllForTutor('auth0|abc');
 
       expect(prisma.pet.findMany).toHaveBeenCalledWith({
         where: { tutorId: 'tutor-1' },
+        include: { carteiraDigital: true },
       });
-      expect(result[0]).toMatchObject({ id: 'pet-1', name: 'Rex' });
+      expect(result[0]).toMatchObject({
+        id: 'pet-1',
+        name: 'Rex',
+        qr_code_url: QR_URL,
+      });
     });
   });
 
   describe('findOne', () => {
     it('should allow the owner to read a pet', async () => {
-      prisma.pet.findUnique.mockResolvedValue(pet);
+      prisma.pet.findUnique.mockResolvedValue(petWithCard);
 
       const result = await service.findOne('pet-1', 'auth0|abc', false);
 
-      expect(result).toMatchObject({ id: 'pet-1', name: 'Rex' });
+      expect(prisma.pet.findUnique).toHaveBeenCalledWith({
+        where: { id: 'pet-1' },
+        include: { carteiraDigital: true },
+      });
+      expect(result).toMatchObject({
+        id: 'pet-1',
+        name: 'Rex',
+        qr_code_url: QR_URL,
+      });
     });
 
     it('should deny access to non-owner tutors', async () => {
       prisma.pet.findUnique.mockResolvedValue({
-        ...pet,
+        ...petWithCard,
         tutorId: 'other',
       });
 
@@ -227,7 +239,7 @@ describe('PetService', () => {
 
     it('should allow any vet to read the pet', async () => {
       prisma.pet.findUnique.mockResolvedValue({
-        ...pet,
+        ...petWithCard,
         tutorId: 'other',
       });
 
@@ -250,7 +262,7 @@ describe('PetService', () => {
     it('should update owned pets', async () => {
       prisma.pet.findUnique.mockResolvedValue(pet);
       prisma.pet.update.mockResolvedValue({
-        ...pet,
+        ...petWithCard,
         name: 'Rex II',
       });
 
@@ -258,6 +270,12 @@ describe('PetService', () => {
         name: 'Rex II',
       });
 
+      expect(prisma.pet.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'pet-1' },
+          include: { carteiraDigital: true },
+        }),
+      );
       expect(result.name).toBe('Rex II');
     });
 

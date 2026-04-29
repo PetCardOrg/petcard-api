@@ -289,6 +289,7 @@ describe('CRUDs MVP1 (e2e)', () => {
 
       expect(mockPrisma.pet.findMany).toHaveBeenCalledWith({
         where: { tutorId: '22222222-2222-4222-8222-222222222222' },
+        include: { carteiraDigital: true },
       });
     });
 
