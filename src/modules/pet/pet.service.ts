@@ -1,7 +1,6 @@
 import {
   ForbiddenException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { CarteiraDigital, Pet } from '@prisma/client';
@@ -13,9 +12,8 @@ import {
   UpdatePetDto,
 } from '@petcardorg/shared';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CardService } from '../card/card.service';
+import { QrCodePublisher } from '../queue/qr-code.publisher';
 import { TutorService } from '../tutor/tutor.service';
-import { UploadService } from '../upload/upload.service';
 
 type PetWithCard = Pet & { carteiraDigital: CarteiraDigital | null };
 
@@ -42,13 +40,10 @@ type PetInput = Omit<CreatePetDto, 'tutor_id'>;
 
 @Injectable()
 export class PetService {
-  private readonly logger = new Logger(PetService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly tutorService: TutorService,
-    private readonly cardService: CardService,
-    private readonly uploadService: UploadService,
+    private readonly qrCodePublisher: QrCodePublisher,
   ) {}
 
   async create(auth0Id: string, dto: PetInput): Promise<PetResponseDto> {
@@ -66,24 +61,14 @@ export class PetService {
       },
     });
 
-    await this.generateAndUploadQrCode(pet.id);
+    await this.qrCodePublisher.publishGenerate(pet.id);
 
     return this.findById(pet.id);
   }
 
-  async regenerateQrCode(
-    petId: string,
-    auth0Id: string,
-  ): Promise<PetResponseDto> {
+  async regenerateQrCode(petId: string, auth0Id: string): Promise<void> {
     await this.assertOwnership(petId, auth0Id);
-
-    const qrCodeUrl = await this.generateAndUploadQrCode(petId);
-
-    if (!qrCodeUrl) {
-      throw new Error('Failed to generate and upload QR Code');
-    }
-
-    return this.findById(petId);
+    await this.qrCodePublisher.publishGenerate(petId);
   }
 
   async findAllForTutor(auth0Id: string): Promise<PetResponseDto[]> {
@@ -176,26 +161,5 @@ export class PetService {
       return pet;
     }
     return this.assertOwnership(petId, auth0Id);
-  }
-
-  private async generateAndUploadQrCode(petId: string): Promise<string | null> {
-    try {
-      const token = await this.cardService.issueTokenForPet(petId);
-      const buffer = await this.cardService.generateQrCode(token);
-      const key = `qr-codes/${petId}.png`;
-      const url = await this.uploadService.uploadBuffer(
-        buffer,
-        key,
-        'image/png',
-      );
-      await this.cardService.setCardQrCodeUrl(petId, url);
-      return url;
-    } catch (error) {
-      this.logger.error(
-        `Failed to generate/upload QR Code for pet ${petId}`,
-        error instanceof Error ? error.stack : error,
-      );
-      return null;
-    }
   }
 }

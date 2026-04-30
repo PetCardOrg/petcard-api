@@ -46,18 +46,18 @@ Equipe: Álvaro Araújo (Backend Lead), Camila Martins (DevOps/PM), Ricardo Temp
 
 ### Issues
 
-| Código | Repo   | #   | Título                               | Status real                                                 | Evidência                                                             |
-| ------ | ------ | --- | ------------------------------------ | ----------------------------------------------------------- | --------------------------------------------------------------------- |
-| PC-047 | api    | #18 | Geração QR (UUID + token)            | ✅ Done                                                     | PR #53; `card.service.generateQrCode`                                 |
-| PC-048 | api    | #19 | Upload QR para S3                    | ✅ Done                                                     | PR #54; `upload.service.uploadBuffer`; key `qr-codes/{petId}.png`     |
-| PC-054 | api    | #22 | Migration `carteira_digital`         | ✅ Done                                                     | PR #55; migration `20260426204420`                                    |
-| PC-055 | shared | #6  | DTOs CarteiraDigital                 | ✅ Done                                                     | PR #23; em `@petcardorg/shared@0.4.0`                                 |
-| PC-056 | shared | #7  | Publicar shared com DTOs             | ✅ Done (0.5.0 publicado)                                   |
-| PC-049 | api    | #20 | Rota pública `GET /cards/:token`     | 🚧 In Progress (branch `feature/PC-049-rota-publica-cards`) | rota + service + specs + e2e prontos; aguarda PR                      |
-| PC-050 | api    | #21 | Worker RabbitMQ — geração assíncrona | 📋 To Do                                                    | RabbitMQ no compose, sem código; `bullmq`/`amqplib` ausentes          |
-| PC-051 | mobile | #13 | Tela carteira digital + QR           | 📋 To Do                                                    | sem `Carteira/Wallet/QRCode` screens; mobile ainda em shared `^0.2.1` |
-| PC-052 | mobile | #14 | Compartilhar link da carteira        | 📋 To Do                                                    | sem `expo-sharing`/`Share.share`                                      |
-| PC-053 | web    | #6  | Página pública SPA `/card/:token`    | 📋 To Do                                                    | repo só tem template Vite + React 19, sem router                      |
+| Código | Repo   | #   | Título                               | Status real               | Evidência                                                             |
+| ------ | ------ | --- | ------------------------------------ | ------------------------- | --------------------------------------------------------------------- |
+| PC-047 | api    | #18 | Geração QR (UUID + token)            | ✅ Done                   | PR #53; `card.service.generateQrCode`                                 |
+| PC-048 | api    | #19 | Upload QR para S3                    | ✅ Done                   | PR #54; `upload.service.uploadBuffer`; key `qr-codes/{petId}.png`     |
+| PC-054 | api    | #22 | Migration `carteira_digital`         | ✅ Done                   | PR #55; migration `20260426204420`                                    |
+| PC-055 | shared | #6  | DTOs CarteiraDigital                 | ✅ Done                   | PR #23; em `@petcardorg/shared@0.4.0`                                 |
+| PC-056 | shared | #7  | Publicar shared com DTOs             | ✅ Done (0.5.0 publicado) |
+| PC-049 | api    | #20 | Rota pública `GET /cards/:token`     | ✅ Done                   | rota + service + specs + e2e prontos; aguarda PR                      |
+| PC-050 | api    | #21 | Worker RabbitMQ — geração assíncrona | ✅ Done                   | RabbitMQ no compose, sem código; `bullmq`/`amqplib` ausentes          |
+| PC-051 | mobile | #13 | Tela carteira digital + QR           | 📋 To Do                  | sem `Carteira/Wallet/QRCode` screens; mobile ainda em shared `^0.2.1` |
+| PC-052 | mobile | #14 | Compartilhar link da carteira        | 📋 To Do                  | sem `expo-sharing`/`Share.share`                                      |
+| PC-053 | web    | #6  | Página pública SPA `/card/:token`    | 📋 To Do                  | repo só tem template Vite + React 19, sem router                      |
 
 ### Decisões já tomadas (extraídas do código — não há ADR de M2)
 
