@@ -2,9 +2,8 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Sex, Species } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { CardService } from '../../card/card.service';
+import { QrCodePublisher } from '../../queue/qr-code.publisher';
 import { TutorService } from '../../tutor/tutor.service';
-import { UploadService } from '../../upload/upload.service';
 import { PetService } from '../pet.service';
 
 describe('PetService', () => {
@@ -20,12 +19,7 @@ describe('PetService', () => {
     };
   };
   let tutorService: { findByAuth0Id: jest.Mock };
-  let cardService: {
-    issueTokenForPet: jest.Mock;
-    generateQrCode: jest.Mock;
-    setCardQrCodeUrl: jest.Mock;
-  };
-  let uploadService: { uploadBuffer: jest.Mock };
+  let qrCodePublisher: { publishGenerate: jest.Mock };
 
   const tutor = { id: 'tutor-1', auth0Id: 'auth0|abc' };
   const now = new Date('2025-01-15T12:00:00Z');
@@ -67,13 +61,8 @@ describe('PetService', () => {
       },
     };
     tutorService = { findByAuth0Id: jest.fn().mockResolvedValue(tutor) };
-    cardService = {
-      issueTokenForPet: jest.fn().mockResolvedValue('tok-123'),
-      generateQrCode: jest.fn().mockResolvedValue(Buffer.from('fake-qr-png')),
-      setCardQrCodeUrl: jest.fn().mockResolvedValue(undefined),
-    };
-    uploadService = {
-      uploadBuffer: jest.fn().mockResolvedValue(QR_URL),
+    qrCodePublisher = {
+      publishGenerate: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -81,8 +70,7 @@ describe('PetService', () => {
         PetService,
         { provide: PrismaService, useValue: prisma },
         { provide: TutorService, useValue: tutorService },
-        { provide: CardService, useValue: cardService },
-        { provide: UploadService, useValue: uploadService },
+        { provide: QrCodePublisher, useValue: qrCodePublisher },
       ],
     }).compile();
 
@@ -92,7 +80,7 @@ describe('PetService', () => {
   describe('create', () => {
     it('should create a pet linked to the authenticated tutor', async () => {
       prisma.pet.create.mockResolvedValue(pet);
-      prisma.pet.findUniqueOrThrow.mockResolvedValue(petWithCard);
+      prisma.pet.findUniqueOrThrow.mockResolvedValue(pet);
 
       const result = await service.create('auth0|abc', {
         name: 'Rex',
@@ -119,35 +107,9 @@ describe('PetService', () => {
       });
     });
 
-    it('should generate and upload QR Code and persist qrCodeUrl on the carteira', async () => {
-      prisma.pet.create.mockResolvedValue(pet);
-      prisma.pet.findUniqueOrThrow.mockResolvedValue(petWithCard);
-
-      const result = await service.create('auth0|abc', {
-        name: 'Rex',
-        species: Species.DOG,
-        sex: Sex.MALE,
-      });
-
-      expect(cardService.issueTokenForPet).toHaveBeenCalledWith('pet-1');
-      expect(cardService.generateQrCode).toHaveBeenCalledWith('tok-123');
-      expect(uploadService.uploadBuffer).toHaveBeenCalledWith(
-        expect.any(Buffer),
-        'qr-codes/pet-1.png',
-        'image/png',
-      );
-      expect(cardService.setCardQrCodeUrl).toHaveBeenCalledWith(
-        'pet-1',
-        QR_URL,
-      );
-      expect(prisma.pet.update).not.toHaveBeenCalled();
-      expect(result.qr_code_url).toBe(QR_URL);
-    });
-
-    it('should create the pet even if QR Code upload fails', async () => {
+    it('should publish a qr-code.generate message after creating the pet', async () => {
       prisma.pet.create.mockResolvedValue(pet);
       prisma.pet.findUniqueOrThrow.mockResolvedValue(pet);
-      cardService.issueTokenForPet.mockRejectedValue(new Error('DB down'));
 
       const result = await service.create('auth0|abc', {
         name: 'Rex',
@@ -155,28 +117,32 @@ describe('PetService', () => {
         sex: Sex.MALE,
       });
 
-      expect(result.id).toBe('pet-1');
+      expect(qrCodePublisher.publishGenerate).toHaveBeenCalledWith('pet-1');
       expect(result.qr_code_url).toBeUndefined();
-      expect(prisma.pet.update).not.toHaveBeenCalled();
+    });
+
+    it('should return the created pet even if publishing fails', async () => {
+      prisma.pet.create.mockResolvedValue(pet);
+      prisma.pet.findUniqueOrThrow.mockResolvedValue(pet);
+      qrCodePublisher.publishGenerate.mockRejectedValue(new Error('rmq down'));
+
+      await expect(
+        service.create('auth0|abc', {
+          name: 'Rex',
+          species: Species.DOG,
+          sex: Sex.MALE,
+        }),
+      ).rejects.toThrow('rmq down');
     });
   });
 
   describe('regenerateQrCode', () => {
-    it('should regenerate QR Code for an owned pet', async () => {
+    it('should publish a qr-code.generate message for an owned pet', async () => {
       prisma.pet.findUnique.mockResolvedValue(pet);
-      prisma.pet.findUniqueOrThrow.mockResolvedValue(petWithCard);
 
-      const result = await service.regenerateQrCode('pet-1', 'auth0|abc');
+      await service.regenerateQrCode('pet-1', 'auth0|abc');
 
-      expect(cardService.issueTokenForPet).toHaveBeenCalledWith('pet-1');
-      expect(cardService.generateQrCode).toHaveBeenCalledWith('tok-123');
-      expect(uploadService.uploadBuffer).toHaveBeenCalledWith(
-        expect.any(Buffer),
-        'qr-codes/pet-1.png',
-        'image/png',
-      );
-      expect(prisma.pet.update).not.toHaveBeenCalled();
-      expect(result.qr_code_url).toBe(QR_URL);
+      expect(qrCodePublisher.publishGenerate).toHaveBeenCalledWith('pet-1');
     });
 
     it('should throw ForbiddenException when another tutor tries to regenerate', async () => {
@@ -188,6 +154,7 @@ describe('PetService', () => {
       await expect(
         service.regenerateQrCode('pet-1', 'auth0|abc'),
       ).rejects.toThrow(ForbiddenException);
+      expect(qrCodePublisher.publishGenerate).not.toHaveBeenCalled();
     });
   });
 
