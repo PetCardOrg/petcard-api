@@ -67,10 +67,11 @@ export class PetController {
 
   @Post(':id/qr-code')
   @Auth(Role.TUTOR)
+  @HttpCode(HttpStatus.ACCEPTED)
   async regenerateQrCode(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
-  ): Promise<PetResponseDto> {
+  ): Promise<void> {
     return this.petService.regenerateQrCode(id, user.sub);
   }
 }
