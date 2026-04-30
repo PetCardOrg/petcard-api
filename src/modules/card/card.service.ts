@@ -190,6 +190,7 @@ export class CardService {
       weight: pet.weight ?? undefined,
       photo_url: pet.photoUrl ?? undefined,
       qr_code_url: card.qrCodeUrl ?? undefined,
+      public_url: this.buildPublicUrl(card.token),
       tutor_id: pet.tutor.id,
       tutor_name: pet.tutor.name,
       vaccines_count: pet.vaccineRecords.length,
@@ -206,6 +207,14 @@ export class CardService {
       ).length,
       issued_at: card.createdAt,
     };
+  }
+
+  private buildPublicUrl(token: string): string {
+    const baseUrl = this.configService.get<string>(
+      'card.publicBaseUrl',
+      'https://card.petcard.app',
+    );
+    return `${baseUrl.replace(/\/+$/, '')}/${token}`;
   }
 
   private async generateBuffer(data: string): Promise<Buffer> {

@@ -279,6 +279,7 @@ describe('CardService', () => {
         tutor_id: 'tutor-1',
         tutor_name: 'Alice',
         qr_code_url: 'https://s3/qr.png',
+        public_url: 'https://card.petcard.app/tok-abc',
         vaccines_count: 2,
         dewormings_count: 1,
         medications_count: 3,
@@ -342,6 +343,7 @@ describe('CardService', () => {
       );
       expect(result.issued_at).toBe(baseDate);
       expect(result.qr_code_url).toBeUndefined();
+      expect(result.public_url).toBe('https://card.petcard.app/tok-abc');
     });
 
     it('should throw NotFoundException when the pet does not exist', async () => {
