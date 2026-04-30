@@ -16,6 +16,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard';
+import { QrCodePublisher } from '../src/modules/queue/qr-code.publisher';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 type Ctx = {
@@ -47,6 +48,7 @@ const mockPrisma = {
     create: jest.fn(),
     findMany: jest.fn(),
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
   },
@@ -83,6 +85,18 @@ const tutor1 = {
   phone: null,
   profileImageUrl: null,
   role: 'TUTOR',
+  createdAt: new Date('2026-01-01'),
+  updatedAt: new Date('2026-01-01'),
+};
+
+const vet1 = {
+  id: '33333333-3333-4333-8333-333333333333',
+  auth0Id: 'auth0|vet-1',
+  name: 'Vet Camila',
+  email: 'vet@petcard.com',
+  phone: null,
+  profileImageUrl: null,
+  role: 'VET',
   createdAt: new Date('2026-01-01'),
   updatedAt: new Date('2026-01-01'),
 };
@@ -147,6 +161,8 @@ describe('CRUDs MVP1 (e2e)', () => {
     })
       .overrideProvider(PrismaService)
       .useValue(mockPrisma)
+      .overrideProvider(QrCodePublisher)
+      .useValue({ publishGenerate: jest.fn().mockResolvedValue(undefined) })
       .overrideGuard(JwtAuthGuard)
       .useValue({
         canActivate: (context: {
@@ -179,11 +195,11 @@ describe('CRUDs MVP1 (e2e)', () => {
     currentUser = tutorCtx;
     mockPrisma.tutor.findUnique.mockImplementation(
       ({ where }: { where: { auth0Id?: string; id?: string } }) => {
-        if (
-          where.auth0Id === 'auth0|tutor-1' ||
-          where.id === '22222222-2222-4222-8222-222222222222'
-        ) {
+        if (where.auth0Id === 'auth0|tutor-1' || where.id === tutor1.id) {
           return Promise.resolve(tutor1);
+        }
+        if (where.auth0Id === 'auth0|vet-1' || where.id === vet1.id) {
+          return Promise.resolve(vet1);
         }
         return Promise.resolve(null);
       },
@@ -246,6 +262,10 @@ describe('CRUDs MVP1 (e2e)', () => {
   describe('Pet', () => {
     it('POST /pets creates a pet for the tutor', async () => {
       mockPrisma.pet.create.mockResolvedValue(pet1);
+      mockPrisma.pet.findUniqueOrThrow.mockResolvedValue({
+        ...pet1,
+        carteiraDigital: null,
+      });
 
       await request(app.getHttpServer())
         .post('/pets')
@@ -255,7 +275,7 @@ describe('CRUDs MVP1 (e2e)', () => {
           sex: 'MALE',
           breed: 'Labrador',
           weight: 20,
-          tutor_id: '22222222-2222-4222-8222-222222222222',
+          birth_date: '2023-05-01',
         })
         .expect(201)
         .expect((res) =>
@@ -388,7 +408,7 @@ describe('CRUDs MVP1 (e2e)', () => {
         .patch('/vaccines/vac-uuid-1')
         .send({ vaccine_name: 'Rabies Plus' })
         .expect(200)
-        .expect((res) => expect(res.body.vaccineName).toBe('Rabies Plus'));
+        .expect((res) => expect(res.body.vaccine_name).toBe('Rabies Plus'));
     });
 
     it('DELETE /vaccines/:id removes the record', async () => {
