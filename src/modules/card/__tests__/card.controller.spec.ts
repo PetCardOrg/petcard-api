@@ -6,12 +6,14 @@ describe('CardController', () => {
   let controller: CardController;
   let cardService: {
     generateQrCode: jest.Mock;
+    findByPetIdForTutor: jest.Mock;
     findPublicByToken: jest.Mock;
   };
 
   beforeEach(() => {
     cardService = {
       generateQrCode: jest.fn(),
+      findByPetIdForTutor: jest.fn(),
       findPublicByToken: jest.fn(),
     };
     controller = new CardController(cardService as unknown as CardService);
@@ -74,6 +76,23 @@ describe('CardController', () => {
       await expect(controller.getPublicCard('bad')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('getCardByPetId', () => {
+    it('should return the authenticated card payload for the pet', async () => {
+      const dto = { pet_id: 'pet-1', pet_name: 'Rex', vaccines_count: 2 };
+      cardService.findByPetIdForTutor.mockResolvedValue(dto);
+
+      const result = await controller.getCardByPetId('pet-1', {
+        sub: 'auth0|tutor-1',
+      } as never);
+
+      expect(cardService.findByPetIdForTutor).toHaveBeenCalledWith(
+        'pet-1',
+        'auth0|tutor-1',
+      );
+      expect(result).toBe(dto);
     });
   });
 });
