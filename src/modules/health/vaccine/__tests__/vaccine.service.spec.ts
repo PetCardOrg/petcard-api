@@ -87,7 +87,19 @@ describe('VaccineService', () => {
         'auth0|abc',
         true,
       );
-      expect(result).toEqual([record]);
+      expect(result).toEqual([
+        {
+          id: 'vac-1',
+          pet_id: 'pet-1',
+          vaccine_name: 'Rabies',
+          applied_at: '2026-01-01',
+          next_dose_at: undefined,
+          veterinarian_name: undefined,
+          notes: undefined,
+          created_at: record.createdAt,
+          updated_at: record.updatedAt,
+        },
+      ]);
     });
   });
 
@@ -111,7 +123,7 @@ describe('VaccineService', () => {
         vaccine_name: 'Rabies Plus',
       });
 
-      expect(result.vaccineName).toBe('Rabies Plus');
+      expect(result.vaccine_name).toBe('Rabies Plus');
     });
   });
 

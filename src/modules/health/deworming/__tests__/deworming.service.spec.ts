@@ -75,7 +75,19 @@ describe('DewormingService', () => {
 
     const result = await service.findAllForPet('pet-1', 'auth0|abc', false);
 
-    expect(result).toEqual([record]);
+    expect(result).toEqual([
+      {
+        id: 'dew-1',
+        pet_id: 'pet-1',
+        product_name: 'Drontal',
+        applied_at: '2026-01-01',
+        next_dose_at: undefined,
+        veterinarian_name: undefined,
+        notes: undefined,
+        created_at: record.createdAt,
+        updated_at: record.updatedAt,
+      },
+    ]);
   });
 
   it('should throw when updating missing record', async () => {

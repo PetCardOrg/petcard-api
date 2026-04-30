@@ -48,17 +48,30 @@ model Pet {
   sex       Sex
   birthDate DateTime? @map("birth_date")
   weight    Float?
-  photoUrl  String?   @map("photo_url")
-  tutorId   String    @map("tutor_id")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
+  photoUrl   String?   @map("photo_url")
+  tutorId    String    @map("tutor_id")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
 
   tutor              Tutor               @relation(fields: [tutorId], references: [id])
   vaccineRecords     VaccineRecord[]
   dewormingRecords   DewormingRecord[]
   medicationRecords  MedicationRecord[]
+  carteiraDigital    CarteiraDigital?
 
   @@map("pet")
+}
+
+model CarteiraDigital {
+  id        String   @id @default(uuid())
+  petId     String   @unique @map("pet_id")
+  token     String   @unique
+  qrCodeUrl String?  @map("qr_code_url")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@map("carteira_digital")
 }
 
 model VaccineRecord {

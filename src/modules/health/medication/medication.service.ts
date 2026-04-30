@@ -2,12 +2,30 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { MedicationRecord } from '@prisma/client';
 import {
   CreateMedicationRecordDto,
+  MedicationRecordResponseDto,
   UpdateMedicationRecordDto,
 } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PetService } from '../../pet/pet.service';
 
 type MedicationInput = Omit<CreateMedicationRecordDto, 'pet_id'>;
+
+function toResponseDto(record: MedicationRecord): MedicationRecordResponseDto {
+  return {
+    id: record.id,
+    pet_id: record.petId,
+    medication_name: record.medicationName,
+    dosage: record.dosage,
+    frequency: record.frequency,
+    start_date: record.startDate.toISOString().split('T')[0],
+    end_date: record.endDate
+      ? record.endDate.toISOString().split('T')[0]
+      : undefined,
+    notes: record.notes ?? undefined,
+    created_at: record.createdAt,
+    updated_at: record.updatedAt,
+  };
+}
 
 @Injectable()
 export class MedicationService {
@@ -21,9 +39,9 @@ export class MedicationService {
     auth0Id: string,
     isVet: boolean,
     dto: MedicationInput,
-  ): Promise<MedicationRecord> {
+  ): Promise<MedicationRecordResponseDto> {
     await this.petService.assertAccess(petId, auth0Id, isVet);
-    return this.prisma.medicationRecord.create({
+    const record = await this.prisma.medicationRecord.create({
       data: {
         petId,
         medicationName: dto.medication_name,
@@ -34,18 +52,20 @@ export class MedicationService {
         notes: dto.notes,
       },
     });
+    return toResponseDto(record);
   }
 
   async findAllForPet(
     petId: string,
     auth0Id: string,
     isVet: boolean,
-  ): Promise<MedicationRecord[]> {
+  ): Promise<MedicationRecordResponseDto[]> {
     await this.petService.assertAccess(petId, auth0Id, isVet);
-    return this.prisma.medicationRecord.findMany({
+    const records = await this.prisma.medicationRecord.findMany({
       where: { petId },
       orderBy: { startDate: 'desc' },
     });
+    return records.map(toResponseDto);
   }
 
   async update(
@@ -53,10 +73,10 @@ export class MedicationService {
     auth0Id: string,
     isVet: boolean,
     dto: Omit<UpdateMedicationRecordDto, 'pet_id'>,
-  ): Promise<MedicationRecord> {
+  ): Promise<MedicationRecordResponseDto> {
     const record = await this.getRecord(id);
     await this.petService.assertAccess(record.petId, auth0Id, isVet);
-    return this.prisma.medicationRecord.update({
+    const updated = await this.prisma.medicationRecord.update({
       where: { id },
       data: {
         medicationName: dto.medication_name,
@@ -67,6 +87,7 @@ export class MedicationService {
         notes: dto.notes,
       },
     });
+    return toResponseDto(updated);
   }
 
   async remove(id: string, auth0Id: string): Promise<void> {

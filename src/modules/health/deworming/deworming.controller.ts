@@ -9,9 +9,9 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { DewormingRecord } from '@prisma/client';
 import {
   CreateDewormingRecordDto,
+  DewormingRecordResponseDto,
   UpdateDewormingRecordDto,
 } from '@petcardorg/shared';
 import { Auth } from '../../auth/decorators/auth.decorator';
@@ -30,7 +30,7 @@ export class DewormingController {
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateDewormingRecordDto,
-  ): Promise<DewormingRecord> {
+  ): Promise<DewormingRecordResponseDto> {
     const isVet = user.permissions?.includes(Role.VET) ?? false;
     return this.dewormingService.create(petId, user.sub, isVet, dto);
   }
@@ -40,7 +40,7 @@ export class DewormingController {
   async findAll(
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
-  ): Promise<DewormingRecord[]> {
+  ): Promise<DewormingRecordResponseDto[]> {
     const isVet = user.permissions?.includes(Role.VET) ?? false;
     return this.dewormingService.findAllForPet(petId, user.sub, isVet);
   }
@@ -51,7 +51,7 @@ export class DewormingController {
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
     @Body() dto: UpdateDewormingRecordDto,
-  ): Promise<DewormingRecord> {
+  ): Promise<DewormingRecordResponseDto> {
     const isVet = user.permissions?.includes(Role.VET) ?? false;
     return this.dewormingService.update(id, user.sub, isVet, dto);
   }

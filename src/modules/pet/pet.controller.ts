@@ -9,8 +9,7 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { Pet } from '@prisma/client';
-import { CreatePetDto, UpdatePetDto } from '@petcardorg/shared';
+import { CreatePetDto, PetResponseDto, UpdatePetDto } from '@petcardorg/shared';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '../auth/enums/role.enum';
@@ -26,13 +25,13 @@ export class PetController {
   async create(
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreatePetDto,
-  ): Promise<Pet> {
+  ): Promise<PetResponseDto> {
     return this.petService.create(user.sub, dto);
   }
 
   @Get()
   @Auth(Role.TUTOR)
-  async findAll(@CurrentUser() user: JwtPayload): Promise<Pet[]> {
+  async findAll(@CurrentUser() user: JwtPayload): Promise<PetResponseDto[]> {
     return this.petService.findAllForTutor(user.sub);
   }
 
@@ -41,7 +40,7 @@ export class PetController {
   async findOne(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
-  ): Promise<Pet> {
+  ): Promise<PetResponseDto> {
     const isVet = user.permissions?.includes(Role.VET) ?? false;
     return this.petService.findOne(id, user.sub, isVet);
   }
@@ -52,7 +51,7 @@ export class PetController {
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
     @Body() dto: UpdatePetDto,
-  ): Promise<Pet> {
+  ): Promise<PetResponseDto> {
     return this.petService.update(id, user.sub, dto);
   }
 
@@ -64,5 +63,15 @@ export class PetController {
     @CurrentUser() user: JwtPayload,
   ): Promise<void> {
     return this.petService.remove(id, user.sub);
+  }
+
+  @Post(':id/qr-code')
+  @Auth(Role.TUTOR)
+  @HttpCode(HttpStatus.ACCEPTED)
+  async regenerateQrCode(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<void> {
+    return this.petService.regenerateQrCode(id, user.sub);
   }
 }

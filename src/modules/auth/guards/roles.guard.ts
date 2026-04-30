@@ -6,15 +6,19 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
+import { PrismaService } from '../../../prisma/prisma.service';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import { Role } from '../enums/role.enum';
 import { JwtPayload } from '../strategies/jwt.strategy';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly prisma: PrismaService,
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const requiredRoles = this.reflector.getAllAndOverride<Role[] | undefined>(
       ROLES_KEY,
       [context.getHandler(), context.getClass()],
@@ -27,9 +31,20 @@ export class RolesGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request>();
     const user = request.user as JwtPayload | undefined;
-    const userRoles = user?.permissions ?? [];
 
-    const hasRole = requiredRoles.some((role) => userRoles.includes(role));
+    if (!user?.sub) {
+      throw new ForbiddenException('Insufficient role permissions');
+    }
+
+    const tutor = await this.prisma.tutor.findUnique({
+      where: { auth0Id: user.sub },
+      select: { role: true },
+    });
+
+    const userRole = tutor?.role;
+
+    const hasRole = userRole ? requiredRoles.includes(userRole as Role) : false;
+
     if (!hasRole) {
       throw new ForbiddenException('Insufficient role permissions');
     }
