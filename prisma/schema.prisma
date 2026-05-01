@@ -25,15 +25,15 @@ enum Sex {
 }
 
 model Tutor {
-  id               String   @id @default(uuid())
-  auth0Id          String   @unique @map("auth0_id")
-  name             String
-  email            String   @unique
-  phone            String?
-  profileImageUrl  String?  @map("profile_image_url")
-  role             Role     @default(TUTOR)
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(uuid())
+  auth0Id         String   @unique @map("auth0_id")
+  name            String
+  email           String   @unique
+  phone           String?
+  profileImageUrl String?  @map("profile_image_url")
+  role            Role     @default(TUTOR)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   pets Pet[]
 
@@ -48,16 +48,16 @@ model Pet {
   sex       Sex
   birthDate DateTime? @map("birth_date")
   weight    Float?
-  photoUrl   String?   @map("photo_url")
-  tutorId    String    @map("tutor_id")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
+  photoUrl  String?   @map("photo_url")
+  tutorId   String    @map("tutor_id")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-  tutor              Tutor               @relation(fields: [tutorId], references: [id])
-  vaccineRecords     VaccineRecord[]
-  dewormingRecords   DewormingRecord[]
-  medicationRecords  MedicationRecord[]
-  carteiraDigital    CarteiraDigital?
+  tutor             Tutor              @relation(fields: [tutorId], references: [id])
+  vaccineRecords    VaccineRecord[]
+  dewormingRecords  DewormingRecord[]
+  medicationRecords MedicationRecord[]
+  carteiraDigital   CarteiraDigital?
 
   @@map("pet")
 }
@@ -121,4 +121,17 @@ model MedicationRecord {
   pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
 
   @@map("medication_record")
+}
+
+model Clinic {
+  id          String                                 @id @default(uuid())
+  name        String
+  address     String
+  phone       String?
+  specialty   String?
+  coordinates Unsupported("geography(Point, 4326)")?
+  createdAt   DateTime                               @default(now()) @map("created_at")
+  updatedAt   DateTime                               @updatedAt @map("updated_at")
+
+  @@map("clinica")
 }
