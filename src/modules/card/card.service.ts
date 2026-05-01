@@ -35,12 +35,7 @@ export class CardService {
   ) {}
 
   async generateQrCode(token: string): Promise<Buffer> {
-    const baseUrl = this.configService.get<string>(
-      'card.publicBaseUrl',
-      'https://card.petcard.app',
-    );
-    const url = `${baseUrl.replace(/\/+$/, '')}/${token}`;
-    return this.generateBuffer(url);
+    return this.generateBuffer(this.buildPublicUrl(token));
   }
 
   async issueTokenForPet(petId: string): Promise<string> {
@@ -212,7 +207,7 @@ export class CardService {
   private buildPublicUrl(token: string): string {
     const baseUrl = this.configService.get<string>(
       'card.publicBaseUrl',
-      'https://card.petcard.app',
+      'https://card.petcard.app/#',
     );
     return `${baseUrl.replace(/\/+$/, '')}/${token}`;
   }
