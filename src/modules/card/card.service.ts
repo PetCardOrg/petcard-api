@@ -15,6 +15,14 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { TutorService } from '../tutor/tutor.service';
 
+interface CarteiraDigitalFullResponseDto extends CarteiraDigitalResponseDto {
+  weight?: number;
+  public_url?: string;
+  upcoming_vaccines_count: number;
+  upcoming_dewormings_count: number;
+  active_medications_count: number;
+}
+
 function isFutureOrToday(date?: Date | null): boolean {
   if (!date) return false;
   const today = new Date();
@@ -132,7 +140,7 @@ export class CardService {
   async findByPetIdForTutor(
     petId: string,
     auth0Id: string,
-  ): Promise<CarteiraDigitalResponseDto> {
+  ): Promise<CarteiraDigitalFullResponseDto> {
     const tutor = await this.tutorService.findByAuth0Id(auth0Id);
     const pet = await this.prisma.pet.findUnique({
       where: { id: petId },
