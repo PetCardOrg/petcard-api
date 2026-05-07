@@ -8,6 +8,7 @@ import { cardConfig } from './config/card.config';
 import { rabbitmqConfig } from './config/rabbitmq.config';
 import { AuthModule } from './modules/auth/auth.module';
 import { CardModule } from './modules/card/card.module';
+import { ClinicaModule } from './modules/clinica/clinica.module';
 import { DewormingModule } from './modules/health/deworming/deworming.module';
 import { MedicationModule } from './modules/health/medication/medication.module';
 import { VaccineModule } from './modules/health/vaccine/vaccine.module';
@@ -33,6 +34,7 @@ import { PrismaModule } from './prisma/prisma.module';
     MedicationModule,
     UploadModule,
     QueueModule,
+    ClinicaModule,
   ],
   controllers: [AppController],
   providers: [AppService],
