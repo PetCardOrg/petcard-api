@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import {
   ClinicaCoordinates,
   ClinicaResponseDto,
@@ -35,6 +36,7 @@ export class ClinicaService {
       radiusMeters,
       limit,
       offset,
+      query.specialty,
     );
 
     return rows.map((row) => ({
@@ -56,7 +58,12 @@ export class ClinicaService {
     radiusMeters: number,
     limit: number,
     offset: number,
+    specialty?: string,
   ): Promise<NearbyRow[]> {
+    const specialtyFilter = specialty
+      ? Prisma.sql`AND LOWER(specialty) = LOWER(${specialty})`
+      : Prisma.empty;
+
     return this.prisma.$queryRaw<NearbyRow[]>`
       SELECT
         id,
@@ -77,6 +84,7 @@ export class ClinicaService {
           ST_MakePoint(${lng}, ${lat})::geography,
           ${radiusMeters}
         )
+        ${specialtyFilter}
       ORDER BY ST_Distance(
         coordinates,
         ST_MakePoint(${lng}, ${lat})::geography

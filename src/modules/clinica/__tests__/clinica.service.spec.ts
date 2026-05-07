@@ -145,5 +145,109 @@ describe('ClinicaService', () => {
       expect(clinic.phone).toBeUndefined();
       expect(clinic.specialty).toBeUndefined();
     });
+
+    it('executes query without specialty filter when not provided', async () => {
+      prisma.$queryRaw.mockResolvedValue([fakeRow]);
+
+      await service.findNearby({
+        lat: -3.7302,
+        lng: -38.5217,
+        radiusKm: 10,
+      });
+
+      const callArgs = prisma.$queryRaw.mock.calls[0] as unknown[];
+      const params = callArgs.slice(1);
+      // When no specialty is provided, Prisma.empty is used — no specialty param object
+      const hasSpecialtyFragment = params.some(
+        (p) =>
+          typeof p === 'object' &&
+          p !== null &&
+          'strings' in p &&
+          (p as { strings: string[] }).strings.some((s: string) =>
+            s.includes('LOWER(specialty)'),
+          ),
+      );
+      expect(hasSpecialtyFragment).toBe(false);
+    });
+
+    it('applies specialty filter when provided', async () => {
+      prisma.$queryRaw.mockResolvedValue([fakeRow]);
+
+      await service.findNearby({
+        lat: -3.7302,
+        lng: -38.5217,
+        radiusKm: 10,
+        specialty: 'Clínica geral',
+      });
+
+      const callArgs = prisma.$queryRaw.mock.calls[0] as unknown[];
+      const params = callArgs.slice(1);
+      // Prisma.sql creates a nested fragment with strings and values
+      const specialtyFragment = params.find(
+        (p) =>
+          typeof p === 'object' &&
+          p !== null &&
+          'strings' in p &&
+          (p as { strings: string[] }).strings.some((s: string) =>
+            s.includes('LOWER(specialty)'),
+          ),
+      ) as { strings: string[]; values: string[] } | undefined;
+      expect(specialtyFragment).toBeDefined();
+      expect(specialtyFragment!.values).toContain('Clínica geral');
+    });
+
+    it('returns only matching clinics when specialty filter is used', async () => {
+      const ortopediaRow = {
+        ...fakeRow,
+        id: '22222222-2222-4222-8222-222222222222',
+        name: 'Hospital Vet Cocó',
+        specialty: 'Ortopedia',
+      };
+      prisma.$queryRaw.mockResolvedValue([ortopediaRow]);
+
+      const result = await service.findNearby({
+        lat: -3.7302,
+        lng: -38.5217,
+        radiusKm: 10,
+        specialty: 'Ortopedia',
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].specialty).toBe('Ortopedia');
+    });
+
+    it('combines distance and specialty filters in the same query', async () => {
+      prisma.$queryRaw.mockResolvedValue([]);
+
+      await service.findNearby({
+        lat: -3.7302,
+        lng: -38.5217,
+        radiusKm: 3,
+        specialty: 'Emergência 24h',
+      });
+
+      const callArgs = prisma.$queryRaw.mock.calls[0] as unknown[];
+      // Check template contains ST_DWithin
+      const templateStrings = callArgs[0] as string[];
+      const joined = templateStrings.join('');
+      expect(joined).toContain('ST_DWithin');
+
+      // Check radiusKm was converted to meters
+      const params = callArgs.slice(1);
+      expect(params).toContain(3000);
+
+      // Check specialty fragment is present
+      const specialtyFragment = params.find(
+        (p) =>
+          typeof p === 'object' &&
+          p !== null &&
+          'strings' in p &&
+          (p as { strings: string[] }).strings.some((s: string) =>
+            s.includes('LOWER(specialty)'),
+          ),
+      ) as { strings: string[]; values: string[] } | undefined;
+      expect(specialtyFragment).toBeDefined();
+      expect(specialtyFragment!.values).toContain('Emergência 24h');
+    });
   });
 });

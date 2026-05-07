@@ -198,4 +198,38 @@ describe('Clinica Geo (e2e)', () => {
       .expect(200)
       .expect((res) => expect(res.body).toEqual([]));
   });
+
+  it('accepts specialty as optional filter', async () => {
+    await request(app.getHttpServer())
+      .get('/clinicas')
+      .query({
+        lat: -3.7302,
+        lng: -38.5217,
+        radiusKm: 10,
+        specialty: 'Clínica geral',
+      })
+      .expect(200)
+      .expect((res) => {
+        expect(Array.isArray(res.body)).toBe(true);
+      });
+  });
+
+  it('returns 200 with distance filter only (no specialty)', async () => {
+    await request(app.getHttpServer())
+      .get('/clinicas')
+      .query({ lat: -3.7302, lng: -38.5217, radiusKm: 5 })
+      .expect(200);
+  });
+
+  it('rejects empty specialty string', async () => {
+    await request(app.getHttpServer())
+      .get('/clinicas')
+      .query({
+        lat: -3.7302,
+        lng: -38.5217,
+        radiusKm: 10,
+        specialty: '',
+      })
+      .expect(400);
+  });
 });
