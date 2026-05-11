@@ -5,6 +5,7 @@ import { AppService } from './app.service';
 import { authConfig } from './config/auth.config';
 import { awsConfig } from './config/aws.config';
 import { cardConfig } from './config/card.config';
+import { googleMapsConfig } from './config/google-maps.config';
 import { rabbitmqConfig } from './config/rabbitmq.config';
 import { AuthModule } from './modules/auth/auth.module';
 import { CardModule } from './modules/card/card.module';
@@ -22,7 +23,13 @@ import { PrismaModule } from './prisma/prisma.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [authConfig, awsConfig, cardConfig, rabbitmqConfig],
+      load: [
+        authConfig,
+        awsConfig,
+        cardConfig,
+        googleMapsConfig,
+        rabbitmqConfig,
+      ],
     }),
     PrismaModule,
     AuthModule,

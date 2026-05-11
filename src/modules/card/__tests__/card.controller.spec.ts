@@ -46,7 +46,7 @@ describe('CardController', () => {
 
       const result = await controller.getCardByPetId('pet-1', {
         sub: 'auth0|tutor-1',
-      } as never);
+      });
 
       expect(cardService.findByPetIdForTutor).toHaveBeenCalledWith(
         'pet-1',
