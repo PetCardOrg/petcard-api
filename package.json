@@ -39,7 +39,7 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/throttler": "^6.5.0",
-    "@petcardorg/shared": "file:../petcard-shared",
+    "@petcardorg/shared": "^0.6.1",
     "@prisma/client": "^6.19.3",
     "amqp-connection-manager": "^5.0.0",
     "amqplib": "^1.0.3",
