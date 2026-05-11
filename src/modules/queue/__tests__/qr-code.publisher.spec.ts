@@ -1,5 +1,4 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ClientProxy } from '@nestjs/microservices';
 import { of, throwError } from 'rxjs';
 import { QrCodePublisher } from '../qr-code.publisher';
 import { QR_CODE_CLIENT, QR_CODE_GENERATE_PATTERN } from '../queue.constants';
@@ -14,7 +13,7 @@ describe('QrCodePublisher', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         QrCodePublisher,
-        { provide: QR_CODE_CLIENT, useValue: client as unknown as ClientProxy },
+        { provide: QR_CODE_CLIENT, useValue: client as unknown },
       ],
     }).compile();
 
