@@ -31,6 +31,8 @@ Multirepo sob `PetCardOrg`:
 
 ## M3 — Geolocalização + Clínicas
 
+> ⚠️ **Atualização (2026-05-12):** a abordagem de tabela `clinica` local + PostGIS (`ST_DWithin`/`ST_Distance`, `$queryRaw`, índice GiST) foi **descartada**. A busca de clínicas passou a ser feita exclusivamente via **Google Places API** (`GET /clinicas/places`). Foram removidos: tabela `clinica` (migration `20260512130000_drop_clinica_table`), `ClinicaService`, endpoint `GET /clinicas`, bloco de seed de clínicas e os DTOs `ClinicaResponseDto` / `FindNearbyClinicsQueryDto` (shared `0.7.0`). As seções abaixo que falam de PostGIS/`ST_DWithin` ficam só como registro histórico — a extensão PostGIS continua instalada no banco, mas sem uso.
+
 ### Objetivo
 
 Tutor abre o app, vê clínicas próximas no mapa, filtra por especialidade/avaliação/distância, e liga direto da tela. A API expõe busca geoespacial via PostGIS.

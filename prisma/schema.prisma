@@ -122,16 +122,3 @@ model MedicationRecord {
 
   @@map("medication_record")
 }
-
-model Clinic {
-  id          String                                 @id @default(uuid())
-  name        String
-  address     String
-  phone       String?
-  specialty   String?
-  coordinates Unsupported("geography(Point, 4326)")?
-  createdAt   DateTime                               @default(now()) @map("created_at")
-  updatedAt   DateTime                               @updatedAt @map("updated_at")
-
-  @@map("clinica")
-}

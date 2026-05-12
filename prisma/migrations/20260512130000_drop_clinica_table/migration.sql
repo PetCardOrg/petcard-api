@@ -1,0 +1,12 @@
+-- Remove a tabela `clinica` (e, junto, o índice GiST `clinica_coordinates_idx`,
+-- caso ainda exista).
+--
+-- Motivo: a busca de clínicas passou a ser feita exclusivamente via Google
+-- Places API (GET /clinicas/places). O endpoint GET /clinicas, que consultava
+-- esta tabela com PostGIS (ST_DWithin / ST_Distance), foi removido — assim como
+-- o ClinicaService, os DTOs ClinicaResponseDto/FindNearbyClinicsQueryDto e o
+-- bloco de seed de clínicas.
+--
+-- A extensão PostGIS é mantida no banco de propósito (inofensiva e barata de
+-- manter; reintroduzi-la depois é mais custoso do que deixá-la).
+DROP TABLE IF EXISTS "clinica";
