@@ -4,11 +4,12 @@ import { PassportStrategy } from '@nestjs/passport';
 import { passportJwtSecret } from 'jwks-rsa';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { TutorService } from '../../tutor/tutor.service';
+import { Role } from '../enums/role.enum';
 
 export interface JwtPayload {
   sub: string;
   email?: string;
-  permissions?: string[];
+  role?: Role;
 }
 
 @Injectable()
@@ -36,18 +37,21 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload): Promise<JwtPayload> {
+    let role: Role | undefined;
+
     if (payload.sub && payload.email) {
-      await this.tutorService.findOrCreate(
+      const tutor = await this.tutorService.findOrCreate(
         payload.sub,
         payload.email,
         payload.email.split('@')[0],
       );
+      role = tutor.role as Role;
     }
 
     return {
       sub: payload.sub,
       email: payload.email,
-      permissions: payload.permissions,
+      role,
     };
   }
 }

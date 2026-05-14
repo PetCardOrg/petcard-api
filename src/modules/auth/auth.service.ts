@@ -7,7 +7,7 @@ export class AuthService {
     return {
       sub: payload.sub,
       email: payload.email,
-      permissions: payload.permissions,
+      role: payload.role,
     };
   }
 }

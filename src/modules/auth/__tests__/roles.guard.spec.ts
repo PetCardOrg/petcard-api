@@ -1,6 +1,5 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { PrismaService } from '../../../prisma/prisma.service';
 import { ROLES_KEY, Roles } from '../decorators/roles.decorator';
 import { Role } from '../enums/role.enum';
 import { RolesGuard } from '../guards/roles.guard';
@@ -19,63 +18,58 @@ const createContext = (user: JwtPayload | undefined): ExecutionContext => {
 describe('RolesGuard', () => {
   let guard: RolesGuard;
   let reflector: Reflector;
-  let prisma: { tutor: { findUnique: jest.Mock } };
 
   beforeEach(() => {
     reflector = new Reflector();
-    prisma = { tutor: { findUnique: jest.fn() } };
-    guard = new RolesGuard(reflector, prisma as unknown as PrismaService);
+    guard = new RolesGuard(reflector);
   });
 
   it('should be defined', () => {
     expect(guard).toBeDefined();
   });
 
-  it('should allow access when no roles are required', async () => {
+  it('should allow access when no roles are required', () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(undefined);
     const ctx = createContext({ sub: 'auth0|1' });
 
-    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(guard.canActivate(ctx)).toBe(true);
   });
 
-  it('should allow access when required roles array is empty', async () => {
+  it('should allow access when required roles array is empty', () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([]);
     const ctx = createContext({ sub: 'auth0|1' });
 
-    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(guard.canActivate(ctx)).toBe(true);
   });
 
-  it('should allow access when user has one of the required roles', async () => {
+  it('should allow access when user has one of the required roles', () => {
     jest
       .spyOn(reflector, 'getAllAndOverride')
       .mockReturnValue([Role.TUTOR, Role.VET]);
-    prisma.tutor.findUnique.mockResolvedValue({ role: Role.TUTOR });
-    const ctx = createContext({ sub: 'auth0|1' });
+    const ctx = createContext({ sub: 'auth0|1', role: Role.TUTOR });
 
-    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(guard.canActivate(ctx)).toBe(true);
   });
 
-  it('should deny access when user has a different role', async () => {
+  it('should deny access when user has a different role', () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.VET]);
-    prisma.tutor.findUnique.mockResolvedValue({ role: Role.TUTOR });
-    const ctx = createContext({ sub: 'auth0|1' });
+    const ctx = createContext({ sub: 'auth0|1', role: Role.TUTOR });
 
-    await expect(guard.canActivate(ctx)).rejects.toThrow(ForbiddenException);
+    expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });
 
-  it('should deny access when user is not found in database', async () => {
+  it('should deny access when user has no role', () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.TUTOR]);
-    prisma.tutor.findUnique.mockResolvedValue(null);
     const ctx = createContext({ sub: 'auth0|1' });
 
-    await expect(guard.canActivate(ctx)).rejects.toThrow(ForbiddenException);
+    expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });
 
-  it('should deny access when request has no user', async () => {
+  it('should deny access when request has no user', () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.TUTOR]);
     const ctx = createContext(undefined);
 
-    await expect(guard.canActivate(ctx)).rejects.toThrow(ForbiddenException);
+    expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });
 });
 
