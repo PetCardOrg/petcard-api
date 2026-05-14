@@ -1,5 +1,4 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ClientProxy } from '@nestjs/microservices';
 import { of, throwError } from 'rxjs';
 import { QrCodePublisher } from '../qr-code.publisher';
 import { QR_CODE_CLIENT, QR_CODE_GENERATE_PATTERN } from '../queue.constants';
@@ -14,7 +13,7 @@ describe('QrCodePublisher', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         QrCodePublisher,
-        { provide: QR_CODE_CLIENT, useValue: client as unknown as ClientProxy },
+        { provide: QR_CODE_CLIENT, useValue: client as unknown },
       ],
     }).compile();
 
@@ -29,9 +28,10 @@ describe('QrCodePublisher', () => {
     });
   });
 
-  it('should swallow publish errors so the caller is not impacted', async () => {
-    client.emit.mockReturnValue(throwError(() => new Error('rmq down')));
+  it('should rethrow publish errors so the caller can react', async () => {
+    const cause = new Error('rmq down');
+    client.emit.mockReturnValue(throwError(() => cause));
 
-    await expect(publisher.publishGenerate('pet-42')).resolves.toBeUndefined();
+    await expect(publisher.publishGenerate('pet-42')).rejects.toThrow(cause);
   });
 });

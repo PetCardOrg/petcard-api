@@ -31,7 +31,7 @@ export class DewormingController {
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateDewormingRecordDto,
   ): Promise<DewormingRecordResponseDto> {
-    const isVet = user.permissions?.includes(Role.VET) ?? false;
+    const isVet = user.role === Role.VET;
     return this.dewormingService.create(petId, user.sub, isVet, dto);
   }
 
@@ -41,7 +41,7 @@ export class DewormingController {
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<DewormingRecordResponseDto[]> {
-    const isVet = user.permissions?.includes(Role.VET) ?? false;
+    const isVet = user.role === Role.VET;
     return this.dewormingService.findAllForPet(petId, user.sub, isVet);
   }
 
@@ -52,7 +52,7 @@ export class DewormingController {
     @CurrentUser() user: JwtPayload,
     @Body() dto: UpdateDewormingRecordDto,
   ): Promise<DewormingRecordResponseDto> {
-    const isVet = user.permissions?.includes(Role.VET) ?? false;
+    const isVet = user.role === Role.VET;
     return this.dewormingService.update(id, user.sub, isVet, dto);
   }
 

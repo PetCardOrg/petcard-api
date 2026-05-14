@@ -1,161 +1,179 @@
-# PetCard — Contexto para Claude Code
+# PetCard — Contexto para Claude Code (foco: Milestone 3 / API)
 
 ## Projeto
 
 PetCard — carteira digital de saúde para pets. TCC do Ricardo Temporal.
 Multirepo sob `PetCardOrg`:
 
-- `petcard-api` (NestJS 11 + Prisma 6 + Postgres + Redis + RabbitMQ + S3)
-- `petcard-mobile` (React Native + Expo, `expo-auth-session` PKCE)
-- `petcard-web` (Vite + React 19 — esqueleto, sem router/UI ainda)
-- `petcard-shared` (npm `@petcardorg/shared@0.5.0` no GitHub Packages)
-- `petcard-docs` (ADRs em `architecture/adr/`, board centralizado)
+- `petcard-api` (NestJS + Prisma + Postgres + Redis + S3) — **foco desta sessão**
+- `petcard-mobile` (React Native + Expo)
+- `petcard-web` (SPA)
+- `petcard-shared` (npm `@petcardorg/shared` no GitHub Packages)
+- `petcard-docs` (ADRs, board centralizado, documentação)
 
-Equipe: Álvaro Araújo (Backend Lead), Camila Martins (DevOps/PM), Ricardo Temporal (Frontend Lead).
+**Equipe:** Álvaro Araújo (Backend), Camila Martins (DevOps/PM), Ricardo Temporal (Frontend Lead — atuando na API nesta milestone).
 
-## Stack (api)
+## Stack relevante
 
-- NestJS 11, `@nestjs/passport` + `passport-jwt` + `jwks-rsa`
-- Prisma 6.19, Postgres via imagem `postgis/postgis:16-3.4` (PostGIS já provisionado para M3)
-- AWS SDK v3 (`@aws-sdk/client-s3`, `s3-request-presigner`)
-- `qrcode@1.5.4` para geração de PNG
-- Redis e RabbitMQ no docker-compose, **ainda não consumidos por código**
-- Jest unitário + e2e (`test/jest-e2e.json`)
-- `@petcardorg/shared@^0.5.0`
-
-## Auth
-
-- Auth0 (`AUTH0_DOMAIN`, `AUTH0_AUDIENCE`)
-- Roles: `TUTOR` (mobile), `VET` (web)
-- Decorators: `@Auth(Role)`, `@Roles(...)`, `@CurrentUser()`
-- Guards: `JwtAuthGuard`, `RolesGuard`
-- **Auth é opt-in** (não há `APP_GUARD` global). Rota sem `@Auth` é pública por design — cuidar ao criar endpoints
-- Mobile: `expo-auth-session` com PKCE (não `react-native-auth0`)
-- `RolesGuard` consulta o role no banco (não confia só no token)
+- **Backend:** NestJS, Prisma, PostgreSQL **com extension PostGIS** (presumido — confirmar no banco), Redis, AWS S3
+- **Auth:** Auth0 (JWKS), roles `TUTOR` e `VET`
+- **Decorators existentes:** `@CurrentUser`, `@Roles`, `@Auth`
+- **Guards existentes:** `JwtAuthGuard`, `RolesGuard`
+- **Shared:** DTOs em `@petcardorg/shared` (versão atual a confirmar no `package.json`)
 
 ## Status das milestones
 
-- **M0** ✅ Setup e Fundações (multirepo, GitHub Packages, ADR-001)
+- **M0** ✅ Setup, GitHub Packages, ADR-001 multirepo, project board
 - **M1** ✅ Auth + CRUDs (Tutor, Pet, Vaccine, Deworming, Medication), upload S3, seed
-- **M2** 🚧 Carteira Digital + QR Code — em andamento (3/10 issues fechadas + 2 fechadas no shared, 5 abertas)
-- **M3** 📋 Geolocalização + Clínicas — backlog detalhado, não iniciado
+- **M2** ✅/🚧 Carteira Digital + QR Code (auditar antes de mergulhar em M3)
+- **M3** 🚧 Geolocalização + Clínicas — **foco atual**
+- **M4+** 📋 Não definido
 
-## M2 — Carteira Digital + QR Code
+## M3 — Geolocalização + Clínicas
 
-**Objetivo:** pet ganha uma carteira digital com QR Code que aponta para uma rota pública (sem auth) com o histórico de saúde — útil quando o pet é encontrado perdido ou em consulta com VET sem cadastro.
+> ⚠️ **Atualização (2026-05-12):** a abordagem de tabela `clinica` local + PostGIS (`ST_DWithin`/`ST_Distance`, `$queryRaw`, índice GiST) foi **descartada**. A busca de clínicas passou a ser feita exclusivamente via **Google Places API** (`GET /clinicas/places`). Foram removidos: tabela `clinica` (migration `20260512130000_drop_clinica_table`), `ClinicaService`, endpoint `GET /clinicas`, bloco de seed de clínicas e os DTOs `ClinicaResponseDto` / `FindNearbyClinicsQueryDto` (shared `0.7.0`). As seções abaixo que falam de PostGIS/`ST_DWithin` ficam só como registro histórico — a extensão PostGIS continua instalada no banco, mas sem uso.
 
-### Issues
+### Objetivo
 
-| Código | Repo   | #   | Título                               | Status real               | Evidência                                                             |
-| ------ | ------ | --- | ------------------------------------ | ------------------------- | --------------------------------------------------------------------- |
-| PC-047 | api    | #18 | Geração QR (UUID + token)            | ✅ Done                   | PR #53; `card.service.generateQrCode`                                 |
-| PC-048 | api    | #19 | Upload QR para S3                    | ✅ Done                   | PR #54; `upload.service.uploadBuffer`; key `qr-codes/{petId}.png`     |
-| PC-054 | api    | #22 | Migration `carteira_digital`         | ✅ Done                   | PR #55; migration `20260426204420`                                    |
-| PC-055 | shared | #6  | DTOs CarteiraDigital                 | ✅ Done                   | PR #23; em `@petcardorg/shared@0.4.0`                                 |
-| PC-056 | shared | #7  | Publicar shared com DTOs             | ✅ Done (0.5.0 publicado) |
-| PC-049 | api    | #20 | Rota pública `GET /cards/:token`     | ✅ Done                   | rota + service + specs + e2e prontos; aguarda PR                      |
-| PC-050 | api    | #21 | Worker RabbitMQ — geração assíncrona | ✅ Done                   | RabbitMQ no compose, sem código; `bullmq`/`amqplib` ausentes          |
-| PC-051 | mobile | #13 | Tela carteira digital + QR           | 📋 To Do                  | sem `Carteira/Wallet/QRCode` screens; mobile ainda em shared `^0.2.1` |
-| PC-052 | mobile | #14 | Compartilhar link da carteira        | 📋 To Do                  | sem `expo-sharing`/`Share.share`                                      |
-| PC-053 | web    | #6  | Página pública SPA `/card/:token`    | 📋 To Do                  | repo só tem template Vite + React 19, sem router                      |
+Tutor abre o app, vê clínicas próximas no mapa, filtra por especialidade/avaliação/distância, e liga direto da tela. A API expõe busca geoespacial via PostGIS.
 
-### Decisões já tomadas (extraídas do código — não há ADR de M2)
+### Pré-requisito já entregue
 
-- **Token:** `randomUUID()` opaco, único por pet (`carteira_digital.token UNIQUE`). Renovado a cada `regenerateQrCode`.
-- **Conteúdo do QR:** PNG 400×400, errorCorrection `M`, payload **URL navegável** `${CARD_PUBLIC_BASE_URL}/${token}` (default `https://card.petcard.app/{token}`). Configurado via `card.publicBaseUrl` em `src/config/card.config.ts`.
-- **Rota pública:** `GET /cards/:token` no `CardController` (path `cards`, plural). Sem guard, **sem rate-limit por enquanto** (a adicionar em PC futuro), sem expiração do token.
-- **Resposta pública:** retorna pet completo + `tutor_name` + todos os vacinas/vermifugações/medicações (incluindo `notes` e `veterinarian_name`) ordenados desc por data. Filtro de privacidade pode ser revisitado depois.
-- **Bucket S3:** URL pública direta (`https://{bucket}.s3.{region}.amazonaws.com/{key}`) — assume bucket público. `qr-codes/{petId}.png` sobrescreve a cada regeneração.
-- **Source of truth do `qr_code_url`:** `carteira_digital.qr_code_url`. Coluna redundante em `pet` removida na migration `20260429171445_drop_pet_qr_code_url`. `pet.service` lê via `include: { carteiraDigital: true }`.
-- **Geração:** **síncrona** dentro de `pet.create()` e `pet.regenerateQrCode()`. Falha de S3 não quebra criação (`try/catch` + log + retorna `null`). PC-050 vai mover para fila.
-- **PrismaModule é `@Global()`** — qualquer service injeta `PrismaService` sem importar.
+- **PC-062** ✅ Migration: tabela `clinica` com coluna do tipo `GEOGRAPHY`
+  - Presunção: PostGIS instalado como extension no **mesmo banco** da API. Confirmar com `SELECT PostGIS_Version();` antes de codar.
 
-### Decisões pendentes (perguntar ao Ricardo antes de codar)
+### Issues — ordem de execução para a API
 
-1. Stack do worker PC-050: BullMQ (Redis, já no compose) ou AMQP via `@golevelup/nestjs-rabbitmq`?
-2. Web (PC-053): router (react-router vs TanStack), state, UI lib — tudo em aberto.
-3. Mobile (PC-051): bumpar shared para `^0.5.0` antes? Lib de QR: `react-native-qrcode-svg`?
-4. Rate-limit na rota pública (deferido de PC-049): `@nestjs/throttler` quando?
-5. Filtro de privacidade na resposta pública (deferido de PC-049): ocultar `notes`/`veterinarian_name` dos registros médicos?
+| #   | Código | Título                                                   | Repo        | Por quê nesta posição                                                                                                                         |
+| --- | ------ | -------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | PC-063 | Seed de clínicas com coordenadas reais                   | petcard-api | Sem dados no banco, nada de busca/filtro pode ser validado. Bloqueia tudo abaixo.                                                             |
+| 2   | PC-057 | Módulo Geo: busca de clínicas com `ST_DWithin`           | petcard-api | Núcleo da M3. Sem o endpoint de busca por raio, filtros e mapa não têm o que consumir.                                                        |
+| 3   | PC-058 | Filtros de clínica (especialidade, avaliação, distância) | petcard-api | Depende do endpoint de busca já funcionando. Estende com query params.                                                                        |
+| 4   | PC-059 | Integração com Google Maps API (geocoding)               | petcard-api | Camada de enriquecimento (converter endereço digitado → lat/lng). Funciona sobre busca pronta — não é bloqueante para os primeiros endpoints. |
 
-### O que falta na M2 (ordem sugerida)
+### Issues fora do escopo desta sessão (mobile)
 
-1. PC-049: PR e merge na develop (rota pública pronta no working tree).
-2. Decidir #1 → implementar PC-050 (mover geração de QR para fila)
-3. Bumpar mobile para shared `^0.5.0` → PC-051 → PC-052
-4. Decidir #2 → bootstrap do `petcard-web` → PC-053
-5. PC-056: só corrigir título da issue (já entregue como 0.5.0)
+- **PC-060** — Tela de busca de clínicas com mapa interativo (mobile)
+- **PC-061** — Filtros e chamada telefônica direta (mobile)
 
-## M3 — Geolocalização + Clínicas (preview)
+Não codar essas agora. Mas: ao desenhar os endpoints (PC-057, PC-058), considere que o **mobile vai consumir** — campos retornados, paginação, formato de coordenadas devem ser pensados para o app, não só para curl.
 
-PostGIS (`ST_DWithin`), Google Maps API geocoding, filtros de especialidade/avaliação/distância, migration com tipo `GEOGRAPHY`, seed de clínicas com coordenadas reais. Postgres já roda na imagem PostGIS desde M1. **Não codar nada de M3 até M2 fechar.**
+### Decisões de arquitetura a tomar (antes de codar PC-057)
 
-## Convenções
+Estas decisões precisam estar resolvidas antes de implementar — pergunte ao Ricardo se faltar contexto, não invente:
 
-- **Branches:** `feature/PC-XXX-descricao-kebab` (padrão visto em PRs mergeados)
-- **Commits:** Conventional Commits (`feat(card): ...`, `fix(auth): ...`, `chore(deps): ...`, `test(pet): ...`)
-- **PRs:** mergeados via PR (não direto em `develop`); título e branch carregam o `PC-XXX`
-- **DTOs compartilhados:** sempre em `@petcardorg/shared`; campos em `snake_case` (`pet_id`, `qr_code_url`); bump minor para nova feature, publicar via CI no GitHub Packages
-- **Testes:** unit obrigatório para services novos (`__tests__/<file>.spec.ts` colado ao módulo); e2e obrigatório para endpoints públicos sem auth
-- **Migrations:** `prisma migrate dev --name <descricao_snake_case>`; nome inclui timestamp gerado pelo Prisma
-- **ADRs:** decisões arquiteturais relevantes vão em `petcard-docs/architecture/adr/` antes de codar (hoje só ADR-001 existe — multirepo)
+1. **Formato do payload de busca:** query params (`GET /clinicas?lat=...&lng=...&radius=5000`) ou body em POST? Preferência REST: GET com query params.
+2. **Unidade do raio:** metros (default do PostGIS com `geography`) ou quilômetros? Recomendado: metros na API, mobile converte para exibir.
+3. **Ordenação:** sempre por distância crescente, ou configurável?
+4. **Paginação:** offset/limit ou cursor? Para listas geográficas, offset/limit costuma bastar.
+5. **Distância retornada:** API devolve `distanceMeters` em cada clínica (calculado via `ST_Distance`)? Mobile precisa disso pra exibir "1.2 km".
+6. **Cache:** Redis para resultados de busca? Não recomendado no MVP (geolocalização do usuário muda muito) — YAGNI.
+7. **Rate limit do Google Maps:** quem chama o geocoding — backend (recomendado, esconde a chave) ou frontend? Se backend, considerar cache de geocodings repetidos.
+
+### Decisões já fixadas
+
+- **PostgreSQL + PostGIS no mesmo banco** (presumido — verificar)
+- **Coluna `GEOGRAPHY`** no schema (não `GEOMETRY`) — escolha correta para distâncias em metros sobre superfície terrestre
+- **`ST_DWithin`** como operador de busca (usa índice GIST eficientemente)
+
+### Schema esperado (referência, confirmar no `schema.prisma`)
+
+```
+clinica
+├── id              UUID
+├── nome            String
+├── endereco        String
+├── telefone        String?
+├── especialidades  String[]   ou tabela auxiliar (a confirmar)
+├── avaliacao       Float?     (média de reviews — origem? campo manual no seed?)
+├── localizacao     Unsupported("geography(Point, 4326)")
+└── createdAt/updatedAt
+```
+
+Prisma **não suporta nativamente** `geography`. Soluções comuns:
+
+- `Unsupported("geography(Point, 4326)")` no schema + queries `$queryRaw` para `ST_DWithin`/`ST_Distance`
+- Plugin `prisma-extensions-postgis` (avaliar se vale a dependência)
+
+**Recomendação YAGNI:** começar com `Unsupported` + `$queryRaw` em métodos específicos do `ClinicaService`. Encapsular o SQL raw num único método para não espalhar.
+
+## Padrões a seguir nesta milestone
+
+- **Investigar antes de codar.** Antes de PC-057, ler como `PetService`/`TutorService` estão estruturados e seguir o mesmo padrão de module/controller/service/dto.
+- **DTOs no `@petcardorg/shared`.** Toda resposta nova de clínica vai como DTO no shared, com bump de versão minor e publish.
+- **Testes:** unit para o service (mockando Prisma), e2e para o endpoint de busca cobrindo ao menos: raio válido, raio sem resultados, lat/lng inválidos.
+- **Migrations:** `npx prisma migrate dev --name <descricao_snake_case>`. Para alterações que envolvem PostGIS (ex.: criar índice GIST), pode ser necessário SQL manual via `prisma migrate dev --create-only` + edição.
+- **Seed:** PC-063 deve usar coordenadas reais (Fortaleza ou cidade de teste). Não usar lat/lng inventados — quebra a percepção de busca durante demo do TCC.
+
+## Convenções gerais
+
+- **Branches:** `feat/pc-XXX-descricao`, `fix/pc-XXX-...`, `chore/...`
+- **Commits:** Conventional Commits (`feat(clinica): add geo search endpoint`)
+- **PRs:** título `feat: PC-XXX - Descrição`, com checklist de DoD na descrição
+- **DTOs compartilhados:** sempre em `@petcardorg/shared`, com bump minor para nova feature
+- **ADRs:** decisões arquiteturais relevantes (ex.: usar `$queryRaw` vs plugin Prisma) documentadas em `petcard-docs/adrs/` antes de mergear
 
 ## Princípios de trabalho
 
-- **YAGNI.** Não introduzir filas, caches ou abstrações sem demanda da issue.
-- **Reutilizar antes de criar.** Procurar equivalente em `petcard-api` e `@petcardorg/shared` antes de novo código.
-- **Investigar antes de codar.** Sempre ler o módulo existente antes de propor arquitetura — em especial `card.service`, `pet.service`, `upload.service`.
-- **Falha de serviço externo (S3) não quebra fluxo crítico** — degradar com graça, logar via `Logger`.
-- **Rotas públicas (sem auth) são superfície de risco** — validar token, retornar apenas o necessário, considerar rate-limit.
-- **Atualizar `@petcardorg/shared` exige bump de versão e publish via CI** — depois bumpar consumidores (api/mobile/web).
+- **YAGNI.** Sem cache, sem fila, sem abstrações sem demanda real.
+- **Reutilizar antes de criar.** Antes de novo service/util, procurar equivalente em `petcard-api` e `@petcardorg/shared`.
+- **Investigar antes de codar.** Sempre ler o módulo existente antes de propor arquitetura.
+- **Falha de Google Maps não quebra a API.** Se o geocoding falhar, retornar erro graceful — não derrubar o endpoint de busca.
+- **Coordenadas vêm validadas.** `ValidationPipe` + `class-validator` em todos os query params (`@IsLatitude`, `@IsLongitude`, `@IsInt @Min(...)` no raio).
+- **Atualizar `@petcardorg/shared` exige bump + publish** (workflow em `.github/workflows/`).
 
-## Escopo fora de M2 (não fazer agora)
+## Escopo fora desta sessão (não fazer agora)
 
-- Issues de M3 (PostGIS, Google Maps, clínicas)
-- Refactors amplos não relacionados à carteira digital
-- Substituir libs já estabelecidas (Prisma, NestJS, AWS SDK v3)
+- PC-060, PC-061 (mobile)
+- Qualquer coisa fora de M3 (M2 já fechada/em revisão; M4+ não definida)
+- Refactors amplos não relacionados a clínicas
+- Substituir libs já estabelecidas
+- Funcionalidade de reviews/avaliação (se `avaliacao` for campo manual por enquanto, não construir sistema de reviews aqui)
 
 ## Ambiente de desenvolvimento
 
-- Codespace do `petcard-api` com `petcard-shared` e `petcard-mobile` clonados em `/workspaces/`
-- `petcard-web` e `petcard-docs` **não** clonados — usar `gh` CLI ou clonar sob demanda
-- Docker Compose em `docker/docker-compose.yml`: postgres (PostGIS), redis, rabbitmq (com management UI em :15672)
-- Mobile precisa `NODE_AUTH_TOKEN=$GITHUB_TOKEN` para resolver `@petcardorg/shared` no install
-- Setup local Windows também documentado em outra parte; Postgres 17 nativo precisa ficar parado para Docker usar a 5432
+- Codespace do `petcard-api` com `petcard-shared` e `petcard-mobile` clonados ao lado em `/workspaces/`
+- Docker Compose em `docker/docker-compose.yml`
+- **Confirmar imagem do Postgres no compose** — para PostGIS funcionar, a imagem precisa ser `postgis/postgis:<versão>` em vez de `postgres:<versão>`. Se ainda for postgres puro, PC-062 não roda.
+- Mobile precisa `export NODE_AUTH_TOKEN=$GITHUB_TOKEN` para resolver `@petcardorg/shared`
+
+## Checklist antes de começar PC-063
+
+- [ ] Confirmar que `SELECT PostGIS_Version();` retorna versão (PostGIS instalado)
+- [ ] Confirmar que migration de PC-062 foi aplicada (`npx prisma migrate status`)
+- [ ] Confirmar índice GIST na coluna `localizacao` (sem ele, busca por raio é table scan e mata performance no demo)
+  - Se faltar: `CREATE INDEX clinica_localizacao_idx ON clinica USING GIST (localizacao);`
+- [ ] Decidir cidade do seed (Fortaleza recomendado pelo contexto do Ricardo)
+- [ ] Decidir 5-15 clínicas reais ou fictícias com coordenadas plausíveis
+- [ ] Verificar se já existe seed estruturado em `prisma/seed.ts` (M1) e estender, não duplicar
 
 ## Comandos úteis
 
 ```bash
-# API
+# Subir ambiente
 docker compose -f docker/docker-compose.yml up -d
 npm run start:dev
-npx prisma studio
-npx prisma migrate dev
-npm run db:seed
-npm test
-npm run test:e2e
 
-# Listar M2 em todos os repos (label não existe — usar milestone)
-for r in petcard-api petcard-mobile petcard-web petcard-shared petcard-docs; do
-  gh issue list --repo PetCardOrg/$r --milestone "M2 - Carteira Digital + QR Code" --state all
-done
+# Verificar PostGIS no banco
+docker exec -it $(docker ps --filter name=postgres -q) \
+  psql -U <user> -d <db> -c "SELECT PostGIS_Version();"
 
-# Sincronizar todos os repos clonados
-for r in petcard-api petcard-mobile petcard-shared; do
-  git -C /workspaces/$r fetch --all --prune
-done
+# Migrations
+npx prisma migrate status
+npx prisma migrate dev --name <descricao>
+npx prisma migrate dev --create-only --name <descricao>  # para editar SQL antes de aplicar
+
+# Seed
+npm run seed   # ou o comando real do package.json (db:seed?)
+
+# Listar issues M3 da API
+gh issue list --repo PetCardOrg/petcard-api \
+  --label "M3 - Geolocalizacao + Clinicas" --state all
+
+# Testar busca por raio (depois de PC-057)
+curl "http://localhost:3000/clinicas?lat=-3.7172&lng=-38.5433&radius=5000"
 ```
-
-## Referências rápidas
-
-- Arquivos centrais de M2:
-  - `prisma/schema.prisma` — modelos `Pet`, `CarteiraDigital`
-  - `src/modules/card/card.service.ts` — `generateQrCode`, `issueTokenForPet`, `setCardQrCodeUrl`, `findPublicByToken`
-  - `src/modules/card/card.controller.ts` — `GET /cards/qr-code` (auth) e `GET /cards/:token` (público, em diff)
-  - `src/modules/pet/pet.service.ts:178` — `generateAndUploadQrCode`
-  - `src/modules/upload/upload.service.ts` — `uploadBuffer` (in-memory PNG)
-- ADRs: `gh api repos/PetCardOrg/petcard-docs/contents/architecture/adr` (hoje só `001-multirepo-strategy.md`)
 
 ## Última atualização
 
-2026-04-29 — atualizado por Claude Code: redundância `pet.qr_code_url` resolvida (PR mergeado), decisões de PC-049 fechadas (URL no QR; sem rate-limit por agora; resposta pública sem filtro de privacidade)
+Gerado por Claude Code para iniciar a Milestone 3.

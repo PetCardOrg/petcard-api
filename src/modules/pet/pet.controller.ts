@@ -41,7 +41,7 @@ export class PetController {
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<PetResponseDto> {
-    const isVet = user.permissions?.includes(Role.VET) ?? false;
+    const isVet = user.role === Role.VET;
     return this.petService.findOne(id, user.sub, isVet);
   }
 

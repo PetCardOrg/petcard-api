@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthService } from '../auth.service';
+import { Role } from '../enums/role.enum';
 import { JwtPayload } from '../strategies/jwt.strategy';
 
 describe('AuthService', () => {
@@ -22,7 +23,7 @@ describe('AuthService', () => {
       const payload: JwtPayload = {
         sub: 'auth0|123456',
         email: 'tutor@petcard.com',
-        permissions: ['read:pets', 'write:pets'],
+        role: Role.TUTOR,
       };
 
       const result = service.getUserFromPayload(payload);
@@ -30,7 +31,7 @@ describe('AuthService', () => {
       expect(result).toEqual({
         sub: 'auth0|123456',
         email: 'tutor@petcard.com',
-        permissions: ['read:pets', 'write:pets'],
+        role: Role.TUTOR,
       });
     });
 
@@ -44,7 +45,7 @@ describe('AuthService', () => {
       expect(result).toEqual({
         sub: 'auth0|789',
         email: undefined,
-        permissions: undefined,
+        role: undefined,
       });
     });
   });

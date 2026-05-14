@@ -126,13 +126,14 @@ describe('PetService', () => {
       prisma.pet.findUniqueOrThrow.mockResolvedValue(pet);
       qrCodePublisher.publishGenerate.mockRejectedValue(new Error('rmq down'));
 
-      await expect(
-        service.create('auth0|abc', {
-          name: 'Rex',
-          species: Species.DOG,
-          sex: Sex.MALE,
-        }),
-      ).rejects.toThrow('rmq down');
+      const result = await service.create('auth0|abc', {
+        name: 'Rex',
+        species: Species.DOG,
+        sex: Sex.MALE,
+      });
+
+      expect(result.id).toBe('pet-1');
+      expect(qrCodePublisher.publishGenerate).toHaveBeenCalledWith('pet-1');
     });
   });
 

@@ -213,6 +213,14 @@ describe('CardService', () => {
   describe('findByPetIdForTutor', () => {
     const baseDate = new Date('2026-04-01T10:00:00Z');
 
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-04-01T00:00:00Z'));
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
     it('should return the authenticated card summary for the owner', async () => {
       tutorService.findByAuth0Id.mockResolvedValue({ id: 'tutor-1' });
       prisma.pet.findUnique.mockResolvedValue({
