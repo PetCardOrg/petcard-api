@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtStrategy, JwtPayload } from '../strategies/jwt.strategy';
+import { Role } from '../enums/role.enum';
 import { TutorService } from '../../tutor/tutor.service';
 
 // Mock jwks-rsa para não fazer chamadas HTTP reais
@@ -24,7 +25,7 @@ describe('JwtStrategy', () => {
 
   beforeEach(async () => {
     tutorService = {
-      findOrCreate: jest.fn().mockResolvedValue({}),
+      findOrCreate: jest.fn().mockResolvedValue({ role: Role.TUTOR }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -43,11 +44,11 @@ describe('JwtStrategy', () => {
   });
 
   describe('validate', () => {
-    it('should return the payload with sub, email, and permissions', async () => {
+    it('should return the payload with sub, email, and role from the database', async () => {
+      tutorService.findOrCreate.mockResolvedValueOnce({ role: Role.VET });
       const payload: JwtPayload = {
         sub: 'auth0|abc123',
         email: 'vet@petcard.com',
-        permissions: ['read:pets'],
       };
 
       const result = await strategy.validate(payload);
@@ -55,7 +56,7 @@ describe('JwtStrategy', () => {
       expect(result).toEqual({
         sub: 'auth0|abc123',
         email: 'vet@petcard.com',
-        permissions: ['read:pets'],
+        role: Role.VET,
       });
       expect(tutorService.findOrCreate).toHaveBeenCalledWith(
         'auth0|abc123',
@@ -64,7 +65,7 @@ describe('JwtStrategy', () => {
       );
     });
 
-    it('should handle payload with only sub', async () => {
+    it('should handle payload with only sub (no email, no role)', async () => {
       const payload: JwtPayload = {
         sub: 'auth0|minimal',
       };
@@ -74,7 +75,7 @@ describe('JwtStrategy', () => {
       expect(result).toEqual({
         sub: 'auth0|minimal',
         email: undefined,
-        permissions: undefined,
+        role: undefined,
       });
       expect(tutorService.findOrCreate).not.toHaveBeenCalled();
     });

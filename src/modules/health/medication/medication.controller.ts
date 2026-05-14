@@ -31,7 +31,7 @@ export class MedicationController {
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateMedicationRecordDto,
   ): Promise<MedicationRecordResponseDto> {
-    const isVet = user.permissions?.includes(Role.VET) ?? false;
+    const isVet = user.role === Role.VET;
     return this.medicationService.create(petId, user.sub, isVet, dto);
   }
 
@@ -41,7 +41,7 @@ export class MedicationController {
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<MedicationRecordResponseDto[]> {
-    const isVet = user.permissions?.includes(Role.VET) ?? false;
+    const isVet = user.role === Role.VET;
     return this.medicationService.findAllForPet(petId, user.sub, isVet);
   }
 
@@ -52,7 +52,7 @@ export class MedicationController {
     @CurrentUser() user: JwtPayload,
     @Body() dto: UpdateMedicationRecordDto,
   ): Promise<MedicationRecordResponseDto> {
-    const isVet = user.permissions?.includes(Role.VET) ?? false;
+    const isVet = user.role === Role.VET;
     return this.medicationService.update(id, user.sub, isVet, dto);
   }
 
