@@ -28,9 +28,10 @@ describe('QrCodePublisher', () => {
     });
   });
 
-  it('should swallow publish errors so the caller is not impacted', async () => {
-    client.emit.mockReturnValue(throwError(() => new Error('rmq down')));
+  it('should rethrow publish errors so the caller can react', async () => {
+    const cause = new Error('rmq down');
+    client.emit.mockReturnValue(throwError(() => cause));
 
-    await expect(publisher.publishGenerate('pet-42')).resolves.toBeUndefined();
+    await expect(publisher.publishGenerate('pet-42')).rejects.toThrow(cause);
   });
 });

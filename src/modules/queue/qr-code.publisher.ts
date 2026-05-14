@@ -19,6 +19,7 @@ export class QrCodePublisher {
         `Failed to publish qr-code.generate for pet ${petId}`,
         error instanceof Error ? error.stack : error,
       );
+      throw error;
     }
   }
 }

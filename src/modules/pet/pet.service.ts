@@ -1,6 +1,7 @@
 import {
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { CarteiraDigital, Pet } from '@prisma/client';
@@ -40,11 +41,24 @@ type PetInput = Omit<CreatePetDto, 'tutor_id'>;
 
 @Injectable()
 export class PetService {
+  private readonly logger = new Logger(PetService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tutorService: TutorService,
     private readonly qrCodePublisher: QrCodePublisher,
   ) {}
+
+  private async enqueueQrCodeGeneration(petId: string): Promise<void> {
+    try {
+      await this.qrCodePublisher.publishGenerate(petId);
+    } catch (error) {
+      this.logger.error(
+        `QR Code job NOT enqueued for pet ${petId} — needs manual regeneration`,
+        error instanceof Error ? error.stack : error,
+      );
+    }
+  }
 
   async create(auth0Id: string, dto: PetInput): Promise<PetResponseDto> {
     const tutor = await this.tutorService.findByAuth0Id(auth0Id);
@@ -61,14 +75,14 @@ export class PetService {
       },
     });
 
-    await this.qrCodePublisher.publishGenerate(pet.id);
+    await this.enqueueQrCodeGeneration(pet.id);
 
     return this.findById(pet.id);
   }
 
   async regenerateQrCode(petId: string, auth0Id: string): Promise<void> {
     await this.assertOwnership(petId, auth0Id);
-    await this.qrCodePublisher.publishGenerate(petId);
+    await this.enqueueQrCodeGeneration(petId);
   }
 
   async findAllForTutor(auth0Id: string): Promise<PetResponseDto[]> {
