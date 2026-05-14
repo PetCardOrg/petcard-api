@@ -5,7 +5,12 @@ import { CardModule } from '../card/card.module';
 import { UploadModule } from '../upload/upload.module';
 import { QrCodeConsumer } from './qr-code.consumer';
 import { QrCodePublisher } from './qr-code.publisher';
-import { QR_CODE_CLIENT } from './queue.constants';
+import {
+  QR_CODE_CLIENT,
+  QR_CODE_DLQ_ROUTING_KEY,
+  QR_CODE_DLX,
+} from './queue.constants';
+import { RabbitMqTopologyService } from './rabbitmq-topology.service';
 
 @Global()
 @Module({
@@ -22,7 +27,13 @@ import { QR_CODE_CLIENT } from './queue.constants';
           options: {
             urls: [config.get<string>('rabbitmq.url')!],
             queue: config.get<string>('rabbitmq.qrCodeQueue')!,
-            queueOptions: { durable: true },
+            queueOptions: {
+              durable: true,
+              arguments: {
+                'x-dead-letter-exchange': QR_CODE_DLX,
+                'x-dead-letter-routing-key': QR_CODE_DLQ_ROUTING_KEY,
+              },
+            },
             persistent: true,
           },
         }),
@@ -30,7 +41,7 @@ import { QR_CODE_CLIENT } from './queue.constants';
     ]),
   ],
   controllers: [QrCodeConsumer],
-  providers: [QrCodePublisher],
+  providers: [QrCodePublisher, RabbitMqTopologyService],
   exports: [QrCodePublisher],
 })
 export class QueueModule {}
