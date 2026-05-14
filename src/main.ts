@@ -10,7 +10,12 @@ import {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.enableCors();
+  const config = app.get(ConfigService);
+
+  app.enableCors({
+    origin: config.get<string[]>('app.corsOrigins'),
+    credentials: true,
+  });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -19,7 +24,6 @@ async function bootstrap() {
     }),
   );
 
-  const config = app.get(ConfigService);
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.RMQ,
     options: {
