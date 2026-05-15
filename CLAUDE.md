@@ -1,4 +1,4 @@
-# PetCard — Contexto para Claude Code (foco: Milestone 3 / API)
+# PetCard — Contexto para Claude Code (foco: Milestone 4 — Integrações Externas / API)
 
 ## Projeto
 
@@ -7,145 +7,127 @@ Multirepo sob `PetCardOrg`:
 
 - `petcard-api` (NestJS + Prisma + Postgres + Redis + S3) — **foco desta sessão**
 - `petcard-mobile` (React Native + Expo)
-- `petcard-web` (SPA)
+- `petcard-web` (SPA Vite + React)
 - `petcard-shared` (npm `@petcardorg/shared` no GitHub Packages)
 - `petcard-docs` (ADRs, board centralizado, documentação)
 
-**Equipe:** Álvaro Araújo (Backend), Camila Martins (DevOps/PM), Ricardo Temporal (Frontend Lead — atuando na API nesta milestone).
+**Equipe:** Álvaro Araújo (Backend), Camila Martins (DevOps/PM), Ricardo Temporal (Frontend Lead — vem atuando na API desde M2).
 
 ## Stack relevante
 
-- **Backend:** NestJS, Prisma, PostgreSQL **com extension PostGIS** (presumido — confirmar no banco), Redis, AWS S3
+- **Backend:** NestJS, Prisma, PostgreSQL (PostGIS instalado mas sem uso após pivô para Google Places), Redis (no compose, ainda sem uso em código), AWS S3, RabbitMQ
 - **Auth:** Auth0 (JWKS), roles `TUTOR` e `VET`
 - **Decorators existentes:** `@CurrentUser`, `@Roles`, `@Auth`
-- **Guards existentes:** `JwtAuthGuard`, `RolesGuard`
-- **Shared:** DTOs em `@petcardorg/shared` (versão atual a confirmar no `package.json`)
+- **Guards existentes:** `JwtAuthGuard`, `RolesGuard` (síncrono, role propagado pelo `JwtStrategy` — fonte única é `tutor.role` no banco)
+- **Shared:** DTOs em `@petcardorg/shared`, versão atual `0.7.0` em api/mobile/web
 
 ## Status das milestones
 
-- **M0** ✅ Setup, GitHub Packages, ADR-001 multirepo, project board
+- **M0** ✅ Setup, GitHub Packages, ADR-001 multirepo, project board, ferramental (ESLint/Prettier/Husky/CI) em todos os 5 repos
 - **M1** ✅ Auth + CRUDs (Tutor, Pet, Vaccine, Deworming, Medication), upload S3, seed
-- **M2** ✅/🚧 Carteira Digital + QR Code (auditar antes de mergulhar em M3)
-- **M3** 🚧 Geolocalização + Clínicas — **foco atual**
-- **M4+** 📋 Não definido
+- **M2** ✅ Carteira Digital + QR Code (fila com retry/DLQ)
+- **M3** ✅ Geolocalização + Clínicas — entregue via Google Places API (`GET /clinicas/places`); tabela `clinica` local + PostGIS foi descartada
+- **M4** 🚧 **Integrações Externas** — ver escopo abaixo
 
-## M3 — Geolocalização + Clínicas
+### Auditoria M0-M3 (2026-05-11) — fechada
 
-> ⚠️ **Atualização (2026-05-12):** a abordagem de tabela `clinica` local + PostGIS (`ST_DWithin`/`ST_Distance`, `$queryRaw`, índice GiST) foi **descartada**. A busca de clínicas passou a ser feita exclusivamente via **Google Places API** (`GET /clinicas/places`). Foram removidos: tabela `clinica` (migration `20260512130000_drop_clinica_table`), `ClinicaService`, endpoint `GET /clinicas`, bloco de seed de clínicas e os DTOs `ClinicaResponseDto` / `FindNearbyClinicsQueryDto` (shared `0.7.0`). As seções abaixo que falam de PostGIS/`ST_DWithin` ficam só como registro histórico — a extensão PostGIS continua instalada no banco, mas sem uso.
+As 8 recomendações de `audits/auditoria-completa-M0-M3-2026-05-11.md` foram endereçadas até 2026-05-14:
+
+1. ✅ Índice GiST de `clinica.coordinates` (depois descartado junto com a tabela no pivô para Google Places)
+2. ✅ `@petcardorg/shared` alinhado em `^0.7.0` nos 3 consumidores
+3. ✅ Ferramental do `petcard-shared` (ESLint, Prettier, Husky, CI)
+4. ✅ CI do `petcard-mobile` (lint + typecheck + expo-doctor)
+5. ✅ Fonte única de role: `tutor.role` propagado via `request.user.role`
+6. ✅ DLX/DLQ + retry no `qr-code.generate`
+7. ✅ CORS allowlisted via `CORS_ORIGINS`; Auth0 sem fallback hardcoded no mobile
+8. ✅ Higiene (LICENSE, no-explicit-any, coverageThreshold, docker-compose version, encoding, etc.)
+
+## M4 — Integrações Externas
 
 ### Objetivo
 
-Tutor abre o app, vê clínicas próximas no mapa, filtra por especialidade/avaliação/distância, e liga direto da tela. A API expõe busca geoespacial via PostGIS.
+Conectar a API a serviços externos que fecham o loop de produto sem o tutor precisar abrir o app:
 
-### Pré-requisito já entregue
+- **Lembretes proativos** de próxima dose (vacina/vermífugo/medicação) chegando como **notificação push** no celular do tutor.
+- **Agendamento de consultas** no **Google Calendar** do tutor, com lembrete nativo do calendário e visibilidade na rotina dele.
 
-- **PC-062** ✅ Migration: tabela `clinica` com coluna do tipo `GEOGRAPHY`
-  - Presunção: PostGIS instalado como extension no **mesmo banco** da API. Confirmar com `SELECT PostGIS_Version();` antes de codar.
+### Escopo (núcleo)
 
-### Issues — ordem de execução para a API
+| #   | Integração                          | API role                                                                | Triggers / fluxo                                                                                                                                                                                                                                         |
+| --- | ----------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Firebase Cloud Messaging (push)** | Outbound — envia push para device tokens do tutor                       | (a) cron diário consulta `vaccine/deworming/medication` onde `next_dose_at` está em janela X dias e ainda não foi notificado; (b) `POST /devices` registra/atualiza FCM token; (c) opcional: push em eventos imediatos (ex.: carteira pública acessada). |
+| 2   | **Google Calendar (agenda)**        | Outbound com OAuth por tutor — cria/atualiza eventos na agenda do tutor | (a) novo endpoint `POST /appointments` cria evento no Calendar via OAuth tokens persistidos do tutor; (b) `GET /auth/google/connect` inicia fluxo OAuth; (c) refresh token armazenado server-side, criptografado.                                        |
 
-| #   | Código | Título                                                   | Repo        | Por quê nesta posição                                                                                                                         |
-| --- | ------ | -------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | PC-063 | Seed de clínicas com coordenadas reais                   | petcard-api | Sem dados no banco, nada de busca/filtro pode ser validado. Bloqueia tudo abaixo.                                                             |
-| 2   | PC-057 | Módulo Geo: busca de clínicas com `ST_DWithin`           | petcard-api | Núcleo da M3. Sem o endpoint de busca por raio, filtros e mapa não têm o que consumir.                                                        |
-| 3   | PC-058 | Filtros de clínica (especialidade, avaliação, distância) | petcard-api | Depende do endpoint de busca já funcionando. Estende com query params.                                                                        |
-| 4   | PC-059 | Integração com Google Maps API (geocoding)               | petcard-api | Camada de enriquecimento (converter endereço digitado → lat/lng). Funciona sobre busca pronta — não é bloqueante para os primeiros endpoints. |
+### Fora de escopo nesta milestone (M5+)
 
-### Issues fora do escopo desta sessão (mobile)
+- Webhooks de entrada (sistemas de clínica empurrando dados pra API).
+- Email transacional (SendGrid/Resend) — usar push como canal único em M4.
+- SMS (Twilio).
+- Painel do veterinário no `petcard-web` (continua aguardando milestone própria).
+- Hardening de produção (rate-limit global, helmet, payload size) — não é integração; entra em M5 se o cronograma permitir.
 
-- **PC-060** — Tela de busca de clínicas com mapa interativo (mobile)
-- **PC-061** — Filtros e chamada telefônica direta (mobile)
+### Decisões de arquitetura a tomar (antes de codar)
 
-Não codar essas agora. Mas: ao desenhar os endpoints (PC-057, PC-058), considere que o **mobile vai consumir** — campos retornados, paginação, formato de coordenadas devem ser pensados para o app, não só para curl.
+Perguntar ao Ricardo se faltar contexto — não inventar:
 
-### Decisões de arquitetura a tomar (antes de codar PC-057)
+1. **Trigger das notificações de próxima dose:** cron único (ex.: diário às 08:00 no fuso do tutor) ou job-on-write quando `next_dose_at` é setado/atualizado? Recomendação inicial: cron diário, simples; idempotência via campo `last_notified_at` no model.
+2. **Modelo de device token:** tabela nova `device_token` (id, tutorId, token, platform, createdAt, lastSeenAt)? Relação 1:N tutor→tokens (mesmo tutor em vários devices).
+3. **Fila de saída para push:** publicar no RabbitMQ (`notification.push` com DLX/DLQ, padrão da `qr-code.generate`) ou chamar FCM síncrono dentro do cron? Recomendação: fila — desacopla cron de latência/falha do FCM, e a topologia DLX/DLQ já está pronta para reuso.
+4. **Storage dos OAuth tokens do Google:** novo model `google_oauth_token` (tutorId UNIQUE, accessToken encrypted, refreshToken encrypted, expiresAt, scopes). Chave de criptografia em env separada (não reusar JWT_SECRET).
+5. **Fuso horário:** `next_dose_at` está em UTC hoje? Push e Calendar precisam do fuso do tutor — adicionar `timezone` no `tutor` (default `America/Fortaleza`?).
+6. **Re-notificação:** se o tutor não abrir o push, manda de novo no dia seguinte? Política de retry de notificação é separada do retry de fila — pensar como negócio, não como infra.
+7. **Falha do FCM/Google:** API nunca pode derrubar uma chamada de tutor por causa de integração externa cair. Garantir caminho de degradação em todos os endpoints novos.
+8. **Credenciais Firebase:** `FIREBASE_PRIVATE_KEY` no `.env.example` está como string — em produção, secret manager ou volume montado? Decidir antes do deploy.
 
-Estas decisões precisam estar resolvidas antes de implementar — pergunte ao Ricardo se faltar contexto, não invente:
+### Padrões específicos da M4
 
-1. **Formato do payload de busca:** query params (`GET /clinicas?lat=...&lng=...&radius=5000`) ou body em POST? Preferência REST: GET com query params.
-2. **Unidade do raio:** metros (default do PostGIS com `geography`) ou quilômetros? Recomendado: metros na API, mobile converte para exibir.
-3. **Ordenação:** sempre por distância crescente, ou configurável?
-4. **Paginação:** offset/limit ou cursor? Para listas geográficas, offset/limit costuma bastar.
-5. **Distância retornada:** API devolve `distanceMeters` em cada clínica (calculado via `ST_Distance`)? Mobile precisa disso pra exibir "1.2 km".
-6. **Cache:** Redis para resultados de busca? Não recomendado no MVP (geolocalização do usuário muda muito) — YAGNI.
-7. **Rate limit do Google Maps:** quem chama o geocoding — backend (recomendado, esconde a chave) ou frontend? Se backend, considerar cache de geocodings repetidos.
+- **Boundary de integração isolada.** Cada serviço externo vira um módulo (`NotificationModule`, `CalendarModule`) com um _client_ injetável e uma _facade_ que o resto da API consome. Trocar o provedor não vaza pro service de negócio.
+- **Degradação graceful.** Falha do FCM/Google → log de ERROR + métrica + caminho de fallback (ex.: enfileirar pra retry). A request do tutor não falha por isso, salvo quando o objetivo da request _é_ a integração (ex.: `POST /auth/google/connect`).
+- **Fila para todo outbound de volume.** Push e criação de evento no Calendar passam pela mesma topologia de DLX/DLQ usada em M2 (ver `RabbitMqTopologyService`). Sincronicidade só onde o tutor está esperando resposta imediata.
+- **Secret hygiene.** `.env.example` recebe entradas novas (FCM service account JSON path, Calendar client ID/secret, encryption key) com placeholders óbvios. Nada hardcoded — `CORS_ORIGINS` e o ex-Auth0 do mobile (M0-#7) viraram o padrão; aplicar igual aqui.
+- **OAuth flow do tutor.** O tutor já passou pelo Auth0; o Google Calendar é uma segunda camada de OAuth (delegação). Documentar em ADR-002 antes de mergear (linkar Auth0 ↔ Google).
 
-### Decisões já fixadas
+## Padrões a seguir (independente do M4 escolhido)
 
-- **PostgreSQL + PostGIS no mesmo banco** (presumido — verificar)
-- **Coluna `GEOGRAPHY`** no schema (não `GEOMETRY`) — escolha correta para distâncias em metros sobre superfície terrestre
-- **`ST_DWithin`** como operador de busca (usa índice GIST eficientemente)
-
-### Schema esperado (referência, confirmar no `schema.prisma`)
-
-```
-clinica
-├── id              UUID
-├── nome            String
-├── endereco        String
-├── telefone        String?
-├── especialidades  String[]   ou tabela auxiliar (a confirmar)
-├── avaliacao       Float?     (média de reviews — origem? campo manual no seed?)
-├── localizacao     Unsupported("geography(Point, 4326)")
-└── createdAt/updatedAt
-```
-
-Prisma **não suporta nativamente** `geography`. Soluções comuns:
-
-- `Unsupported("geography(Point, 4326)")` no schema + queries `$queryRaw` para `ST_DWithin`/`ST_Distance`
-- Plugin `prisma-extensions-postgis` (avaliar se vale a dependência)
-
-**Recomendação YAGNI:** começar com `Unsupported` + `$queryRaw` em métodos específicos do `ClinicaService`. Encapsular o SQL raw num único método para não espalhar.
-
-## Padrões a seguir nesta milestone
-
-- **Investigar antes de codar.** Antes de PC-057, ler como `PetService`/`TutorService` estão estruturados e seguir o mesmo padrão de module/controller/service/dto.
-- **DTOs no `@petcardorg/shared`.** Toda resposta nova de clínica vai como DTO no shared, com bump de versão minor e publish.
-- **Testes:** unit para o service (mockando Prisma), e2e para o endpoint de busca cobrindo ao menos: raio válido, raio sem resultados, lat/lng inválidos.
-- **Migrations:** `npx prisma migrate dev --name <descricao_snake_case>`. Para alterações que envolvem PostGIS (ex.: criar índice GIST), pode ser necessário SQL manual via `prisma migrate dev --create-only` + edição.
-- **Seed:** PC-063 deve usar coordenadas reais (Fortaleza ou cidade de teste). Não usar lat/lng inventados — quebra a percepção de busca durante demo do TCC.
+- **Investigar antes de codar.** Ler módulos existentes (`PetService`, `TutorService`, `CardService`, `QueueModule`) antes de propor arquitetura nova. Reutilizar padrões de module/controller/service/dto.
+- **DTOs no `@petcardorg/shared`.** Toda request/response nova vai como DTO no shared, com bump minor + publish. Atualizar consumidores (api/mobile/web) na mesma PR ou em PR encadeada.
+- **Testes.** Unit para o service (mockando Prisma e clientes externos), e2e para endpoints novos. Manter `coverageThreshold` global em `package.json` (40/30/45/40 hoje — subir floor conforme cobertura melhora).
+- **Migrations.** `npx prisma migrate dev --name <descricao_snake_case>`. Para SQL fora do que o Prisma cobre, `--create-only` + edição manual.
+- **Auth.** Usar `@Auth()` + `@Roles(Role.VET)` ou `Role.TUTOR`; recuperar usuário via `@CurrentUser()` — nunca ler claim JWT direto em controller.
+- **RBAC.** Fonte única é `tutor.role` no banco, propagado em `request.user.role` pelo `JwtStrategy`. Não reintroduzir leitura do claim `permissions`.
+- **Filas.** Toda nova fila precisa de DLX/DLQ + retry — seguir o padrão de `qr-code.generate` (ver `RabbitMqTopologyService` + headers `x-retry-count`).
+- **Configuração.** Variáveis sensíveis em `.env` (com entrada no `.env.example`). Nada de fallback hardcoded. Em produção, faltar variável crítica = falha rápida no boot (ver `CORS_ORIGINS`).
 
 ## Convenções gerais
 
 - **Branches:** `feat/pc-XXX-descricao`, `fix/pc-XXX-...`, `chore/...`
-- **Commits:** Conventional Commits (`feat(clinica): add geo search endpoint`)
+- **Commits:** Conventional Commits (`feat(notif): add fcm token registration endpoint`)
 - **PRs:** título `feat: PC-XXX - Descrição`, com checklist de DoD na descrição
-- **DTOs compartilhados:** sempre em `@petcardorg/shared`, com bump minor para nova feature
-- **ADRs:** decisões arquiteturais relevantes (ex.: usar `$queryRaw` vs plugin Prisma) documentadas em `petcard-docs/adrs/` antes de mergear
+- **DTOs compartilhados:** sempre em `@petcardorg/shared`, com bump minor para nova feature, patch para fix de tipo
+- **ADRs:** decisões arquiteturais relevantes documentadas em `petcard-docs/architecture/adr/` antes de mergear
 
 ## Princípios de trabalho
 
-- **YAGNI.** Sem cache, sem fila, sem abstrações sem demanda real.
+- **YAGNI.** Sem cache, sem fila, sem abstrações sem demanda real. Se Redis entrar em M4, que seja por uso concreto — não "porque está no compose".
 - **Reutilizar antes de criar.** Antes de novo service/util, procurar equivalente em `petcard-api` e `@petcardorg/shared`.
-- **Investigar antes de codar.** Sempre ler o módulo existente antes de propor arquitetura.
-- **Falha de Google Maps não quebra a API.** Se o geocoding falhar, retornar erro graceful — não derrubar o endpoint de busca.
-- **Coordenadas vêm validadas.** `ValidationPipe` + `class-validator` em todos os query params (`@IsLatitude`, `@IsLongitude`, `@IsInt @Min(...)` no raio).
-- **Atualizar `@petcardorg/shared` exige bump + publish** (workflow em `.github/workflows/`).
+- **Falha de serviço externo não derruba a API.** Google, Firebase, S3, Auth0 — todos têm caminho de degradação previsto. Ver como o `places.service`/`geocoding.service` lidam hoje.
+- **Validação na borda.** `ValidationPipe` global + `class-validator` em todos os DTOs de entrada. Confiar em código interno.
+- **Atualizar `@petcardorg/shared` exige bump + publish** (workflow `publish.yaml` no shared).
 
 ## Escopo fora desta sessão (não fazer agora)
 
-- PC-060, PC-061 (mobile)
-- Qualquer coisa fora de M3 (M2 já fechada/em revisão; M4+ não definida)
-- Refactors amplos não relacionados a clínicas
-- Substituir libs já estabelecidas
-- Funcionalidade de reviews/avaliação (se `avaliacao` for campo manual por enquanto, não construir sistema de reviews aqui)
+- Webhooks de entrada, email transacional, SMS, painel vet web, hardening de produção (ver "Fora de escopo nesta milestone" acima)
+- Refactors amplos não relacionados a Firebase/Calendar
+- Substituir libs já estabelecidas (NestJS, Prisma, Auth0, etc.)
+- Reintroduzir tabela `clinica` local + PostGIS (descartado em 2026-05-12)
+- M5+ — não definido ainda
 
 ## Ambiente de desenvolvimento
 
 - Codespace do `petcard-api` com `petcard-shared` e `petcard-mobile` clonados ao lado em `/workspaces/`
-- Docker Compose em `docker/docker-compose.yml`
-- **Confirmar imagem do Postgres no compose** — para PostGIS funcionar, a imagem precisa ser `postgis/postgis:<versão>` em vez de `postgres:<versão>`. Se ainda for postgres puro, PC-062 não roda.
+- Docker Compose em `docker/docker-compose.yml` (postgis/postgis:16-3.4, redis:7-alpine, rabbitmq:3-management-alpine)
 - Mobile precisa `export NODE_AUTH_TOKEN=$GITHUB_TOKEN` para resolver `@petcardorg/shared`
-
-## Checklist antes de começar PC-063
-
-- [ ] Confirmar que `SELECT PostGIS_Version();` retorna versão (PostGIS instalado)
-- [ ] Confirmar que migration de PC-062 foi aplicada (`npx prisma migrate status`)
-- [ ] Confirmar índice GIST na coluna `localizacao` (sem ele, busca por raio é table scan e mata performance no demo)
-  - Se faltar: `CREATE INDEX clinica_localizacao_idx ON clinica USING GIST (localizacao);`
-- [ ] Decidir cidade do seed (Fortaleza recomendado pelo contexto do Ricardo)
-- [ ] Decidir 5-15 clínicas reais ou fictícias com coordenadas plausíveis
-- [ ] Verificar se já existe seed estruturado em `prisma/seed.ts` (M1) e estender, não duplicar
+- API obriga `CORS_ORIGINS` em produção; em dev usa defaults de localhost (Vite :5173, API :3000, Expo :8081/:19006)
 
 ## Comandos úteis
 
@@ -154,26 +136,33 @@ Prisma **não suporta nativamente** `geography`. Soluções comuns:
 docker compose -f docker/docker-compose.yml up -d
 npm run start:dev
 
-# Verificar PostGIS no banco
-docker exec -it $(docker ps --filter name=postgres -q) \
-  psql -U <user> -d <db> -c "SELECT PostGIS_Version();"
-
 # Migrations
 npx prisma migrate status
 npx prisma migrate dev --name <descricao>
 npx prisma migrate dev --create-only --name <descricao>  # para editar SQL antes de aplicar
 
+# Testes
+npm test                  # unit
+npm run test:cov          # com coverage (respeita coverageThreshold)
+npm run test:e2e          # e2e
+
 # Seed
-npm run seed   # ou o comando real do package.json (db:seed?)
+npm run db:seed
 
-# Listar issues M3 da API
-gh issue list --repo PetCardOrg/petcard-api \
-  --label "M3 - Geolocalizacao + Clinicas" --state all
+# Fila — limpar fila com args divergentes antes de redeploy
+docker exec petcard-rabbitmq rabbitmqctl delete_queue qr-code.generate
 
-# Testar busca por raio (depois de PC-057)
-curl "http://localhost:3000/clinicas?lat=-3.7172&lng=-38.5433&radius=5000"
+# Listar issues da M4
+gh issue list --repo PetCardOrg/petcard-api --label "M4 - Integracoes Externas" --state all
+
+# Smoke do FCM (depois do módulo de notificação existir)
+curl -X POST http://localhost:3000/devices -H "Authorization: Bearer $TOKEN" \
+  -d '{"token":"<fcm-token>","platform":"ios"}'
+
+# Iniciar fluxo OAuth Google Calendar (depois de implementado)
+open http://localhost:3000/auth/google/connect
 ```
 
 ## Última atualização
 
-Gerado por Claude Code para iniciar a Milestone 3.
+2026-05-14 — pós-fechamento da auditoria M0-M3. M4 = Integrações Externas (Firebase push + Google Calendar). Decisões de arquitetura ainda pendentes — ver lista numerada acima.
