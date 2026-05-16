@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  url = env("DATABASE_URL")
 }
 
 enum Role {
@@ -24,6 +24,25 @@ enum Sex {
   FEMALE
 }
 
+enum AppointmentSyncStatus {
+  PENDING_CREATE
+  SYNCED
+  PENDING_UPDATE
+  PENDING_DELETE
+  FAILED
+}
+
+enum NotificationKind {
+  DOSE_REMINDER
+  APPOINTMENT_REMINDER
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
 model Tutor {
   id              String   @id @default(uuid())
   auth0Id         String   @unique @map("auth0_id")
@@ -32,10 +51,13 @@ model Tutor {
   phone           String?
   profileImageUrl String?  @map("profile_image_url")
   role            Role     @default(TUTOR)
+  timezone        String   @default("America/Fortaleza")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  pets Pet[]
+  pets          Pet[]
+  appointments  Appointment[]
+  notifications Notification[]
 
   @@map("tutor")
 }
@@ -58,6 +80,7 @@ model Pet {
   dewormingRecords  DewormingRecord[]
   medicationRecords MedicationRecord[]
   carteiraDigital   CarteiraDigital?
+  appointments      Appointment[]
 
   @@map("pet")
 }
@@ -80,6 +103,7 @@ model VaccineRecord {
   vaccineName      String    @map("vaccine_name")
   appliedAt        DateTime  @map("applied_at")
   nextDoseAt       DateTime? @map("next_dose_at")
+  lastNotifiedAt   DateTime? @map("last_notified_at")
   veterinarianName String?   @map("veterinarian_name")
   notes            String?
   createdAt        DateTime  @default(now()) @map("created_at")
@@ -96,6 +120,7 @@ model DewormingRecord {
   productName      String    @map("product_name")
   appliedAt        DateTime  @map("applied_at")
   nextDoseAt       DateTime? @map("next_dose_at")
+  lastNotifiedAt   DateTime? @map("last_notified_at")
   veterinarianName String?   @map("veterinarian_name")
   notes            String?
   createdAt        DateTime  @default(now()) @map("created_at")
@@ -114,6 +139,7 @@ model MedicationRecord {
   frequency      String
   startDate      DateTime  @map("start_date")
   endDate        DateTime? @map("end_date")
+  lastNotifiedAt DateTime? @map("last_notified_at")
   notes          String?
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
@@ -121,4 +147,53 @@ model MedicationRecord {
   pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
 
   @@map("medication_record")
+}
+
+model Appointment {
+  id              String                @id @default(uuid())
+  tutorId         String                @map("tutor_id")
+  petId           String?               @map("pet_id")
+  title           String
+  description     String?
+  scheduledAt     DateTime              @map("scheduled_at")
+  durationMinutes Int                   @default(60) @map("duration_minutes")
+  location        String?
+  googleEventId   String?               @unique @map("google_event_id")
+  googleEtag      String?               @map("google_etag")
+  syncStatus      AppointmentSyncStatus @default(PENDING_CREATE) @map("sync_status")
+  syncError       String?               @map("sync_error")
+  lastSyncedAt    DateTime?             @map("last_synced_at")
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+
+  tutor         Tutor          @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  pet           Pet?           @relation(fields: [petId], references: [id], onDelete: SetNull)
+  notifications Notification[]
+
+  @@index([tutorId, scheduledAt])
+  @@index([syncStatus])
+  @@map("appointment")
+}
+
+model Notification {
+  id            String             @id @default(uuid())
+  tutorId       String             @map("tutor_id")
+  appointmentId String?            @map("appointment_id")
+  kind          NotificationKind
+  referenceType String             @map("reference_type")
+  referenceId   String             @map("reference_id")
+  payload       Json
+  metadata      Json?
+  fcmMessageId  String?            @map("fcm_message_id")
+  status        NotificationStatus @default(PENDING)
+  errorCode     String?            @map("error_code")
+  sentAt        DateTime?          @map("sent_at")
+  createdAt     DateTime           @default(now()) @map("created_at")
+
+  tutor       Tutor        @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  @@index([tutorId, createdAt])
+  @@index([referenceType, referenceId])
+  @@map("notification")
 }
