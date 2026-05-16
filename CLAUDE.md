@@ -66,18 +66,18 @@ Conectar a API a serviços externos que fecham o loop de produto sem o tutor pre
 - Painel do veterinário no `petcard-web` (continua aguardando milestone própria).
 - Hardening de produção (rate-limit global, helmet, payload size) — não é integração; entra em M5 se o cronograma permitir.
 
-### Decisões de arquitetura a tomar (antes de codar)
+### Decisões de arquitetura M4 (fechadas em 2026-05-16)
 
-Perguntar ao Ricardo se faltar contexto — não inventar:
+Sessão de decisão com Ricardo em 2026-05-16. Detalhamento completo (motivação + alternativas rejeitadas) em `petcard-docs/architecture/adr/002-m4-integracoes-externas.md`.
 
-1. **Trigger das notificações de próxima dose:** cron único (ex.: diário às 08:00 no fuso do tutor) ou job-on-write quando `next_dose_at` é setado/atualizado? Recomendação inicial: cron diário, simples; idempotência via campo `last_notified_at` no model.
-2. **Modelo de device token:** tabela nova `device_token` (id, tutorId, token, platform, createdAt, lastSeenAt)? Relação 1:N tutor→tokens (mesmo tutor em vários devices).
-3. **Fila de saída para push:** publicar no RabbitMQ (`notification.push` com DLX/DLQ, padrão da `qr-code.generate`) ou chamar FCM síncrono dentro do cron? Recomendação: fila — desacopla cron de latência/falha do FCM, e a topologia DLX/DLQ já está pronta para reuso.
-4. **Storage dos OAuth tokens do Google:** novo model `google_oauth_token` (tutorId UNIQUE, accessToken encrypted, refreshToken encrypted, expiresAt, scopes). Chave de criptografia em env separada (não reusar JWT_SECRET).
-5. **Fuso horário:** `next_dose_at` está em UTC hoje? Push e Calendar precisam do fuso do tutor — adicionar `timezone` no `tutor` (default `America/Fortaleza`?).
-6. **Re-notificação:** se o tutor não abrir o push, manda de novo no dia seguinte? Política de retry de notificação é separada do retry de fila — pensar como negócio, não como infra.
-7. **Falha do FCM/Google:** API nunca pode derrubar uma chamada de tutor por causa de integração externa cair. Garantir caminho de degradação em todos os endpoints novos.
-8. **Credenciais Firebase:** `FIREBASE_PRIVATE_KEY` no `.env.example` está como string — em produção, secret manager ou volume montado? Decidir antes do deploy.
+1. **Trigger das notificações de próxima dose:** cron diário no fuso do tutor, varrendo `vaccine/deworming/medication` com `next_dose_at` na janela X dias e ainda não notificado. Idempotência via campo `last_notified_at` no model. Rejeitados: job-on-write (exige scheduler persistente) e híbrido (complexidade sem ganho).
+2. **Modelo de device token:** tabela `device_token` com `id, tutorId, token (UNIQUE), platform, createdAt, lastSeenAt`. Relação 1:N tutor→tokens (multi-device). Soft-invalida tokens que o FCM retornar como não-registrados.
+3. **Fila de saída para push:** RabbitMQ `notification.push` com DLX/DLQ + headers `x-retry-count`, reusando topologia da `qr-code.generate`. Cron só publica; worker (PC-068) chama FCM.
+4. **Storage dos OAuth tokens do Google:** model `google_oauth_token` (`tutorId UNIQUE, accessToken encrypted, refreshToken encrypted, expiresAt, scopes[]`). Criptografia AES-256-GCM. `ENCRYPTION_KEY` em env separada — NUNCA reusar `JWT_SECRET`. Rotação documentada em ADR-002.
+5. **Fuso horário:** coluna `tutor.timezone` (nullable, default `America/Fortaleza`), exposta em `PATCH /tutor/me`. Cron e Calendar leem este campo.
+6. **Re-notificação:** 1 push por dose, sem retry no MVP. `last_notified_at` evita reenvio. Política mais agressiva (escalonado 7d/1d/0d) fica para M5+ se houver demanda.
+7. **Falha do FCM/Google:** log ERROR + métrica + mensagem na DLQ. Request do tutor nunca falha por causa de integração externa, EXCETO `POST /auth/google/connect` (objetivo da request _é_ a integração — aí pode retornar 502).
+8. **Credenciais Firebase em produção:** AWS Secrets Manager com carregamento no boot via IAM role do ECS Fargate (alinhado com PC-092). Dev usa arquivo local apontado em `.env`. Falha rápida no boot se o secret não puder ser lido.
 
 ### Padrões específicos da M4
 
@@ -165,4 +165,4 @@ open http://localhost:3000/auth/google/connect
 
 ## Última atualização
 
-2026-05-14 — pós-fechamento da auditoria M0-M3. M4 = Integrações Externas (Firebase push + Google Calendar). Decisões de arquitetura ainda pendentes — ver lista numerada acima.
+2026-05-16 — decisões de arquitetura M4 (#1-#8) fechadas em sessão com Ricardo; ver lista numerada acima e ADR-002 (`petcard-docs/architecture/adr/002-m4-integracoes-externas.md`). Próximo passo: abrir PC-072 (migrations) seguindo a ordem PC-072 → PC-066 → PC-068 → PC-067 → PC-064 → PC-069 → PC-065.
