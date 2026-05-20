@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { appConfig } from './config/app.config';
@@ -9,6 +10,7 @@ import { cardConfig } from './config/card.config';
 import { firebaseConfig } from './config/firebase.config';
 import { googleMapsConfig } from './config/google-maps.config';
 import { rabbitmqConfig } from './config/rabbitmq.config';
+import { reminderConfig } from './config/reminder.config';
 import { AuthModule } from './modules/auth/auth.module';
 import { CardModule } from './modules/card/card.module';
 import { ClinicaModule } from './modules/clinica/clinica.module';
@@ -18,6 +20,7 @@ import { VaccineModule } from './modules/health/vaccine/vaccine.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { PetModule } from './modules/pet/pet.module';
 import { QueueModule } from './modules/queue/queue.module';
+import { ReminderModule } from './modules/reminder/reminder.module';
 import { TutorModule } from './modules/tutor/tutor.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -34,8 +37,10 @@ import { PrismaModule } from './prisma/prisma.module';
         firebaseConfig,
         googleMapsConfig,
         rabbitmqConfig,
+        reminderConfig,
       ],
     }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
     CardModule,
@@ -48,6 +53,7 @@ import { PrismaModule } from './prisma/prisma.module';
     QueueModule,
     ClinicaModule,
     NotificationModule,
+    ReminderModule,
   ],
   controllers: [AppController],
   providers: [AppService],
