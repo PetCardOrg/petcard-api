@@ -6,6 +6,7 @@ import { appConfig } from './config/app.config';
 import { authConfig } from './config/auth.config';
 import { awsConfig } from './config/aws.config';
 import { cardConfig } from './config/card.config';
+import { firebaseConfig } from './config/firebase.config';
 import { googleMapsConfig } from './config/google-maps.config';
 import { rabbitmqConfig } from './config/rabbitmq.config';
 import { AuthModule } from './modules/auth/auth.module';
@@ -14,6 +15,7 @@ import { ClinicaModule } from './modules/clinica/clinica.module';
 import { DewormingModule } from './modules/health/deworming/deworming.module';
 import { MedicationModule } from './modules/health/medication/medication.module';
 import { VaccineModule } from './modules/health/vaccine/vaccine.module';
+import { NotificationModule } from './modules/notification/notification.module';
 import { PetModule } from './modules/pet/pet.module';
 import { QueueModule } from './modules/queue/queue.module';
 import { TutorModule } from './modules/tutor/tutor.module';
@@ -29,6 +31,7 @@ import { PrismaModule } from './prisma/prisma.module';
         authConfig,
         awsConfig,
         cardConfig,
+        firebaseConfig,
         googleMapsConfig,
         rabbitmqConfig,
       ],
@@ -44,6 +47,7 @@ import { PrismaModule } from './prisma/prisma.module';
     UploadModule,
     QueueModule,
     ClinicaModule,
+    NotificationModule,
   ],
   controllers: [AppController],
   providers: [AppService],

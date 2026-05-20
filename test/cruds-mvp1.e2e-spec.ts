@@ -22,17 +22,20 @@ import { PrismaService } from '../src/prisma/prisma.service';
 type Ctx = {
   sub: string;
   email: string;
+  role: 'TUTOR' | 'VET';
   permissions: string[];
 };
 
 const tutorCtx: Ctx = {
   sub: 'auth0|tutor-1',
   email: 'tutor@petcard.com',
+  role: 'TUTOR',
   permissions: ['TUTOR'],
 };
 const vetCtx: Ctx = {
   sub: 'auth0|vet-1',
   email: 'vet@petcard.com',
+  role: 'VET',
   permissions: ['VET'],
 };
 

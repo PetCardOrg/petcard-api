@@ -3,9 +3,13 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { CardModule } from '../card/card.module';
 import { UploadModule } from '../upload/upload.module';
+import { NotificationPushPublisher } from './notification-push.publisher';
 import { QrCodeConsumer } from './qr-code.consumer';
 import { QrCodePublisher } from './qr-code.publisher';
 import {
+  NOTIFICATION_PUSH_CLIENT,
+  NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
+  NOTIFICATION_PUSH_DLX,
   QR_CODE_CLIENT,
   QR_CODE_DLQ_ROUTING_KEY,
   QR_CODE_DLX,
@@ -38,10 +42,34 @@ import { RabbitMqTopologyService } from './rabbitmq-topology.service';
           },
         }),
       },
+      {
+        name: NOTIFICATION_PUSH_CLIENT,
+        imports: [ConfigModule],
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [config.get<string>('rabbitmq.url')!],
+            queue: config.get<string>('rabbitmq.notificationPushQueue')!,
+            queueOptions: {
+              durable: true,
+              arguments: {
+                'x-dead-letter-exchange': NOTIFICATION_PUSH_DLX,
+                'x-dead-letter-routing-key': NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
+              },
+            },
+            persistent: true,
+          },
+        }),
+      },
     ]),
   ],
   controllers: [QrCodeConsumer],
-  providers: [QrCodePublisher, RabbitMqTopologyService],
-  exports: [QrCodePublisher],
+  providers: [
+    QrCodePublisher,
+    NotificationPushPublisher,
+    RabbitMqTopologyService,
+  ],
+  exports: [QrCodePublisher, NotificationPushPublisher],
 })
 export class QueueModule {}

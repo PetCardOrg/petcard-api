@@ -32,6 +32,11 @@ enum AppointmentSyncStatus {
   FAILED
 }
 
+enum DevicePlatform {
+  IOS
+  ANDROID
+}
+
 enum NotificationKind {
   DOSE_REMINDER
   APPOINTMENT_REMINDER
@@ -58,8 +63,23 @@ model Tutor {
   pets          Pet[]
   appointments  Appointment[]
   notifications Notification[]
+  deviceTokens  DeviceToken[]
 
   @@map("tutor")
+}
+
+model DeviceToken {
+  id         String         @id @default(uuid())
+  tutorId    String         @map("tutor_id")
+  token      String         @unique
+  platform   DevicePlatform
+  createdAt  DateTime       @default(now()) @map("created_at")
+  lastSeenAt DateTime       @default(now()) @updatedAt @map("last_seen_at")
+
+  tutor Tutor @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+  @@index([tutorId])
+  @@map("device_token")
 }
 
 model Pet {
