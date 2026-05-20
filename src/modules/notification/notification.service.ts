@@ -55,6 +55,24 @@ export class NotificationService {
     await this.prisma.deviceToken.deleteMany({ where: { token } });
   }
 
+  async markSent(notificationId: string, fcmMessageId?: string): Promise<void> {
+    await this.prisma.notification.update({
+      where: { id: notificationId },
+      data: {
+        status: NotificationStatus.SENT,
+        fcmMessageId: fcmMessageId ?? null,
+        sentAt: new Date(),
+      },
+    });
+  }
+
+  async markFailed(notificationId: string, errorCode: string): Promise<void> {
+    await this.prisma.notification.update({
+      where: { id: notificationId },
+      data: { status: NotificationStatus.FAILED, errorCode },
+    });
+  }
+
   async schedulePush(input: SchedulePushInput): Promise<Notification[]> {
     const tokens = await this.prisma.deviceToken.findMany({
       where: { tutorId: input.tutorId },

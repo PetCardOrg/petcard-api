@@ -14,7 +14,7 @@ describe('NotificationService', () => {
       findMany: jest.Mock;
       deleteMany: jest.Mock;
     };
-    notification: { create: jest.Mock };
+    notification: { create: jest.Mock; update: jest.Mock };
   };
   let publisher: { publish: jest.Mock };
 
@@ -26,7 +26,7 @@ describe('NotificationService', () => {
         findMany: jest.fn(),
         deleteMany: jest.fn(),
       },
-      notification: { create: jest.fn() },
+      notification: { create: jest.fn(), update: jest.fn() },
     };
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
 
@@ -155,6 +155,43 @@ describe('NotificationService', () => {
 
       expect(result).toHaveLength(1);
       expect(prisma.notification.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('markSent', () => {
+    it('updates the notification to SENT with fcmMessageId and sentAt', async () => {
+      await service.markSent('n1', 'msg-123');
+
+      expect(prisma.notification.update).toHaveBeenCalledWith({
+        where: { id: 'n1' },
+        data: expect.objectContaining({
+          status: 'SENT',
+          fcmMessageId: 'msg-123',
+        }) as unknown,
+      });
+    });
+
+    it('stores null fcmMessageId when none is provided (FCM disabled)', async () => {
+      await service.markSent('n1');
+
+      expect(prisma.notification.update).toHaveBeenCalledWith({
+        where: { id: 'n1' },
+        data: expect.objectContaining({
+          status: 'SENT',
+          fcmMessageId: null,
+        }) as unknown,
+      });
+    });
+  });
+
+  describe('markFailed', () => {
+    it('updates the notification to FAILED with the error code', async () => {
+      await service.markFailed('n1', 'messaging/server-unavailable');
+
+      expect(prisma.notification.update).toHaveBeenCalledWith({
+        where: { id: 'n1' },
+        data: { status: 'FAILED', errorCode: 'messaging/server-unavailable' },
+      });
     });
   });
 });
