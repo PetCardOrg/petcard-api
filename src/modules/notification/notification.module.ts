@@ -3,11 +3,12 @@ import { AuthModule } from '../auth/auth.module';
 import { TutorModule } from '../tutor/tutor.module';
 import { DevicesController } from './devices.controller';
 import { FcmClient } from './fcm.client';
+import { NotificationPushConsumer } from './notification-push.consumer';
 import { NotificationService } from './notification.service';
 
 @Module({
   imports: [AuthModule, TutorModule],
-  controllers: [DevicesController],
+  controllers: [DevicesController, NotificationPushConsumer],
   providers: [FcmClient, NotificationService],
   exports: [FcmClient, NotificationService],
 })
