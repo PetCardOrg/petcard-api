@@ -2,37 +2,24 @@ import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtStrategy, JwtPayload } from '../strategies/jwt.strategy';
 import { Role } from '../enums/role.enum';
-import { TutorService } from '../../tutor/tutor.service';
-
-// Mock jwks-rsa para não fazer chamadas HTTP reais
-jest.mock('jwks-rsa', () => ({
-  passportJwtSecret: jest.fn().mockReturnValue(() => 'mock-secret'),
-}));
 
 describe('JwtStrategy', () => {
   let strategy: JwtStrategy;
-  let tutorService: { findOrCreate: jest.Mock };
 
   const mockConfigService = {
     get: jest.fn((key: string) => {
       const config: Record<string, string> = {
-        'auth.domain': 'petcard-test.us.auth0.com',
-        'auth.audience': 'https://api.petcard.com',
+        'auth.jwtSecret': 'test-secret',
       };
       return config[key];
     }),
   };
 
   beforeEach(async () => {
-    tutorService = {
-      findOrCreate: jest.fn().mockResolvedValue({ role: Role.TUTOR }),
-    };
-
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         JwtStrategy,
         { provide: ConfigService, useValue: mockConfigService },
-        { provide: TutorService, useValue: tutorService },
       ],
     }).compile();
 
@@ -44,40 +31,34 @@ describe('JwtStrategy', () => {
   });
 
   describe('validate', () => {
-    it('should return the payload with sub, email, and role from the database', async () => {
-      tutorService.findOrCreate.mockResolvedValueOnce({ role: Role.VET });
+    it('should return the payload with sub, email, and role', () => {
       const payload: JwtPayload = {
-        sub: 'auth0|abc123',
+        sub: 'tutor-uuid-123',
         email: 'vet@petcard.com',
+        role: Role.VET,
       };
 
-      const result = await strategy.validate(payload);
+      const result = strategy.validate(payload);
 
       expect(result).toEqual({
-        sub: 'auth0|abc123',
+        sub: 'tutor-uuid-123',
         email: 'vet@petcard.com',
         role: Role.VET,
       });
-      expect(tutorService.findOrCreate).toHaveBeenCalledWith(
-        'auth0|abc123',
-        'vet@petcard.com',
-        'vet',
-      );
     });
 
-    it('should handle payload with only sub (no email, no role)', async () => {
+    it('should handle payload with only sub', () => {
       const payload: JwtPayload = {
-        sub: 'auth0|minimal',
+        sub: 'tutor-uuid-456',
       };
 
-      const result = await strategy.validate(payload);
+      const result = strategy.validate(payload);
 
       expect(result).toEqual({
-        sub: 'auth0|minimal',
+        sub: 'tutor-uuid-456',
         email: undefined,
         role: undefined,
       });
-      expect(tutorService.findOrCreate).not.toHaveBeenCalled();
     });
   });
 });

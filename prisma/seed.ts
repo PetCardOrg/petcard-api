@@ -1,24 +1,24 @@
 import { PrismaClient, Role, Species, Sex } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
+const SEED_PASSWORD = 'petcard123';
+
 const tutors = [
   {
-    auth0Id: 'auth0|a1b2c3d4e5f6000000000001',
     name: 'Ana Carolina Silva',
     email: 'ana.silva@example.com',
     phone: '+5511987654321',
     role: Role.TUTOR,
   },
   {
-    auth0Id: 'auth0|a1b2c3d4e5f6000000000002',
     name: 'Bruno Henrique Costa',
     email: 'bruno.costa@example.com',
     phone: '+5521991234567',
     role: Role.TUTOR,
   },
   {
-    auth0Id: 'auth0|a1b2c3d4e5f6000000000003',
     name: 'Dra. Camila Ferreira',
     email: 'camila.ferreira@vet.example.com',
     phone: '+5531988887777',
@@ -33,7 +33,7 @@ type PetSeed = {
   sex: Sex;
   birthDate: Date;
   weight: number;
-  tutorAuth0Id: string;
+  tutorEmail: string;
 };
 
 const pets: PetSeed[] = [
@@ -44,7 +44,7 @@ const pets: PetSeed[] = [
     sex: Sex.MALE,
     birthDate: new Date('2021-05-12'),
     weight: 28.5,
-    tutorAuth0Id: 'auth0|a1b2c3d4e5f6000000000001',
+    tutorEmail: 'ana.silva@example.com',
   },
   {
     name: 'Mel',
@@ -53,7 +53,7 @@ const pets: PetSeed[] = [
     sex: Sex.FEMALE,
     birthDate: new Date('2022-09-03'),
     weight: 6.2,
-    tutorAuth0Id: 'auth0|a1b2c3d4e5f6000000000001',
+    tutorEmail: 'ana.silva@example.com',
   },
   {
     name: 'Luna',
@@ -62,7 +62,7 @@ const pets: PetSeed[] = [
     sex: Sex.FEMALE,
     birthDate: new Date('2020-11-20'),
     weight: 4.1,
-    tutorAuth0Id: 'auth0|a1b2c3d4e5f6000000000002',
+    tutorEmail: 'bruno.costa@example.com',
   },
   {
     name: 'Simba',
@@ -71,7 +71,7 @@ const pets: PetSeed[] = [
     sex: Sex.MALE,
     birthDate: new Date('2023-02-14'),
     weight: 3.8,
-    tutorAuth0Id: 'auth0|a1b2c3d4e5f6000000000002',
+    tutorEmail: 'bruno.costa@example.com',
   },
   {
     name: 'Kiko',
@@ -80,7 +80,7 @@ const pets: PetSeed[] = [
     sex: Sex.MALE,
     birthDate: new Date('2023-06-01'),
     weight: 0.09,
-    tutorAuth0Id: 'auth0|a1b2c3d4e5f6000000000001',
+    tutorEmail: 'ana.silva@example.com',
   },
 ];
 
@@ -231,30 +231,32 @@ const medications: MedicationSeed[] = [
 async function main() {
   console.log('🌱 Iniciando seed do banco de dados...');
 
+  const hashedPassword = await bcrypt.hash(SEED_PASSWORD, 10);
+
   await prisma.$transaction(async (tx) => {
     for (const tutor of tutors) {
       await tx.tutor.upsert({
-        where: { auth0Id: tutor.auth0Id },
+        where: { email: tutor.email },
         update: {
           name: tutor.name,
-          email: tutor.email,
           phone: tutor.phone,
           role: tutor.role,
         },
-        create: tutor,
+        create: { ...tutor, password: hashedPassword },
       });
     }
-    console.log(`✅ ${tutors.length} tutores criados/atualizados`);
+    console.log(
+      `✅ ${tutors.length} tutores criados/atualizados (senha: ${SEED_PASSWORD})`,
+    );
 
-    const tutorByAuth0 = new Map<string, string>();
+    const tutorByEmail = new Map<string, string>();
     for (const t of await tx.tutor.findMany()) {
-      tutorByAuth0.set(t.auth0Id, t.id);
+      tutorByEmail.set(t.email, t.id);
     }
 
     for (const pet of pets) {
-      const tutorId = tutorByAuth0.get(pet.tutorAuth0Id);
-      if (!tutorId)
-        throw new Error(`Tutor não encontrado: ${pet.tutorAuth0Id}`);
+      const tutorId = tutorByEmail.get(pet.tutorEmail);
+      if (!tutorId) throw new Error(`Tutor não encontrado: ${pet.tutorEmail}`);
 
       const existing = await tx.pet.findFirst({
         where: { name: pet.name, tutorId },

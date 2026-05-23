@@ -62,14 +62,14 @@ describe('VaccineService', () => {
     it('should check pet access before creating the record', async () => {
       prisma.vaccineRecord.create.mockResolvedValue(record);
 
-      await service.create('pet-1', 'auth0|abc', false, {
+      await service.create('pet-1', 'tutor-1', false, {
         vaccine_name: 'Rabies',
         applied_at: '2026-01-01',
       });
 
       expect(petService.assertAccess).toHaveBeenCalledWith(
         'pet-1',
-        'auth0|abc',
+        'tutor-1',
         false,
       );
       expect(prisma.vaccineRecord.create).toHaveBeenCalled();
@@ -80,11 +80,11 @@ describe('VaccineService', () => {
     it('should return all records for the pet', async () => {
       prisma.vaccineRecord.findMany.mockResolvedValue([record]);
 
-      const result = await service.findAllForPet('pet-1', 'auth0|abc', true);
+      const result = await service.findAllForPet('pet-1', 'tutor-1', true);
 
       expect(petService.assertAccess).toHaveBeenCalledWith(
         'pet-1',
-        'auth0|abc',
+        'tutor-1',
         true,
       );
       expect(result).toEqual([
@@ -108,7 +108,7 @@ describe('VaccineService', () => {
       prisma.vaccineRecord.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.update('missing', 'auth0|abc', false, {}),
+        service.update('missing', 'tutor-1', false, {}),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -119,7 +119,7 @@ describe('VaccineService', () => {
         vaccineName: 'Rabies Plus',
       });
 
-      const result = await service.update('vac-1', 'auth0|abc', false, {
+      const result = await service.update('vac-1', 'tutor-1', false, {
         vaccine_name: 'Rabies Plus',
       });
 
@@ -132,11 +132,11 @@ describe('VaccineService', () => {
       prisma.vaccineRecord.findUnique.mockResolvedValue(record);
       prisma.vaccineRecord.delete.mockResolvedValue(record);
 
-      await service.remove('vac-1', 'auth0|abc');
+      await service.remove('vac-1', 'tutor-1');
 
       expect(petService.assertOwnership).toHaveBeenCalledWith(
         'pet-1',
-        'auth0|abc',
+        'tutor-1',
       );
       expect(prisma.vaccineRecord.delete).toHaveBeenCalledWith({
         where: { id: 'vac-1' },

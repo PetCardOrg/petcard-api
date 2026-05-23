@@ -45,12 +45,12 @@ describe('CardController', () => {
       cardService.findByPetIdForTutor.mockResolvedValue(dto);
 
       const result = await controller.getCardByPetId('pet-1', {
-        sub: 'auth0|tutor-1',
+        sub: 'tutor-1',
       });
 
       expect(cardService.findByPetIdForTutor).toHaveBeenCalledWith(
         'pet-1',
-        'auth0|tutor-1',
+        'tutor-1',
       );
       expect(result).toBe(dto);
     });

@@ -139,9 +139,9 @@ export class CardService {
 
   async findByPetIdForTutor(
     petId: string,
-    auth0Id: string,
+    userId: string,
   ): Promise<CarteiraDigitalFullResponseDto> {
-    const tutor = await this.tutorService.findByAuth0Id(auth0Id);
+    const tutor = await this.tutorService.findById(userId);
     const pet = await this.prisma.pet.findUnique({
       where: { id: petId },
       include: {

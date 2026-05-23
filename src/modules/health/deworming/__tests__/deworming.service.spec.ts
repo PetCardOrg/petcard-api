@@ -61,7 +61,7 @@ describe('DewormingService', () => {
   it('should create a record after access check', async () => {
     prisma.dewormingRecord.create.mockResolvedValue(record);
 
-    await service.create('pet-1', 'auth0|abc', false, {
+    await service.create('pet-1', 'tutor-1', false, {
       product_name: 'Drontal',
       applied_at: '2026-01-01',
     });
@@ -73,7 +73,7 @@ describe('DewormingService', () => {
   it('should list records for a pet', async () => {
     prisma.dewormingRecord.findMany.mockResolvedValue([record]);
 
-    const result = await service.findAllForPet('pet-1', 'auth0|abc', false);
+    const result = await service.findAllForPet('pet-1', 'tutor-1', false);
 
     expect(result).toEqual([
       {
@@ -94,7 +94,7 @@ describe('DewormingService', () => {
     prisma.dewormingRecord.findUnique.mockResolvedValue(null);
 
     await expect(
-      service.update('missing', 'auth0|abc', false, {}),
+      service.update('missing', 'tutor-1', false, {}),
     ).rejects.toThrow(NotFoundException);
   });
 
@@ -102,11 +102,8 @@ describe('DewormingService', () => {
     prisma.dewormingRecord.findUnique.mockResolvedValue(record);
     prisma.dewormingRecord.delete.mockResolvedValue(record);
 
-    await service.remove('dew-1', 'auth0|abc');
+    await service.remove('dew-1', 'tutor-1');
 
-    expect(petService.assertOwnership).toHaveBeenCalledWith(
-      'pet-1',
-      'auth0|abc',
-    );
+    expect(petService.assertOwnership).toHaveBeenCalledWith('pet-1', 'tutor-1');
   });
 });

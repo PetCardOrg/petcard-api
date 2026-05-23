@@ -11,7 +11,10 @@ import { firebaseConfig } from './config/firebase.config';
 import { googleMapsConfig } from './config/google-maps.config';
 import { rabbitmqConfig } from './config/rabbitmq.config';
 import { reminderConfig } from './config/reminder.config';
+import { googleCalendarConfig } from './config/google-calendar.config';
+import { AppointmentModule } from './modules/appointment/appointment.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CalendarModule } from './modules/calendar/calendar.module';
 import { CardModule } from './modules/card/card.module';
 import { ClinicaModule } from './modules/clinica/clinica.module';
 import { DewormingModule } from './modules/health/deworming/deworming.module';
@@ -38,11 +41,14 @@ import { PrismaModule } from './prisma/prisma.module';
         googleMapsConfig,
         rabbitmqConfig,
         reminderConfig,
+        googleCalendarConfig,
       ],
     }),
     ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
+    AppointmentModule,
+    CalendarModule,
     CardModule,
     TutorModule,
     PetModule,

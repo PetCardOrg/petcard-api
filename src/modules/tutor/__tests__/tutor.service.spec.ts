@@ -7,7 +7,6 @@ describe('TutorService', () => {
   let service: TutorService;
   let prisma: {
     tutor: {
-      upsert: jest.Mock;
       findUnique: jest.Mock;
       update: jest.Mock;
     };
@@ -15,12 +14,13 @@ describe('TutorService', () => {
 
   const tutorFixture = {
     id: 'tutor-1',
-    auth0Id: 'auth0|123',
     name: 'Alice',
     email: 'alice@example.com',
+    password: 'hashed',
     phone: null,
     profileImageUrl: null,
     role: 'TUTOR',
+    timezone: 'America/Fortaleza',
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -28,7 +28,6 @@ describe('TutorService', () => {
   beforeEach(async () => {
     prisma = {
       tutor: {
-        upsert: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
       },
@@ -41,48 +40,15 @@ describe('TutorService', () => {
     service = module.get<TutorService>(TutorService);
   });
 
-  describe('findOrCreate', () => {
-    it('should upsert a tutor by auth0Id', async () => {
-      prisma.tutor.upsert.mockResolvedValue(tutorFixture);
-
-      const result = await service.findOrCreate(
-        'auth0|123',
-        'alice@example.com',
-        'Alice',
-      );
-
-      expect(prisma.tutor.upsert).toHaveBeenCalledWith({
-        where: { auth0Id: 'auth0|123' },
-        update: {},
-        create: {
-          auth0Id: 'auth0|123',
-          email: 'alice@example.com',
-          name: 'Alice',
-        },
-      });
-      expect(result).toBe(tutorFixture);
-    });
-  });
-
-  describe('findByAuth0Id', () => {
+  describe('findById', () => {
     it('should return the tutor when found', async () => {
       prisma.tutor.findUnique.mockResolvedValue(tutorFixture);
 
-      const result = await service.findByAuth0Id('auth0|123');
+      const result = await service.findById('tutor-1');
 
       expect(result).toBe(tutorFixture);
     });
 
-    it('should throw NotFoundException when tutor is missing', async () => {
-      prisma.tutor.findUnique.mockResolvedValue(null);
-
-      await expect(service.findByAuth0Id('auth0|missing')).rejects.toThrow(
-        NotFoundException,
-      );
-    });
-  });
-
-  describe('findById', () => {
     it('should throw NotFoundException when tutor is missing', async () => {
       prisma.tutor.findUnique.mockResolvedValue(null);
 
@@ -92,7 +58,25 @@ describe('TutorService', () => {
     });
   });
 
-  describe('updateByAuth0Id', () => {
+  describe('findByEmail', () => {
+    it('should return the tutor when found', async () => {
+      prisma.tutor.findUnique.mockResolvedValue(tutorFixture);
+
+      const result = await service.findByEmail('alice@example.com');
+
+      expect(result).toBe(tutorFixture);
+    });
+
+    it('should return null when not found', async () => {
+      prisma.tutor.findUnique.mockResolvedValue(null);
+
+      const result = await service.findByEmail('missing@example.com');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('updateById', () => {
     it('should update the tutor profile', async () => {
       prisma.tutor.findUnique.mockResolvedValue(tutorFixture);
       prisma.tutor.update.mockResolvedValue({
@@ -100,12 +84,12 @@ describe('TutorService', () => {
         name: 'Alice Updated',
       });
 
-      const result = await service.updateByAuth0Id('auth0|123', {
+      const result = await service.updateById('tutor-1', {
         name: 'Alice Updated',
       });
 
       expect(prisma.tutor.update).toHaveBeenCalledWith({
-        where: { auth0Id: 'auth0|123' },
+        where: { id: 'tutor-1' },
         data: { name: 'Alice Updated' },
       });
       expect(result.name).toBe('Alice Updated');

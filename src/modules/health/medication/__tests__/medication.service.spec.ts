@@ -62,7 +62,7 @@ describe('MedicationService', () => {
   it('should create a medication after access check', async () => {
     prisma.medicationRecord.create.mockResolvedValue(record);
 
-    await service.create('pet-1', 'auth0|abc', true, {
+    await service.create('pet-1', 'tutor-1', true, {
       medication_name: 'Amoxicillin',
       dosage: '500mg',
       frequency: '8h',
@@ -71,7 +71,7 @@ describe('MedicationService', () => {
 
     expect(petService.assertAccess).toHaveBeenCalledWith(
       'pet-1',
-      'auth0|abc',
+      'tutor-1',
       true,
     );
     expect(prisma.medicationRecord.create).toHaveBeenCalled();
@@ -80,7 +80,7 @@ describe('MedicationService', () => {
   it('should list records ordered by start date', async () => {
     prisma.medicationRecord.findMany.mockResolvedValue([record]);
 
-    const result = await service.findAllForPet('pet-1', 'auth0|abc', false);
+    const result = await service.findAllForPet('pet-1', 'tutor-1', false);
 
     expect(prisma.medicationRecord.findMany).toHaveBeenCalledWith({
       where: { petId: 'pet-1' },
@@ -106,7 +106,7 @@ describe('MedicationService', () => {
     prisma.medicationRecord.findUnique.mockResolvedValue(null);
 
     await expect(
-      service.update('missing', 'auth0|abc', false, {}),
+      service.update('missing', 'tutor-1', false, {}),
     ).rejects.toThrow(NotFoundException);
   });
 
@@ -114,7 +114,7 @@ describe('MedicationService', () => {
     prisma.medicationRecord.findUnique.mockResolvedValue(record);
     prisma.medicationRecord.delete.mockResolvedValue(record);
 
-    await service.remove('med-1', 'auth0|abc');
+    await service.remove('med-1', 'tutor-1');
 
     expect(prisma.medicationRecord.delete).toHaveBeenCalledWith({
       where: { id: 'med-1' },
