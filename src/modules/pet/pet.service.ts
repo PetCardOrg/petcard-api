@@ -60,8 +60,8 @@ export class PetService {
     }
   }
 
-  async create(auth0Id: string, dto: PetInput): Promise<PetResponseDto> {
-    const tutor = await this.tutorService.findByAuth0Id(auth0Id);
+  async create(userId: string, dto: PetInput): Promise<PetResponseDto> {
+    await this.tutorService.findById(userId);
     const pet = await this.prisma.pet.create({
       data: {
         name: dto.name,
@@ -71,7 +71,7 @@ export class PetService {
         birthDate: dto.birth_date ? new Date(dto.birth_date) : null,
         weight: dto.weight,
         photoUrl: dto.photo_url,
-        tutorId: tutor.id,
+        tutorId: userId,
       },
     });
 
@@ -80,15 +80,14 @@ export class PetService {
     return this.findById(pet.id);
   }
 
-  async regenerateQrCode(petId: string, auth0Id: string): Promise<void> {
-    await this.assertOwnership(petId, auth0Id);
+  async regenerateQrCode(petId: string, userId: string): Promise<void> {
+    await this.assertOwnership(petId, userId);
     await this.enqueueQrCodeGeneration(petId);
   }
 
-  async findAllForTutor(auth0Id: string): Promise<PetResponseDto[]> {
-    const tutor = await this.tutorService.findByAuth0Id(auth0Id);
+  async findAllForTutor(userId: string): Promise<PetResponseDto[]> {
     const pets = await this.prisma.pet.findMany({
-      where: { tutorId: tutor.id },
+      where: { tutorId: userId },
       include: { carteiraDigital: true },
     });
     return pets.map(toResponseDto);
@@ -96,7 +95,7 @@ export class PetService {
 
   async findOne(
     id: string,
-    auth0Id: string,
+    userId: string,
     isVet: boolean,
   ): Promise<PetResponseDto> {
     const pet = await this.prisma.pet.findUnique({
@@ -106,21 +105,18 @@ export class PetService {
     if (!pet) {
       throw new NotFoundException(`Pet with id ${id} not found`);
     }
-    if (!isVet) {
-      const tutor = await this.tutorService.findByAuth0Id(auth0Id);
-      if (pet.tutorId !== tutor.id) {
-        throw new ForbiddenException('You do not own this pet');
-      }
+    if (!isVet && pet.tutorId !== userId) {
+      throw new ForbiddenException('You do not own this pet');
     }
     return toResponseDto(pet);
   }
 
   async update(
     id: string,
-    auth0Id: string,
+    userId: string,
     dto: Omit<UpdatePetDto, 'tutor_id'>,
   ): Promise<PetResponseDto> {
-    await this.assertOwnership(id, auth0Id);
+    await this.assertOwnership(id, userId);
     const pet = await this.prisma.pet.update({
       where: { id },
       data: {
@@ -145,18 +141,17 @@ export class PetService {
     return toResponseDto(pet);
   }
 
-  async remove(id: string, auth0Id: string): Promise<void> {
-    await this.assertOwnership(id, auth0Id);
+  async remove(id: string, userId: string): Promise<void> {
+    await this.assertOwnership(id, userId);
     await this.prisma.pet.delete({ where: { id } });
   }
 
-  async assertOwnership(petId: string, auth0Id: string): Promise<Pet> {
+  async assertOwnership(petId: string, userId: string): Promise<Pet> {
     const pet = await this.prisma.pet.findUnique({ where: { id: petId } });
     if (!pet) {
       throw new NotFoundException(`Pet with id ${petId} not found`);
     }
-    const tutor = await this.tutorService.findByAuth0Id(auth0Id);
-    if (pet.tutorId !== tutor.id) {
+    if (pet.tutorId !== userId) {
       throw new ForbiddenException('You do not own this pet');
     }
     return pet;
@@ -164,7 +159,7 @@ export class PetService {
 
   async assertAccess(
     petId: string,
-    auth0Id: string,
+    userId: string,
     isVet: boolean,
   ): Promise<Pet> {
     if (isVet) {
@@ -174,6 +169,6 @@ export class PetService {
       }
       return pet;
     }
-    return this.assertOwnership(petId, auth0Id);
+    return this.assertOwnership(petId, userId);
   }
 }

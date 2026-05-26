@@ -50,9 +50,9 @@ enum NotificationStatus {
 
 model Tutor {
   id              String   @id @default(uuid())
-  auth0Id         String   @unique @map("auth0_id")
   name            String
   email           String   @unique
+  password        String
   phone           String?
   profileImageUrl String?  @map("profile_image_url")
   role            Role     @default(TUTOR)
@@ -60,12 +60,28 @@ model Tutor {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  pets          Pet[]
-  appointments  Appointment[]
-  notifications Notification[]
-  deviceTokens  DeviceToken[]
+  pets               Pet[]
+  appointments       Appointment[]
+  notifications      Notification[]
+  deviceTokens       DeviceToken[]
+  googleOAuthToken   GoogleOAuthToken?
 
   @@map("tutor")
+}
+
+model GoogleOAuthToken {
+  id           String   @id @default(uuid())
+  tutorId      String   @unique @map("tutor_id")
+  accessToken  String   @map("access_token")
+  refreshToken String   @map("refresh_token")
+  expiresAt    DateTime @map("expires_at")
+  scopes       String[] @default([])
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tutor Tutor @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+  @@map("google_oauth_token")
 }
 
 model DeviceToken {

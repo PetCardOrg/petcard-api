@@ -7,11 +7,11 @@ import { NotificationService } from '../notification.service';
 describe('DevicesController', () => {
   let controller: DevicesController;
   let notificationService: { registerDevice: jest.Mock };
-  let tutorService: { findByAuth0Id: jest.Mock };
+  let tutorService: { findById: jest.Mock };
 
   beforeEach(async () => {
     notificationService = { registerDevice: jest.fn() };
-    tutorService = { findByAuth0Id: jest.fn() };
+    tutorService = { findById: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [DevicesController],
@@ -24,22 +24,21 @@ describe('DevicesController', () => {
     controller = module.get(DevicesController);
   });
 
-  it('looks up tutor by auth0 sub and forwards to NotificationService', async () => {
-    tutorService.findByAuth0Id.mockResolvedValue({
+  it('looks up tutor by id and forwards to NotificationService', async () => {
+    tutorService.findById.mockResolvedValue({
       id: 'tutor-db-1',
-      auth0Id: 'auth0|abc',
     });
     notificationService.registerDevice.mockResolvedValue({ id: 'd1' });
 
     const result = await controller.register(
-      { sub: 'auth0|abc' },
+      { sub: 'tutor-db-1' },
       {
         token: 'fcm-token-abc',
         platform: DevicePlatform.IOS,
       },
     );
 
-    expect(tutorService.findByAuth0Id).toHaveBeenCalledWith('auth0|abc');
+    expect(tutorService.findById).toHaveBeenCalledWith('tutor-db-1');
     expect(notificationService.registerDevice).toHaveBeenCalledWith(
       'tutor-db-1',
       { token: 'fcm-token-abc', platform: DevicePlatform.IOS },

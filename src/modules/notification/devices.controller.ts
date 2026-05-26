@@ -21,7 +21,7 @@ export class DevicesController {
     @CurrentUser() user: JwtPayload,
     @Body() dto: RegisterDeviceDto,
   ): Promise<DeviceToken> {
-    const tutor = await this.tutorService.findByAuth0Id(user.sub);
+    const tutor = await this.tutorService.findById(user.sub);
     return this.notificationService.registerDevice(tutor.id, dto);
   }
 }

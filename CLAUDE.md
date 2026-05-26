@@ -16,7 +16,7 @@ Multirepo sob `PetCardOrg`:
 ## Stack relevante
 
 - **Backend:** NestJS, Prisma, PostgreSQL (PostGIS instalado mas sem uso após pivô para Google Places), Redis (no compose, ainda sem uso em código), AWS S3, RabbitMQ
-- **Auth:** Auth0 (JWKS), roles `TUTOR` e `VET`
+- **Auth:** JWT próprio (HS256 + bcrypt), roles `TUTOR` e `VET`
 - **Decorators existentes:** `@CurrentUser`, `@Roles`, `@Auth`
 - **Guards existentes:** `JwtAuthGuard`, `RolesGuard` (síncrono, role propagado pelo `JwtStrategy` — fonte única é `tutor.role` no banco)
 - **Shared:** DTOs em `@petcardorg/shared`, versão atual `0.7.0` em api/mobile/web
