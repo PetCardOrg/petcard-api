@@ -1,15 +1,4 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-jest.mock('jwks-rsa', () => ({
-  passportJwtSecret:
-    () =>
-    (
-      _req: unknown,
-      _token: unknown,
-      done: (err: Error | null, key: string) => void,
-    ) =>
-      done(null, 'test-secret'),
-}));
-
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
@@ -27,7 +16,7 @@ type Ctx = {
   permissions: string[];
 };
 const tutorCtx: Ctx = {
-  sub: 'auth0|tutor-1',
+  sub: '22222222-2222-4222-8222-222222222222',
   email: 'tutor@petcard.com',
   role: 'TUTOR',
   permissions: ['TUTOR'],
@@ -104,8 +93,8 @@ describe('DevicesController (e2e)', () => {
     jest.clearAllMocks();
     currentUser = tutorCtx;
     mockPrisma.tutor.findUnique.mockImplementation(
-      ({ where }: { where: { auth0Id?: string } }) =>
-        where.auth0Id === 'auth0|tutor-1'
+      ({ where }: { where: { id?: string } }) =>
+        where.id === tutor1.id
           ? Promise.resolve(tutor1)
           : Promise.resolve(null),
     );
