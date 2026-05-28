@@ -27,7 +27,7 @@ Multirepo sob `PetCardOrg`:
 - **M1** ✅ Auth + CRUDs (Tutor, Pet, Vaccine, Deworming, Medication), upload S3, seed
 - **M2** ✅ Carteira Digital + QR Code (fila com retry/DLQ)
 - **M3** ✅ Geolocalização + Clínicas — entregue via Google Places API (`GET /clinicas/places`); tabela `clinica` local + PostGIS foi descartada
-- **M4** 🚧 **Integrações Externas** — ver escopo abaixo
+- **M4** ✅ **Integrações Externas** — Firebase push (FCM) + Google Calendar (unidirecional, PetCard → Google). PC-065 (sync bidirecional) descopada como limitação consciente (ver ADR-002). Detalhes do escopo abaixo
 
 ### Auditoria M0-M3 (2026-05-11) — fechada
 
@@ -164,6 +164,8 @@ open http://localhost:3000/auth/google/connect
 ```
 
 ## Última atualização
+
+2026-05-28 — **M4 concluído.** PC-065 (sincronização bidirecional de agendamentos) descopada e fechada como limitação consciente: o Google Calendar fica unidirecional (PetCard → Google) no M4. O caminho inverso exigiria webhook de entrada (`events.watch`, fora do escopo) ou polling com `syncToken` (custo desproporcional ao valor); registrado na seção "Limitações conscientes (M4)" do ADR-002. Sync bidirecional fica como candidata a M5+. O schema já carrega `googleEtag`/`syncStatus`/`lastSyncedAt` que viabilizariam o lado de entrada no futuro.
 
 2026-05-27 — PC-069 entregue: sincronização com Google Calendar passa por fila `calendar.sync` (DLX/DLQ + retry header), substituindo o fire-and-forget anterior do `AppointmentService`. `GoogleCalendarService` agora re-throwa exceções (após persistir `syncStatus=FAILED`) para o consumer decidir entre retry e DLQ. Token revogado (`invalid_grant`) e 404 em UPDATE/DELETE são tratados como permanentes (ack sem retry). Restante de M4: PC-065 (sync bidirecional).
 
