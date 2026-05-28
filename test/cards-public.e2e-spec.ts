@@ -1,14 +1,3 @@
-jest.mock('jwks-rsa', () => ({
-  passportJwtSecret:
-    () =>
-    (
-      _req: unknown,
-      _token: unknown,
-      done: (err: Error | null, key: string) => void,
-    ) =>
-      done(null, 'test-secret'),
-}));
-
 process.env.PUBLIC_CARD_THROTTLE_TTL_SECONDS = '60';
 process.env.PUBLIC_CARD_THROTTLE_LIMIT = '3';
 

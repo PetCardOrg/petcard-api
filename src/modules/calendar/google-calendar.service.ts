@@ -158,6 +158,7 @@ export class GoogleCalendarService {
           syncError: error instanceof Error ? error.message : 'Unknown error',
         },
       });
+      throw error;
     }
   }
 
@@ -229,29 +230,25 @@ export class GoogleCalendarService {
           syncError: error instanceof Error ? error.message : 'Unknown error',
         },
       });
+      throw error;
     }
   }
 
-  async deleteEvent(tutorId: string, appointmentId: string): Promise<void> {
-    const appointment = await this.prisma.appointment.findUnique({
-      where: { id: appointmentId },
-    });
-    if (!appointment?.googleEventId) return;
-
+  async deleteEvent(tutorId: string, googleEventId: string): Promise<void> {
     const calendar = await this.getCalendarClient(tutorId);
     if (!calendar) return;
 
     try {
       await calendar.events.delete({
         calendarId: 'primary',
-        eventId: appointment.googleEventId,
+        eventId: googleEventId,
       });
     } catch (error) {
-      this.logger.warn(
-        `Failed to delete calendar event for appointment ${appointmentId}: ${
-          error instanceof Error ? error.message : error
-        }`,
+      this.logger.error(
+        `Failed to delete calendar event ${googleEventId}`,
+        error instanceof Error ? error.stack : error,
       );
+      throw error;
     }
   }
 
@@ -289,7 +286,16 @@ export class GoogleCalendarService {
     });
 
     for (const appointment of pending) {
-      await this.syncAppointment(tutorId, appointment.id);
+      try {
+        await this.syncAppointment(tutorId, appointment.id);
+      } catch (error) {
+        // syncStatus=FAILED is already persisted inside createEvent/updateEvent.
+        this.logger.warn(
+          `Sync failed for appointment ${appointment.id}: ${
+            error instanceof Error ? error.message : error
+          }`,
+        );
+      }
     }
 
     return pending.length;

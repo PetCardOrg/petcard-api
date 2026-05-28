@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { Appointment } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { GoogleCalendarService } from '../calendar/google-calendar.service';
+import { CalendarSyncPublisher } from '../queue/calendar-sync.publisher';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 
@@ -47,7 +47,7 @@ function toResponse(a: AppointmentWithPet): AppointmentResponse {
 export class AppointmentService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly calendarService: GoogleCalendarService,
+    private readonly calendarSyncPublisher: CalendarSyncPublisher,
   ) {}
 
   async create(
@@ -67,10 +67,11 @@ export class AppointmentService {
       include: { pet: { select: { name: true } } },
     });
 
-    // Fire-and-forget: sync to Google Calendar if connected
-    this.calendarService
-      .syncAppointment(userId, appointment.id)
-      .catch(() => {});
+    await this.calendarSyncPublisher.publish({
+      action: 'CREATE',
+      appointment_id: appointment.id,
+      tutor_id: userId,
+    });
 
     return toResponse(appointment);
   }
@@ -122,18 +123,28 @@ export class AppointmentService {
       include: { pet: { select: { name: true } } },
     });
 
-    this.calendarService
-      .syncAppointment(userId, appointment.id)
-      .catch(() => {});
+    await this.calendarSyncPublisher.publish({
+      action: 'UPDATE',
+      appointment_id: appointment.id,
+      tutor_id: userId,
+    });
 
     return toResponse(appointment);
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    await this.findAndAssertOwnership(id, userId);
+    const appointment = await this.findAndAssertOwnership(id, userId);
 
-    // Delete from Google Calendar first (needs the appointment data)
-    await this.calendarService.deleteEvent(userId, id).catch(() => {});
+    // Capture the event id before deleting the row — the worker needs it to
+    // call the Calendar API after the appointment is gone from the DB.
+    if (appointment.googleEventId) {
+      await this.calendarSyncPublisher.publish({
+        action: 'DELETE',
+        appointment_id: id,
+        tutor_id: userId,
+        google_event_id: appointment.googleEventId,
+      });
+    }
 
     await this.prisma.appointment.delete({ where: { id } });
   }
