@@ -13,3 +13,11 @@ export const NOTIFICATION_PUSH_DLX = 'notification.push.dlx';
 export const NOTIFICATION_PUSH_DLQ_ROUTING_KEY = 'dead';
 export const NOTIFICATION_PUSH_RETRY_HEADER = 'x-retry-count';
 export const NOTIFICATION_PUSH_MAX_RETRIES = 3;
+
+export const CALENDAR_SYNC_CLIENT = 'CALENDAR_SYNC_CLIENT';
+export const CALENDAR_SYNC_PATTERN = 'calendar.sync';
+
+export const CALENDAR_SYNC_DLX = 'calendar.sync.dlx';
+export const CALENDAR_SYNC_DLQ_ROUTING_KEY = 'dead';
+export const CALENDAR_SYNC_RETRY_HEADER = 'x-retry-count';
+export const CALENDAR_SYNC_MAX_RETRIES = 3;

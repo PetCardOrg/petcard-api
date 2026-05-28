@@ -2,6 +2,8 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as amqp from 'amqplib';
 import {
+  CALENDAR_SYNC_DLQ_ROUTING_KEY,
+  CALENDAR_SYNC_DLX,
   NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
   NOTIFICATION_PUSH_DLX,
   QR_CODE_DLQ_ROUTING_KEY,
@@ -19,6 +21,9 @@ export class RabbitMqTopologyService implements OnModuleInit {
     const qrCodeDlq = this.config.get<string>('rabbitmq.qrCodeDlq')!;
     const notificationPushDlq = this.config.get<string>(
       'rabbitmq.notificationPushDlq',
+    )!;
+    const calendarSyncDlq = this.config.get<string>(
+      'rabbitmq.calendarSyncDlq',
     )!;
 
     const connection = await amqp.connect(url);
@@ -43,6 +48,19 @@ export class RabbitMqTopologyService implements OnModuleInit {
       );
       this.logger.log(
         `DLX/DLQ ready (exchange=${NOTIFICATION_PUSH_DLX}, queue=${notificationPushDlq})`,
+      );
+
+      await channel.assertExchange(CALENDAR_SYNC_DLX, 'direct', {
+        durable: true,
+      });
+      await channel.assertQueue(calendarSyncDlq, { durable: true });
+      await channel.bindQueue(
+        calendarSyncDlq,
+        CALENDAR_SYNC_DLX,
+        CALENDAR_SYNC_DLQ_ROUTING_KEY,
+      );
+      this.logger.log(
+        `DLX/DLQ ready (exchange=${CALENDAR_SYNC_DLX}, queue=${calendarSyncDlq})`,
       );
 
       await channel.close();

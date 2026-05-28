@@ -4,6 +4,8 @@ import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { AppModule } from './app.module';
 import {
+  CALENDAR_SYNC_DLQ_ROUTING_KEY,
+  CALENDAR_SYNC_DLX,
   NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
   NOTIFICATION_PUSH_DLX,
   QR_CODE_DLQ_ROUTING_KEY,
@@ -53,6 +55,23 @@ async function bootstrap() {
         arguments: {
           'x-dead-letter-exchange': NOTIFICATION_PUSH_DLX,
           'x-dead-letter-routing-key': NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
+        },
+      },
+      noAck: false,
+      prefetchCount: 1,
+    },
+  });
+
+  app.connectMicroservice<MicroserviceOptions>({
+    transport: Transport.RMQ,
+    options: {
+      urls: [config.get<string>('rabbitmq.url')!],
+      queue: config.get<string>('rabbitmq.calendarSyncQueue')!,
+      queueOptions: {
+        durable: true,
+        arguments: {
+          'x-dead-letter-exchange': CALENDAR_SYNC_DLX,
+          'x-dead-letter-routing-key': CALENDAR_SYNC_DLQ_ROUTING_KEY,
         },
       },
       noAck: false,

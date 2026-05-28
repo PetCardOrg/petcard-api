@@ -8,4 +8,8 @@ export const rabbitmqConfig = registerAs('rabbitmq', () => ({
     process.env.RABBITMQ_NOTIFICATION_PUSH_QUEUE ?? 'notification.push',
   notificationPushDlq:
     process.env.RABBITMQ_NOTIFICATION_PUSH_DLQ ?? 'notification.push.dlq',
+  calendarSyncQueue:
+    process.env.RABBITMQ_CALENDAR_SYNC_QUEUE ?? 'calendar.sync',
+  calendarSyncDlq:
+    process.env.RABBITMQ_CALENDAR_SYNC_DLQ ?? 'calendar.sync.dlq',
 }));

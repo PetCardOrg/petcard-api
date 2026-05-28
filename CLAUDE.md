@@ -165,4 +165,6 @@ open http://localhost:3000/auth/google/connect
 
 ## Última atualização
 
-2026-05-16 — decisões de arquitetura M4 (#1-#8) fechadas em sessão com Ricardo; ver lista numerada acima e ADR-002 (`petcard-docs/architecture/adr/002-m4-integracoes-externas.md`). Próximo passo: abrir PC-072 (migrations) seguindo a ordem PC-072 → PC-066 → PC-068 → PC-067 → PC-064 → PC-069 → PC-065.
+2026-05-27 — PC-069 entregue: sincronização com Google Calendar passa por fila `calendar.sync` (DLX/DLQ + retry header), substituindo o fire-and-forget anterior do `AppointmentService`. `GoogleCalendarService` agora re-throwa exceções (após persistir `syncStatus=FAILED`) para o consumer decidir entre retry e DLQ. Token revogado (`invalid_grant`) e 404 em UPDATE/DELETE são tratados como permanentes (ack sem retry). Restante de M4: PC-065 (sync bidirecional).
+
+2026-05-16 — decisões de arquitetura M4 (#1-#8) fechadas em sessão com Ricardo; ver lista numerada acima e ADR-002 (`petcard-docs/architecture/adr/002-m4-integracoes-externas.md`).

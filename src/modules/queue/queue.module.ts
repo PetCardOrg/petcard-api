@@ -3,10 +3,14 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { CardModule } from '../card/card.module';
 import { UploadModule } from '../upload/upload.module';
+import { CalendarSyncPublisher } from './calendar-sync.publisher';
 import { NotificationPushPublisher } from './notification-push.publisher';
 import { QrCodeConsumer } from './qr-code.consumer';
 import { QrCodePublisher } from './qr-code.publisher';
 import {
+  CALENDAR_SYNC_CLIENT,
+  CALENDAR_SYNC_DLQ_ROUTING_KEY,
+  CALENDAR_SYNC_DLX,
   NOTIFICATION_PUSH_CLIENT,
   NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
   NOTIFICATION_PUSH_DLX,
@@ -62,14 +66,35 @@ import { RabbitMqTopologyService } from './rabbitmq-topology.service';
           },
         }),
       },
+      {
+        name: CALENDAR_SYNC_CLIENT,
+        imports: [ConfigModule],
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [config.get<string>('rabbitmq.url')!],
+            queue: config.get<string>('rabbitmq.calendarSyncQueue')!,
+            queueOptions: {
+              durable: true,
+              arguments: {
+                'x-dead-letter-exchange': CALENDAR_SYNC_DLX,
+                'x-dead-letter-routing-key': CALENDAR_SYNC_DLQ_ROUTING_KEY,
+              },
+            },
+            persistent: true,
+          },
+        }),
+      },
     ]),
   ],
   controllers: [QrCodeConsumer],
   providers: [
     QrCodePublisher,
     NotificationPushPublisher,
+    CalendarSyncPublisher,
     RabbitMqTopologyService,
   ],
-  exports: [QrCodePublisher, NotificationPushPublisher],
+  exports: [QrCodePublisher, NotificationPushPublisher, CalendarSyncPublisher],
 })
 export class QueueModule {}
