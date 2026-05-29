@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url = env("DATABASE_URL")
+  url      = env("DATABASE_URL")
 }
 
 enum Role {
@@ -60,11 +60,11 @@ model Tutor {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  pets               Pet[]
-  appointments       Appointment[]
-  notifications      Notification[]
-  deviceTokens       DeviceToken[]
-  googleOAuthToken   GoogleOAuthToken?
+  pets             Pet[]
+  appointments     Appointment[]
+  notifications    Notification[]
+  deviceTokens     DeviceToken[]
+  googleOAuthToken GoogleOAuthToken?
 
   @@map("tutor")
 }
@@ -117,6 +117,7 @@ model Pet {
   medicationRecords MedicationRecord[]
   carteiraDigital   CarteiraDigital?
   appointments      Appointment[]
+  notasClinicas     NotaClinica[]
 
   @@map("pet")
 }
@@ -232,4 +233,39 @@ model Notification {
   @@index([tutorId, createdAt])
   @@index([referenceType, referenceId])
   @@map("notification")
+}
+
+model Veterinario {
+  id        String   @id @default(uuid())
+  nome      String
+  email     String   @unique
+  password  String
+  crmv      String   @unique
+  telefone  String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  notasClinicas NotaClinica[]
+
+  @@map("veterinario")
+}
+
+model NotaClinica {
+  id            String   @id @default(uuid())
+  veterinarioId String   @map("veterinario_id")
+  petId         String   @map("pet_id")
+  googlePlaceId String?  @map("google_place_id")
+  diagnostico   String
+  prescricao    String?
+  observacoes   String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  veterinario Veterinario @relation(fields: [veterinarioId], references: [id], onDelete: Cascade)
+  pet         Pet         @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([veterinarioId])
+  @@index([petId])
+  @@index([googlePlaceId])
+  @@map("nota_clinica")
 }
