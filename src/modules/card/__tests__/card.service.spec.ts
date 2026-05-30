@@ -171,6 +171,7 @@ describe('CardService', () => {
           ],
           dewormingRecords: [],
           medicationRecords: [],
+          notasClinicas: [],
         },
         ...overrides,
       };

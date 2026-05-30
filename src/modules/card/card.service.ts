@@ -15,6 +15,24 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { TutorService } from '../tutor/tutor.service';
 
+interface ClinicalNotePublicDto {
+  id: string;
+  pet_id: string;
+  veterinario_id: string;
+  veterinario_nome: string;
+  veterinario_crmv: string;
+  google_place_id?: string;
+  diagnostico: string;
+  prescricao?: string;
+  observacoes?: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+interface CarteiraDigitalPublicWithNotesDto extends CarteiraDigitalPublicResponseDto {
+  clinical_notes: ClinicalNotePublicDto[];
+}
+
 interface CarteiraDigitalFullResponseDto extends CarteiraDigitalResponseDto {
   weight?: number;
   public_url?: string;
@@ -65,7 +83,7 @@ export class CardService {
 
   async findPublicByToken(
     token: string,
-  ): Promise<CarteiraDigitalPublicResponseDto> {
+  ): Promise<CarteiraDigitalPublicWithNotesDto> {
     const card = await this.prisma.carteiraDigital.findUnique({
       where: { token },
       include: {
@@ -75,6 +93,10 @@ export class CardService {
             vaccineRecords: { orderBy: { appliedAt: 'desc' } },
             dewormingRecords: { orderBy: { appliedAt: 'desc' } },
             medicationRecords: { orderBy: { startDate: 'desc' } },
+            notasClinicas: {
+              orderBy: { createdAt: 'desc' },
+              include: { veterinario: { select: { nome: true, crmv: true } } },
+            },
           },
         },
       },
@@ -132,6 +154,19 @@ export class CardService {
         notes: r.notes ?? undefined,
         created_at: r.createdAt,
         updated_at: r.updatedAt,
+      })),
+      clinical_notes: pet.notasClinicas.map((n) => ({
+        id: n.id,
+        pet_id: n.petId,
+        veterinario_id: n.veterinarioId,
+        veterinario_nome: n.veterinario.nome,
+        veterinario_crmv: n.veterinario.crmv,
+        google_place_id: n.googlePlaceId ?? undefined,
+        diagnostico: n.diagnostico,
+        prescricao: n.prescricao ?? undefined,
+        observacoes: n.observacoes ?? undefined,
+        created_at: n.createdAt,
+        updated_at: n.updatedAt,
       })),
       issued_at: card.createdAt,
     };
