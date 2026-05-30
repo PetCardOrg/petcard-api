@@ -79,6 +79,54 @@ export class AuthService {
     };
   }
 
+  async loginVeterinario(dto: LoginDto) {
+    const vet = await this.prisma.veterinario.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (!vet) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const passwordValid = await bcrypt.compare(dto.password, vet.password);
+
+    if (!passwordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const token = this.signToken(vet.id, vet.email, Role.VET);
+
+    return {
+      access_token: token,
+      user: {
+        id: vet.id,
+        nome: vet.nome,
+        email: vet.email,
+        crmv: vet.crmv,
+        role: Role.VET,
+      },
+    };
+  }
+
+  async getVeterinarioProfile(id: string) {
+    const vet = await this.prisma.veterinario.findUnique({
+      where: { id },
+    });
+
+    if (!vet) {
+      throw new UnauthorizedException('Veterinario not found');
+    }
+
+    return {
+      id: vet.id,
+      nome: vet.nome,
+      email: vet.email,
+      crmv: vet.crmv,
+      telefone: vet.telefone,
+      role: Role.VET,
+    };
+  }
+
   private signToken(id: string, email: string, role: Role): string {
     return this.jwtService.sign({
       sub: id,
