@@ -201,40 +201,79 @@ describe('VetNoteService', () => {
   });
 
   describe('findAllForPet', () => {
-    it('should return all clinical notes for a pet', async () => {
+    it('should return all clinical notes for a pet when tutor owns it', async () => {
       prisma.pet.findUnique.mockResolvedValue(petFixture);
       prisma.notaClinica.findMany.mockResolvedValue([notaFixture]);
 
-      const result = await service.findAllForPet('pet-1');
+      const result = await service.findAllForPet('pet-1', 'tutor-1', false);
 
       expect(result).toHaveLength(1);
       expect(result[0].diagnostico).toBe('Otite externa');
     });
 
+    it('should return all clinical notes for a pet when user is vet', async () => {
+      prisma.pet.findUnique.mockResolvedValue(petFixture);
+      prisma.notaClinica.findMany.mockResolvedValue([notaFixture]);
+
+      const result = await service.findAllForPet('pet-1', 'vet-1', true);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].diagnostico).toBe('Otite externa');
+    });
+
+    it('should throw ForbiddenException when tutor does not own the pet', async () => {
+      prisma.pet.findUnique.mockResolvedValue(petFixture);
+
+      await expect(
+        service.findAllForPet('pet-1', 'tutor-other', false),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
     it('should throw NotFoundException when pet does not exist', async () => {
       prisma.pet.findUnique.mockResolvedValue(null);
 
-      await expect(service.findAllForPet('missing')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.findAllForPet('missing', 'tutor-1', false),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('findOne', () => {
-    it('should return a clinical note by id', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue(notaFixture);
+    const notaWithPet = {
+      ...notaFixture,
+      pet: { tutorId: 'tutor-1' },
+    };
 
-      const result = await service.findOne('nota-1');
+    it('should return a clinical note when tutor owns the pet', async () => {
+      prisma.notaClinica.findUnique.mockResolvedValue(notaWithPet);
+
+      const result = await service.findOne('nota-1', 'tutor-1', false);
 
       expect(result.id).toBe('nota-1');
+    });
+
+    it('should return a clinical note when user is vet', async () => {
+      prisma.notaClinica.findUnique.mockResolvedValue(notaWithPet);
+
+      const result = await service.findOne('nota-1', 'vet-1', true);
+
+      expect(result.id).toBe('nota-1');
+    });
+
+    it('should throw ForbiddenException when tutor does not own the pet', async () => {
+      prisma.notaClinica.findUnique.mockResolvedValue(notaWithPet);
+
+      await expect(
+        service.findOne('nota-1', 'tutor-other', false),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('should throw NotFoundException when note does not exist', async () => {
       prisma.notaClinica.findUnique.mockResolvedValue(null);
 
-      await expect(service.findOne('missing')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.findOne('missing', 'tutor-1', false),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 

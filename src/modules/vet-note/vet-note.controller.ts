@@ -33,14 +33,20 @@ export class VetNoteController {
   @Auth(Role.TUTOR, Role.VET)
   async findAllForPet(
     @Param('petId') petId: string,
+    @CurrentUser() user: JwtPayload,
   ): Promise<VetNoteResponseDto[]> {
-    return this.vetNoteService.findAllForPet(petId);
+    const isVet = user.role === Role.VET;
+    return this.vetNoteService.findAllForPet(petId, user.sub, isVet);
   }
 
   @Get('clinical-notes/:id')
   @Auth(Role.TUTOR, Role.VET)
-  async findOne(@Param('id') id: string): Promise<VetNoteResponseDto> {
-    return this.vetNoteService.findOne(id);
+  async findOne(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<VetNoteResponseDto> {
+    const isVet = user.role === Role.VET;
+    return this.vetNoteService.findOne(id, user.sub, isVet);
   }
 
   @Delete('clinical-notes/:id')

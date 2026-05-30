@@ -98,8 +98,16 @@ export class VetNoteService {
     return response;
   }
 
-  async findAllForPet(petId: string): Promise<VetNoteResponseDto[]> {
-    await this.findPetOrFail(petId);
+  async findAllForPet(
+    petId: string,
+    userId: string,
+    isVet: boolean,
+  ): Promise<VetNoteResponseDto[]> {
+    const pet = await this.findPetOrFail(petId);
+
+    if (!isVet && pet.tutorId !== userId) {
+      throw new ForbiddenException('You can only view notes for your own pets');
+    }
 
     const notas = await this.prisma.notaClinica.findMany({
       where: { petId },
@@ -110,14 +118,25 @@ export class VetNoteService {
     return notas.map(toResponseDto);
   }
 
-  async findOne(id: string): Promise<VetNoteResponseDto> {
+  async findOne(
+    id: string,
+    userId: string,
+    isVet: boolean,
+  ): Promise<VetNoteResponseDto> {
     const nota = await this.prisma.notaClinica.findUnique({
       where: { id },
-      include: { veterinario: { select: { nome: true, crmv: true } } },
+      include: {
+        veterinario: { select: { nome: true, crmv: true } },
+        pet: { select: { tutorId: true } },
+      },
     });
 
     if (!nota) {
       throw new NotFoundException(`Clinical note with id ${id} not found`);
+    }
+
+    if (!isVet && nota.pet.tutorId !== userId) {
+      throw new ForbiddenException('You can only view notes for your own pets');
     }
 
     return toResponseDto(nota);
