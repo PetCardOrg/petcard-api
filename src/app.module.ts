@@ -26,6 +26,7 @@ import { QueueModule } from './modules/queue/queue.module';
 import { ReminderModule } from './modules/reminder/reminder.module';
 import { TutorModule } from './modules/tutor/tutor.module';
 import { UploadModule } from './modules/upload/upload.module';
+import { VeterinarioModule } from './modules/veterinario/veterinario.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -60,6 +61,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ClinicaModule,
     NotificationModule,
     ReminderModule,
+    VeterinarioModule,
   ],
   controllers: [AppController],
   providers: [AppService],
