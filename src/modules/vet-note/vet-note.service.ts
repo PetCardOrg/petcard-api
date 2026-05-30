@@ -1,10 +1,12 @@
 import {
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { NotaClinica } from '@prisma/client';
+import { NotaClinica, NotificationKind } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationService } from '../notification/notification.service';
 import { CreateVetNoteDto } from './dto/create-vet-note.dto';
 
 export interface VetNoteResponseDto {
@@ -43,14 +45,19 @@ function toResponseDto(nota: NotaWithVet): VetNoteResponseDto {
 
 @Injectable()
 export class VetNoteService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(VetNoteService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationService: NotificationService,
+  ) {}
 
   async create(
     petId: string,
     veterinarioId: string,
     dto: CreateVetNoteDto,
   ): Promise<VetNoteResponseDto> {
-    await this.assertPetExists(petId);
+    const pet = await this.findPetOrFail(petId);
     await this.assertVeterinarioExists(veterinarioId);
 
     const nota = await this.prisma.notaClinica.create({
@@ -65,11 +72,34 @@ export class VetNoteService {
       include: { veterinario: { select: { nome: true, crmv: true } } },
     });
 
-    return toResponseDto(nota);
+    const response = toResponseDto(nota);
+
+    try {
+      await this.notificationService.schedulePush({
+        tutorId: pet.tutorId,
+        kind: NotificationKind.CLINICAL_NOTE,
+        referenceType: 'CLINICAL_NOTE',
+        referenceId: nota.id,
+        title: 'Nova nota clínica',
+        body: `${nota.veterinario.nome} adicionou uma nota clínica para ${pet.name}`,
+        data: {
+          pet_id: petId,
+          clinical_note_id: nota.id,
+          type: 'clinical_note',
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to schedule push notification for clinical note ${nota.id}`,
+        error instanceof Error ? error.stack : error,
+      );
+    }
+
+    return response;
   }
 
   async findAllForPet(petId: string): Promise<VetNoteResponseDto[]> {
-    await this.assertPetExists(petId);
+    await this.findPetOrFail(petId);
 
     const notas = await this.prisma.notaClinica.findMany({
       where: { petId },
@@ -109,11 +139,17 @@ export class VetNoteService {
     await this.prisma.notaClinica.delete({ where: { id } });
   }
 
-  private async assertPetExists(petId: string): Promise<void> {
-    const pet = await this.prisma.pet.findUnique({ where: { id: petId } });
+  private async findPetOrFail(
+    petId: string,
+  ): Promise<{ id: string; name: string; tutorId: string }> {
+    const pet = await this.prisma.pet.findUnique({
+      where: { id: petId },
+      select: { id: true, name: true, tutorId: true },
+    });
     if (!pet) {
       throw new NotFoundException(`Pet with id ${petId} not found`);
     }
+    return pet;
   }
 
   private async assertVeterinarioExists(veterinarioId: string): Promise<void> {
