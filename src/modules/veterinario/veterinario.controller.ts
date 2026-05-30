@@ -8,12 +8,21 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { Auth } from '../auth/decorators/auth.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '../auth/enums/role.enum';
+import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { CreateVeterinarioDto } from './dto/create-veterinario.dto';
+import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { UpdateVeterinarioDto } from './dto/update-veterinario.dto';
-import { VeterinarioResponse, VeterinarioService } from './veterinario.service';
+import {
+  DashboardPetItem,
+  PaginatedResponse,
+  VeterinarioResponse,
+  VeterinarioService,
+} from './veterinario.service';
 
 @Controller('veterinarios')
 export class VeterinarioController {
@@ -25,6 +34,15 @@ export class VeterinarioController {
     @Body() dto: CreateVeterinarioDto,
   ): Promise<VeterinarioResponse> {
     return this.veterinarioService.create(dto);
+  }
+
+  @Get('dashboard/pets')
+  @Auth(Role.VET)
+  async dashboardPets(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: DashboardQueryDto,
+  ): Promise<PaginatedResponse<DashboardPetItem>> {
+    return this.veterinarioService.findAttendedPets(user.sub, query);
   }
 
   @Get()
