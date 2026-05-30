@@ -5,11 +5,21 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuthService } from '../auth.service';
 
-jest.mock('bcrypt');
+jest.mock(
+  'bcrypt',
+  () => ({
+    hash: jest.fn(),
+    compare: jest.fn(),
+  }),
+  { virtual: true },
+);
 
 describe('AuthService', () => {
   let service: AuthService;
-  let prisma: { tutor: { findUnique: jest.Mock; create: jest.Mock } };
+  let prisma: {
+    tutor: { findUnique: jest.Mock; create: jest.Mock };
+    veterinario: { findUnique: jest.Mock };
+  };
   let jwtService: { sign: jest.Mock };
 
   const tutorFixture = {
@@ -25,6 +35,9 @@ describe('AuthService', () => {
       tutor: {
         findUnique: jest.fn(),
         create: jest.fn(),
+      },
+      veterinario: {
+        findUnique: jest.fn(),
       },
     };
     jwtService = { sign: jest.fn().mockReturnValue('jwt-token') };
@@ -100,6 +113,84 @@ describe('AuthService', () => {
 
       await expect(
         service.login({ email: 'unknown@example.com', password: '123456' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('loginVeterinario', () => {
+    const vetFixture = {
+      id: 'vet-1',
+      nome: 'Dr. Bob',
+      email: 'bob@vet.com',
+      password: 'hashed-password',
+      crmv: 'CRMV-SP-12345',
+      telefone: '11999990000',
+    };
+
+    it('should return token for valid vet credentials', async () => {
+      prisma.veterinario.findUnique.mockResolvedValue(vetFixture);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      const result = await service.loginVeterinario({
+        email: 'bob@vet.com',
+        password: '123456',
+      });
+
+      expect(result.access_token).toBe('jwt-token');
+      expect(result.user.nome).toBe('Dr. Bob');
+      expect(result.user.crmv).toBe('CRMV-SP-12345');
+      expect(result.user.role).toBe('VET');
+    });
+
+    it('should throw UnauthorizedException for unknown vet email', async () => {
+      prisma.veterinario.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.loginVeterinario({
+          email: 'unknown@vet.com',
+          password: '123456',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should throw UnauthorizedException for wrong vet password', async () => {
+      prisma.veterinario.findUnique.mockResolvedValue(vetFixture);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+      await expect(
+        service.loginVeterinario({ email: 'bob@vet.com', password: 'wrong' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('getVeterinarioProfile', () => {
+    const vetFixture = {
+      id: 'vet-1',
+      nome: 'Dr. Bob',
+      email: 'bob@vet.com',
+      password: 'hashed-password',
+      crmv: 'CRMV-SP-12345',
+      telefone: '11999990000',
+    };
+
+    it('should return vet profile without password', async () => {
+      prisma.veterinario.findUnique.mockResolvedValue(vetFixture);
+
+      const result = await service.getVeterinarioProfile('vet-1');
+
+      expect(result.id).toBe('vet-1');
+      expect(result.nome).toBe('Dr. Bob');
+      expect(result.crmv).toBe('CRMV-SP-12345');
+      expect(result.telefone).toBe('11999990000');
+      expect(result.role).toBe('VET');
+      expect(result).not.toHaveProperty('password');
+    });
+
+    it('should throw UnauthorizedException if vet not found', async () => {
+      prisma.veterinario.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.getVeterinarioProfile('nonexistent'),
       ).rejects.toThrow(UnauthorizedException);
     });
   });

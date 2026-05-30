@@ -3,6 +3,8 @@ import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { Auth } from './decorators/auth.decorator';
+import { Role } from './enums/role.enum';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import type { JwtPayload } from './strategies/jwt.strategy';
 
@@ -24,5 +26,16 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   getProfile(@CurrentUser() user: JwtPayload): JwtPayload {
     return user;
+  }
+
+  @Post('veterinario/login')
+  loginVeterinario(@Body() dto: LoginDto) {
+    return this.authService.loginVeterinario(dto);
+  }
+
+  @Get('veterinario/profile')
+  @Auth(Role.VET)
+  getVeterinarioProfile(@CurrentUser() user: JwtPayload) {
+    return this.authService.getVeterinarioProfile(user.sub);
   }
 }
