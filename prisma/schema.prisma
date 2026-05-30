@@ -40,6 +40,7 @@ enum DevicePlatform {
 enum NotificationKind {
   DOSE_REMINDER
   APPOINTMENT_REMINDER
+  CLINICAL_NOTE
 }
 
 enum NotificationStatus {
