@@ -1,15 +1,4 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-jest.mock('jwks-rsa', () => ({
-  passportJwtSecret:
-    () =>
-    (
-      _req: unknown,
-      _token: unknown,
-      done: (err: Error | null, key: string) => void,
-    ) =>
-      done(null, 'test-secret'),
-}));
-
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
@@ -22,17 +11,20 @@ import { PrismaService } from '../src/prisma/prisma.service';
 type Ctx = {
   sub: string;
   email: string;
+  role: 'TUTOR' | 'VET';
   permissions: string[];
 };
 
 const tutorCtx: Ctx = {
-  sub: 'auth0|tutor-1',
+  sub: '22222222-2222-4222-8222-222222222222',
   email: 'tutor@petcard.com',
+  role: 'TUTOR',
   permissions: ['TUTOR'],
 };
 const vetCtx: Ctx = {
-  sub: 'auth0|vet-1',
+  sub: '33333333-3333-4333-8333-333333333333',
   email: 'vet@petcard.com',
+  role: 'VET',
   permissions: ['VET'],
 };
 
@@ -228,7 +220,7 @@ describe('CRUDs MVP1 (e2e)', () => {
         .expect((res) => expect(res.body.name).toBe('Alice B'));
 
       expect(mockPrisma.tutor.update).toHaveBeenCalledWith({
-        where: { auth0Id: 'auth0|tutor-1' },
+        where: { id: tutor1.id },
         data: { name: 'Alice B' },
       });
     });

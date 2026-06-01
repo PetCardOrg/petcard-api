@@ -25,7 +25,7 @@ describe('CardService', () => {
     };
   };
   let configService: { get: jest.Mock };
-  let tutorService: { findByAuth0Id: jest.Mock };
+  let tutorService: { findById: jest.Mock };
   const mockedQRCode = jest.mocked(QRCode);
 
   beforeEach(async () => {
@@ -43,7 +43,7 @@ describe('CardService', () => {
       get: jest.fn().mockReturnValue('https://card.petcard.app'),
     };
     tutorService = {
-      findByAuth0Id: jest.fn(),
+      findById: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -171,6 +171,7 @@ describe('CardService', () => {
           ],
           dewormingRecords: [],
           medicationRecords: [],
+          notasClinicas: [],
         },
         ...overrides,
       };
@@ -222,7 +223,7 @@ describe('CardService', () => {
     });
 
     it('should return the authenticated card summary for the owner', async () => {
-      tutorService.findByAuth0Id.mockResolvedValue({ id: 'tutor-1' });
+      tutorService.findById.mockResolvedValue({ id: 'tutor-1' });
       prisma.pet.findUnique.mockResolvedValue({
         id: 'pet-1',
         name: 'Rex',
@@ -253,12 +254,9 @@ describe('CardService', () => {
         ],
       });
 
-      const result = await service.findByPetIdForTutor(
-        'pet-1',
-        'auth0|tutor-1',
-      );
+      const result = await service.findByPetIdForTutor('pet-1', 'tutor-1');
 
-      expect(tutorService.findByAuth0Id).toHaveBeenCalledWith('auth0|tutor-1');
+      expect(tutorService.findById).toHaveBeenCalledWith('tutor-1');
       expect(prisma.pet.findUnique).toHaveBeenCalledWith({
         where: { id: 'pet-1' },
         include: {
@@ -299,7 +297,7 @@ describe('CardService', () => {
     });
 
     it('should create the card record when it does not exist yet', async () => {
-      tutorService.findByAuth0Id.mockResolvedValue({ id: 'tutor-1' });
+      tutorService.findById.mockResolvedValue({ id: 'tutor-1' });
       prisma.pet.findUnique.mockResolvedValue({
         id: 'pet-1',
         name: 'Rex',
@@ -324,10 +322,7 @@ describe('CardService', () => {
         createdAt: baseDate,
       });
 
-      const result = await service.findByPetIdForTutor(
-        'pet-1',
-        'auth0|tutor-1',
-      );
+      const result = await service.findByPetIdForTutor('pet-1', 'tutor-1');
 
       const upsertCalls = prisma.carteiraDigital.upsert.mock.calls as Array<
         [
@@ -355,16 +350,16 @@ describe('CardService', () => {
     });
 
     it('should throw NotFoundException when the pet does not exist', async () => {
-      tutorService.findByAuth0Id.mockResolvedValue({ id: 'tutor-1' });
+      tutorService.findById.mockResolvedValue({ id: 'tutor-1' });
       prisma.pet.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.findByPetIdForTutor('missing', 'auth0|tutor-1'),
+        service.findByPetIdForTutor('missing', 'tutor-1'),
       ).rejects.toThrow(NotFoundException);
     });
 
     it('should throw NotFoundException when the pet belongs to another tutor', async () => {
-      tutorService.findByAuth0Id.mockResolvedValue({ id: 'tutor-1' });
+      tutorService.findById.mockResolvedValue({ id: 'tutor-1' });
       prisma.pet.findUnique.mockResolvedValue({
         id: 'pet-1',
         tutorId: 'tutor-2',
@@ -376,7 +371,7 @@ describe('CardService', () => {
       });
 
       await expect(
-        service.findByPetIdForTutor('pet-1', 'auth0|tutor-1'),
+        service.findByPetIdForTutor('pet-1', 'tutor-1'),
       ).rejects.toThrow(NotFoundException);
     });
   });

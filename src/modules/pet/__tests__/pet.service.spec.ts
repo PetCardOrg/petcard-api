@@ -18,10 +18,10 @@ describe('PetService', () => {
       delete: jest.Mock;
     };
   };
-  let tutorService: { findByAuth0Id: jest.Mock };
+  let tutorService: { findById: jest.Mock };
   let qrCodePublisher: { publishGenerate: jest.Mock };
 
-  const tutor = { id: 'tutor-1', auth0Id: 'auth0|abc' };
+  const tutor = { id: 'tutor-1' };
   const now = new Date('2025-01-15T12:00:00Z');
   const QR_URL = 'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png';
   const pet = {
@@ -60,7 +60,7 @@ describe('PetService', () => {
         delete: jest.fn(),
       },
     };
-    tutorService = { findByAuth0Id: jest.fn().mockResolvedValue(tutor) };
+    tutorService = { findById: jest.fn().mockResolvedValue(tutor) };
     qrCodePublisher = {
       publishGenerate: jest.fn().mockResolvedValue(undefined),
     };
@@ -82,7 +82,7 @@ describe('PetService', () => {
       prisma.pet.create.mockResolvedValue(pet);
       prisma.pet.findUniqueOrThrow.mockResolvedValue(pet);
 
-      const result = await service.create('auth0|abc', {
+      const result = await service.create('tutor-1', {
         name: 'Rex',
         species: Species.DOG,
         sex: Sex.MALE,
@@ -111,7 +111,7 @@ describe('PetService', () => {
       prisma.pet.create.mockResolvedValue(pet);
       prisma.pet.findUniqueOrThrow.mockResolvedValue(pet);
 
-      const result = await service.create('auth0|abc', {
+      const result = await service.create('tutor-1', {
         name: 'Rex',
         species: Species.DOG,
         sex: Sex.MALE,
@@ -126,7 +126,7 @@ describe('PetService', () => {
       prisma.pet.findUniqueOrThrow.mockResolvedValue(pet);
       qrCodePublisher.publishGenerate.mockRejectedValue(new Error('rmq down'));
 
-      const result = await service.create('auth0|abc', {
+      const result = await service.create('tutor-1', {
         name: 'Rex',
         species: Species.DOG,
         sex: Sex.MALE,
@@ -141,7 +141,7 @@ describe('PetService', () => {
     it('should publish a qr-code.generate message for an owned pet', async () => {
       prisma.pet.findUnique.mockResolvedValue(pet);
 
-      await service.regenerateQrCode('pet-1', 'auth0|abc');
+      await service.regenerateQrCode('pet-1', 'tutor-1');
 
       expect(qrCodePublisher.publishGenerate).toHaveBeenCalledWith('pet-1');
     });
@@ -153,7 +153,7 @@ describe('PetService', () => {
       });
 
       await expect(
-        service.regenerateQrCode('pet-1', 'auth0|abc'),
+        service.regenerateQrCode('pet-1', 'tutor-1'),
       ).rejects.toThrow(ForbiddenException);
       expect(qrCodePublisher.publishGenerate).not.toHaveBeenCalled();
     });
@@ -163,7 +163,7 @@ describe('PetService', () => {
     it('should return only pets owned by the tutor', async () => {
       prisma.pet.findMany.mockResolvedValue([petWithCard]);
 
-      const result = await service.findAllForTutor('auth0|abc');
+      const result = await service.findAllForTutor('tutor-1');
 
       expect(prisma.pet.findMany).toHaveBeenCalledWith({
         where: { tutorId: 'tutor-1' },
@@ -181,7 +181,7 @@ describe('PetService', () => {
     it('should allow the owner to read a pet', async () => {
       prisma.pet.findUnique.mockResolvedValue(petWithCard);
 
-      const result = await service.findOne('pet-1', 'auth0|abc', false);
+      const result = await service.findOne('pet-1', 'tutor-1', false);
 
       expect(prisma.pet.findUnique).toHaveBeenCalledWith({
         where: { id: 'pet-1' },
@@ -200,9 +200,9 @@ describe('PetService', () => {
         tutorId: 'other',
       });
 
-      await expect(
-        service.findOne('pet-1', 'auth0|abc', false),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(service.findOne('pet-1', 'tutor-1', false)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('should allow any vet to read the pet', async () => {
@@ -211,17 +211,16 @@ describe('PetService', () => {
         tutorId: 'other',
       });
 
-      const result = await service.findOne('pet-1', 'auth0|vet', true);
+      const result = await service.findOne('pet-1', 'vet-1', true);
 
       expect(result.id).toBe('pet-1');
-      expect(tutorService.findByAuth0Id).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundException when the pet is missing', async () => {
       prisma.pet.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.findOne('missing', 'auth0|abc', false),
+        service.findOne('missing', 'tutor-1', false),
       ).rejects.toThrow(NotFoundException);
     });
   });
@@ -234,7 +233,7 @@ describe('PetService', () => {
         name: 'Rex II',
       });
 
-      const result = await service.update('pet-1', 'auth0|abc', {
+      const result = await service.update('pet-1', 'tutor-1', {
         name: 'Rex II',
       });
 
@@ -251,7 +250,7 @@ describe('PetService', () => {
       prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'other' });
 
       await expect(
-        service.update('pet-1', 'auth0|abc', { name: 'Rex II' }),
+        service.update('pet-1', 'tutor-1', { name: 'Rex II' }),
       ).rejects.toThrow(ForbiddenException);
     });
   });
@@ -261,7 +260,7 @@ describe('PetService', () => {
       prisma.pet.findUnique.mockResolvedValue(pet);
       prisma.pet.delete.mockResolvedValue(pet);
 
-      await service.remove('pet-1', 'auth0|abc');
+      await service.remove('pet-1', 'tutor-1');
 
       expect(prisma.pet.delete).toHaveBeenCalledWith({
         where: { id: 'pet-1' },

@@ -36,11 +36,11 @@ export class MedicationService {
 
   async create(
     petId: string,
-    auth0Id: string,
+    userId: string,
     isVet: boolean,
     dto: MedicationInput,
   ): Promise<MedicationRecordResponseDto> {
-    await this.petService.assertAccess(petId, auth0Id, isVet);
+    await this.petService.assertAccess(petId, userId, isVet);
     const record = await this.prisma.medicationRecord.create({
       data: {
         petId,
@@ -57,10 +57,10 @@ export class MedicationService {
 
   async findAllForPet(
     petId: string,
-    auth0Id: string,
+    userId: string,
     isVet: boolean,
   ): Promise<MedicationRecordResponseDto[]> {
-    await this.petService.assertAccess(petId, auth0Id, isVet);
+    await this.petService.assertAccess(petId, userId, isVet);
     const records = await this.prisma.medicationRecord.findMany({
       where: { petId },
       orderBy: { startDate: 'desc' },
@@ -70,12 +70,12 @@ export class MedicationService {
 
   async update(
     id: string,
-    auth0Id: string,
+    userId: string,
     isVet: boolean,
     dto: Omit<UpdateMedicationRecordDto, 'pet_id'>,
   ): Promise<MedicationRecordResponseDto> {
     const record = await this.getRecord(id);
-    await this.petService.assertAccess(record.petId, auth0Id, isVet);
+    await this.petService.assertAccess(record.petId, userId, isVet);
     const updated = await this.prisma.medicationRecord.update({
       where: { id },
       data: {
@@ -90,9 +90,9 @@ export class MedicationService {
     return toResponseDto(updated);
   }
 
-  async remove(id: string, auth0Id: string): Promise<void> {
+  async remove(id: string, userId: string): Promise<void> {
     const record = await this.getRecord(id);
-    await this.petService.assertOwnership(record.petId, auth0Id);
+    await this.petService.assertOwnership(record.petId, userId);
     await this.prisma.medicationRecord.delete({ where: { id } });
   }
 

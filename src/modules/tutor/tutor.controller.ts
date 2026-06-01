@@ -14,7 +14,7 @@ export class TutorController {
   @Get('me')
   @Auth(Role.TUTOR)
   async getMe(@CurrentUser() user: JwtPayload): Promise<Tutor> {
-    return this.tutorService.findByAuth0Id(user.sub);
+    return this.tutorService.findById(user.sub);
   }
 
   @Patch('me')
@@ -23,7 +23,7 @@ export class TutorController {
     @CurrentUser() user: JwtPayload,
     @Body() dto: UpdateTutorDto,
   ): Promise<Tutor> {
-    return this.tutorService.updateByAuth0Id(user.sub, dto);
+    return this.tutorService.updateById(user.sub, dto);
   }
 
   @Get(':id')

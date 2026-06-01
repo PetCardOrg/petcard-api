@@ -30,14 +30,14 @@ describe('RolesGuard', () => {
 
   it('should allow access when no roles are required', () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(undefined);
-    const ctx = createContext({ sub: 'auth0|1' });
+    const ctx = createContext({ sub: 'tutor-1' });
 
     expect(guard.canActivate(ctx)).toBe(true);
   });
 
   it('should allow access when required roles array is empty', () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([]);
-    const ctx = createContext({ sub: 'auth0|1' });
+    const ctx = createContext({ sub: 'tutor-1' });
 
     expect(guard.canActivate(ctx)).toBe(true);
   });
@@ -46,21 +46,21 @@ describe('RolesGuard', () => {
     jest
       .spyOn(reflector, 'getAllAndOverride')
       .mockReturnValue([Role.TUTOR, Role.VET]);
-    const ctx = createContext({ sub: 'auth0|1', role: Role.TUTOR });
+    const ctx = createContext({ sub: 'tutor-1', role: Role.TUTOR });
 
     expect(guard.canActivate(ctx)).toBe(true);
   });
 
   it('should deny access when user has a different role', () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.VET]);
-    const ctx = createContext({ sub: 'auth0|1', role: Role.TUTOR });
+    const ctx = createContext({ sub: 'tutor-1', role: Role.TUTOR });
 
     expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });
 
   it('should deny access when user has no role', () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.TUTOR]);
-    const ctx = createContext({ sub: 'auth0|1' });
+    const ctx = createContext({ sub: 'tutor-1' });
 
     expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });

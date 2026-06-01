@@ -1,13 +1,137 @@
-import { Injectable } from '@nestjs/common';
-import { JwtPayload } from './strategies/jwt.strategy';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
+import { PrismaService } from '../../prisma/prisma.service';
+import { LoginDto } from './dto/login.dto';
+import { RegisterDto } from './dto/register.dto';
+import { Role } from './enums/role.enum';
+
+const BCRYPT_ROUNDS = 10;
 
 @Injectable()
 export class AuthService {
-  getUserFromPayload(payload: JwtPayload): JwtPayload {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService,
+  ) {}
+
+  async register(dto: RegisterDto) {
+    const existing = await this.prisma.tutor.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (existing) {
+      throw new ConflictException('Email already registered');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
+
+    const tutor = await this.prisma.tutor.create({
+      data: {
+        name: dto.name,
+        email: dto.email,
+        password: hashedPassword,
+      },
+    });
+
+    const token = this.signToken(tutor.id, tutor.email, tutor.role as Role);
+
     return {
-      sub: payload.sub,
-      email: payload.email,
-      role: payload.role,
+      access_token: token,
+      user: {
+        id: tutor.id,
+        name: tutor.name,
+        email: tutor.email,
+        role: tutor.role,
+      },
     };
+  }
+
+  async login(dto: LoginDto) {
+    const tutor = await this.prisma.tutor.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (!tutor) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const passwordValid = await bcrypt.compare(dto.password, tutor.password);
+
+    if (!passwordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const token = this.signToken(tutor.id, tutor.email, tutor.role as Role);
+
+    return {
+      access_token: token,
+      user: {
+        id: tutor.id,
+        name: tutor.name,
+        email: tutor.email,
+        role: tutor.role,
+      },
+    };
+  }
+
+  async loginVeterinario(dto: LoginDto) {
+    const vet = await this.prisma.veterinario.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (!vet) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const passwordValid = await bcrypt.compare(dto.password, vet.password);
+
+    if (!passwordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const token = this.signToken(vet.id, vet.email, Role.VET);
+
+    return {
+      access_token: token,
+      user: {
+        id: vet.id,
+        nome: vet.nome,
+        email: vet.email,
+        crmv: vet.crmv,
+        role: Role.VET,
+      },
+    };
+  }
+
+  async getVeterinarioProfile(id: string) {
+    const vet = await this.prisma.veterinario.findUnique({
+      where: { id },
+    });
+
+    if (!vet) {
+      throw new UnauthorizedException('Veterinario not found');
+    }
+
+    return {
+      id: vet.id,
+      nome: vet.nome,
+      email: vet.email,
+      crmv: vet.crmv,
+      telefone: vet.telefone,
+      role: Role.VET,
+    };
+  }
+
+  private signToken(id: string, email: string, role: Role): string {
+    return this.jwtService.sign({
+      sub: id,
+      email,
+      role,
+    });
   }
 }
