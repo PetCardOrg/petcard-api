@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { google, calendar_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EncryptionService } from '../../common/crypto/encryption.service';
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
 
@@ -16,6 +17,7 @@ export class GoogleCalendarService {
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly encryption: EncryptionService,
   ) {
     this.clientId =
       this.configService.get<string>('googleCalendar.clientId') ?? '';
@@ -56,15 +58,17 @@ export class GoogleCalendarService {
     await this.prisma.googleOAuthToken.upsert({
       where: { tutorId },
       update: {
-        accessToken: tokens.access_token!,
-        refreshToken: tokens.refresh_token ?? undefined,
+        accessToken: this.encryption.encrypt(tokens.access_token!),
+        refreshToken: tokens.refresh_token
+          ? this.encryption.encrypt(tokens.refresh_token)
+          : undefined,
         expiresAt: new Date(tokens.expiry_date!),
         scopes: SCOPES,
       },
       create: {
         tutorId,
-        accessToken: tokens.access_token!,
-        refreshToken: tokens.refresh_token!,
+        accessToken: this.encryption.encrypt(tokens.access_token!),
+        refreshToken: this.encryption.encrypt(tokens.refresh_token!),
         expiresAt: new Date(tokens.expiry_date!),
         scopes: SCOPES,
       },
@@ -311,8 +315,8 @@ export class GoogleCalendarService {
 
     const oauth2Client = this.createOAuth2Client();
     oauth2Client.setCredentials({
-      access_token: token.accessToken,
-      refresh_token: token.refreshToken,
+      access_token: this.encryption.decrypt(token.accessToken),
+      refresh_token: this.encryption.decrypt(token.refreshToken),
       expiry_date: token.expiresAt.getTime(),
     });
 
@@ -320,7 +324,10 @@ export class GoogleCalendarService {
       void this.prisma.googleOAuthToken.update({
         where: { tutorId },
         data: {
-          accessToken: newTokens.access_token ?? token.accessToken,
+          // token.accessToken já está cifrado; só re-cifra quando há novo valor.
+          accessToken: newTokens.access_token
+            ? this.encryption.encrypt(newTokens.access_token)
+            : token.accessToken,
           expiresAt: newTokens.expiry_date
             ? new Date(newTokens.expiry_date)
             : token.expiresAt,

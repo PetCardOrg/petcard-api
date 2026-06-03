@@ -12,6 +12,8 @@ import { googleMapsConfig } from './config/google-maps.config';
 import { rabbitmqConfig } from './config/rabbitmq.config';
 import { reminderConfig } from './config/reminder.config';
 import { googleCalendarConfig } from './config/google-calendar.config';
+import { encryptionConfig } from './config/encryption.config';
+import { CryptoModule } from './common/crypto/crypto.module';
 import { AppointmentModule } from './modules/appointment/appointment.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
@@ -44,9 +46,11 @@ import { PrismaModule } from './prisma/prisma.module';
         rabbitmqConfig,
         reminderConfig,
         googleCalendarConfig,
+        encryptionConfig,
       ],
     }),
     ScheduleModule.forRoot(),
+    CryptoModule,
     PrismaModule,
     AuthModule,
     AppointmentModule,
