@@ -38,7 +38,7 @@ Este repositório faz parte de um conjunto de 5 repos:
 - Node.js >= 20 LTS
 - npm >= 10
 - Docker e Docker Compose
-- Conta Auth0 (dev tenant)
+- GitHub Personal Access Token com escopo `read:packages` (para baixar `@petcardorg/shared` do GitHub Packages)
 
 ## Instalação
 
@@ -47,20 +47,28 @@ Este repositório faz parte de um conjunto de 5 repos:
 git clone https://github.com/PetCardOrg/petcard-api.git
 cd petcard-api
 
-# 2. Instale as dependências
+# 2. Autentique no GitHub Packages (necessário para @petcardorg/shared)
+# Crie um token em https://github.com/settings/tokens com escopo read:packages
+export NODE_AUTH_TOKEN=<seu_personal_access_token>
+
+# 3. Instale as dependências
 npm install
 
-# 3. Configure as variáveis de ambiente
+# 4. Configure as variáveis de ambiente
 cp .env.example .env
-# Edite o .env com suas credenciais
+# Os defaults já casam com o docker-compose local; edite só credenciais externas
+# (AWS, Firebase, Google) se for usar esses serviços.
 
-# 4. Suba os serviços de infraestrutura
+# 5. Suba os serviços de infraestrutura
 docker compose -f docker/docker-compose.yml up -d
 
-# 5. Execute as migrations do banco
+# 6. Execute as migrations do banco
 npx prisma migrate dev
 
-# 6. Inicie o servidor
+# 7. (Opcional) Popule o banco com dados de exemplo
+npm run db:seed
+
+# 8. Inicie o servidor
 npm run start:dev
 # API disponível em http://localhost:3000
 ```
