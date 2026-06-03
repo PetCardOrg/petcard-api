@@ -23,13 +23,13 @@ Este repositório faz parte de um conjunto de 5 repos:
 
 | Camada         | Tecnologia                   |
 | -------------- | ---------------------------- |
-| Framework      | NestJS 10 + Node.js 20 LTS   |
+| Framework      | NestJS 11 + Node.js 20 LTS   |
 | Linguagem      | TypeScript 5.x (strict mode) |
 | Banco de Dados | PostgreSQL 16 + PostGIS 3.4  |
 | ORM            | Prisma 6                     |
 | Cache          | Redis 7                      |
 | Fila           | RabbitMQ 3                   |
-| Autenticação   | Auth0 (OAuth 2.0 + JWT)      |
+| Autenticação   | JWT próprio (HS256 + bcrypt) |
 | Storage        | AWS S3                       |
 | Notificações   | Firebase Cloud Messaging     |
 
