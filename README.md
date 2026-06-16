@@ -84,6 +84,18 @@ npm run start:dev
 | `npm run test:cov`  | Relatório de cobertura                 |
 | `npm run lint`      | Executa ESLint                         |
 
+## Documentação da API (Swagger / OpenAPI)
+
+Com a API rodando, a documentação interativa fica disponível em:
+
+```
+http://localhost:3000/docs
+```
+
+A interface lista os endpoints (tutor, pet, prontuário, carteira/QR, clínicas,
+agendamento/Calendar, notificações e veterinário) e permite autenticar com o
+JWT pelo botão **Authorize** (esquema Bearer).
+
 ## Infraestrutura Local (Docker)
 
 O `docker-compose.yml` sobe os seguintes serviços:
