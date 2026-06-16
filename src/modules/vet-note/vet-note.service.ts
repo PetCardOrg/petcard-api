@@ -7,27 +7,16 @@ import {
 import { NotaClinica, NotificationKind } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
-import { CreateVetNoteDto } from './dto/create-vet-note.dto';
-
-export interface VetNoteResponseDto {
-  id: string;
-  pet_id: string;
-  veterinario_id: string;
-  veterinario_nome: string;
-  veterinario_crmv: string;
-  google_place_id?: string;
-  diagnostico: string;
-  prescricao?: string;
-  observacoes?: string;
-  created_at: Date;
-  updated_at: Date;
-}
+import {
+  CreateNotaClinicaDto,
+  NotaClinicaResponseDto,
+} from '@petcardorg/shared';
 
 type NotaWithVet = NotaClinica & {
   veterinario: { nome: string; crmv: string };
 };
 
-function toResponseDto(nota: NotaWithVet): VetNoteResponseDto {
+function toResponseDto(nota: NotaWithVet): NotaClinicaResponseDto {
   return {
     id: nota.id,
     pet_id: nota.petId,
@@ -55,8 +44,8 @@ export class VetNoteService {
   async create(
     petId: string,
     veterinarioId: string,
-    dto: CreateVetNoteDto,
-  ): Promise<VetNoteResponseDto> {
+    dto: CreateNotaClinicaDto,
+  ): Promise<NotaClinicaResponseDto> {
     const pet = await this.findPetOrFail(petId);
     await this.assertVeterinarioExists(veterinarioId);
 
@@ -102,7 +91,7 @@ export class VetNoteService {
     petId: string,
     userId: string,
     isVet: boolean,
-  ): Promise<VetNoteResponseDto[]> {
+  ): Promise<NotaClinicaResponseDto[]> {
     const pet = await this.findPetOrFail(petId);
 
     if (!isVet && pet.tutorId !== userId) {
@@ -122,7 +111,7 @@ export class VetNoteService {
     id: string,
     userId: string,
     isVet: boolean,
-  ): Promise<VetNoteResponseDto> {
+  ): Promise<NotaClinicaResponseDto> {
     const nota = await this.prisma.notaClinica.findUnique({
       where: { id },
       include: {

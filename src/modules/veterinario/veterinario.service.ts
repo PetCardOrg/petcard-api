@@ -5,9 +5,8 @@ import {
 } from '@nestjs/common';
 import { Prisma, Veterinario } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateVeterinarioDto } from './dto/create-veterinario.dto';
+import { CreateVeterinarioDto, UpdateVeterinarioDto } from '@petcardorg/shared';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
-import { UpdateVeterinarioDto } from './dto/update-veterinario.dto';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const bcrypt = require('bcrypt') as {
