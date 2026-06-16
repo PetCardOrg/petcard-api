@@ -2,6 +2,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import {
   CALENDAR_SYNC_DLQ_ROUTING_KEY,
@@ -27,6 +28,20 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('PetCard API')
+    .setDescription(
+      'API REST do PetCard — carteira digital de saúde para pets. ' +
+        'Autenticação via JWT (Bearer). Endpoints de tutor, pet, prontuário ' +
+        '(vacina/vermífugo/medicação), carteira digital/QR, clínicas, ' +
+        'agendamento/Calendar, notificações e interface do veterinário.',
+    )
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('docs', app, document);
 
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.RMQ,
