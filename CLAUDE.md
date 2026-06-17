@@ -1,171 +1,180 @@
-# PetCard — Contexto para Claude Code (foco: Milestone 5 — Interface do Veterinário / Web)
+# PetCard — Contexto para Claude Code (foco: Milestone 6 — Testes + QA)
 
 ## Projeto
 
 PetCard — carteira digital de saúde para pets. TCC do Ricardo Temporal.
 Multirepo sob `PetCardOrg`:
 
-- `petcard-web` (SPA Vite + React) — **foco principal desta milestone** (dashboard, login e telas do veterinário)
-- `petcard-api` (NestJS + Prisma + Postgres + Redis + S3) — módulo Veterinário + VetNote (escrita reversa)
-- `petcard-shared` (npm `@petcardorg/shared` no GitHub Packages) — DTOs de Veterinario/NotaClinica
-- `petcard-mobile` (React Native + Expo) — sem trabalho nesta milestone
-- `petcard-docs` (ADRs, board centralizado, documentação)
+- `petcard-api` (NestJS + Prisma + Postgres + RabbitMQ + S3) — **maior superfície de teste desta milestone** (services, controllers, fluxos E2E)
+- `petcard-web` (SPA Vite + React) — **infra de teste nasce nesta milestone** (hoje sem nenhum teste)
+- `petcard-mobile` (React Native + Expo) — **infra de teste nasce nesta milestone** (hoje sem nenhum teste)
+- `petcard-shared` (npm `@petcardorg/shared` no GitHub Packages, **`0.9.0`**) — DTOs; sem issue de M6
+- `petcard-docs` (ADRs, board centralizado, documentação) — registrar decisões de QA/CI quando houver
 
-**Equipe:** Álvaro Araújo (Backend), Camila Martins (DevOps/PM), Ricardo Temporal (Frontend Lead — vem atuando na API desde M2; M5 traz o foco de volta para o frontend web).
+**Equipe:** Álvaro Araújo (Backend), Camila Martins (DevOps/PM), Ricardo Temporal (Frontend Lead — atua na API desde M2).
+
+**Contexto de prazo:** a **Parte 1 do TCC já foi apresentada à banca**. A **Parte 2 vai até dezembro/2026** — há folga de tempo. M6 (testes/QA) e M7 (docs/deploy) são o trabalho da Parte 2. Trabalhar com qualidade, sem o regime de "reta final".
 
 ## Stack relevante
 
-- **Backend:** NestJS, Prisma, PostgreSQL (PostGIS instalado mas sem uso após pivô para Google Places), Redis (no compose, ainda sem uso em código), AWS S3, RabbitMQ
-- **Web:** Vite + React + TypeScript, `react-router-dom` v7, i18n (pt-BR + en-US). HTTP via `apiFetch` próprio (`src/services/api.ts`) — hoje **GET-only, sem header de Authorization**. Sem lib de auth, sem gerenciador de estado, sem cliente de query. A área autenticada (login, rotas protegidas, sessão) **ainda não existe** e nasce nesta milestone.
-- **Auth:** JWT próprio (HS256 + bcrypt), roles `TUTOR` e `VET`. Auth0 foi abandonado (ver M0-#7) — **não reintroduzir**.
-- **Decorators existentes (api):** `@CurrentUser`, `@Roles`, `@Auth`
-- **Guards existentes (api):** `JwtAuthGuard`, `RolesGuard` (síncrono, role propagado pelo `JwtStrategy`)
-- **Shared:** DTOs em `@petcardorg/shared`, versão atual **`0.8.0`** (api usa `^0.7.0`/`^0.8.0`; web ainda em `^0.7.0` — alinhar nesta milestone)
+- **Backend:** NestJS 11, Prisma 6, PostgreSQL 16 + PostGIS (PostGIS instalado mas sem uso após pivô para Google Places), AWS S3, RabbitMQ (filas com DLX/DLQ + retry). Redis provisionado no compose, **não consumido em código**.
+- **Web:** Vite + React 19 + TypeScript, `react-router-dom` v7, i18n (pt-BR + en-US). HTTP via `apiFetch` próprio (`src/services/api.ts`). Área autenticada do vet (login, rotas protegidas, sessão) entregue em M5: token em `localStorage` + React Context + `ProtectedRoute`.
+- **Mobile:** React Native + Expo + TypeScript.
+- **Auth:** JWT próprio (HS256 + bcrypt), roles `TUTOR` e `VET`, discriminadas pelo claim `role` (logins separados `login`/`loginVeterinario`). Auth0 foi abandonado (M0-#7) — **não reintroduzir**. Sem refresh token.
+- **Shared:** DTOs em `@petcardorg/shared@0.9.0`. Após M5, api e web consomem os DTOs do vet/nota direto do shared (duplicação local removida). Resolver o pacote exige `NODE_AUTH_TOKEN` (PAT com `read:packages`).
 
 ## Status das milestones
 
-- **M0** ✅ Setup, GitHub Packages, ADR-001 multirepo, project board, ferramental (ESLint/Prettier/Husky/CI) em todos os 5 repos
+- **M0** ✅ Setup, GitHub Packages, ADR-001 multirepo, project board, ferramental (ESLint/Prettier/Husky/CI) nos 5 repos
 - **M1** ✅ Auth + CRUDs (Tutor, Pet, Vaccine, Deworming, Medication), upload S3, seed
 - **M2** ✅ Carteira Digital + QR Code (fila com retry/DLQ)
-- **M3** ✅ Geolocalização + Clínicas — entregue via Google Places API (`GET /clinicas/places`); tabela `clinica` local + PostGIS foi descartada
-- **M4** ✅ Integrações Externas — Firebase push (FCM) + Google Calendar (unidirecional, PetCard → Google). PC-065 (sync bidirecional) descopada como limitação consciente (ver ADR-002)
-- **M5** 🚧 **Interface do Veterinário (Web)** — em andamento. Escrita reversa (vet escreve notas clínicas no histórico do pet) + painel/dashboard do veterinário na web. Escopo abaixo
-- **M6** ⏳ Testes + QA (cobertura ≥ 80%, E2E)
-- **M7** ⏳ Documentação Final + Entrega TCC
+- **M3** ✅ Geolocalização + Clínicas — via Google Places API (`GET /clinicas/places`); tabela `clinica` local + PostGIS descartada
+- **M4** ✅ Integrações Externas — Firebase push (FCM) + Google Calendar (unidirecional). Tokens OAuth cifrados em AES-256-GCM (`EncryptionService`)
+- **M5** ✅ Interface do Veterinário (Web) — escrita reversa (nota clínica) + dashboard do vet + login/rotas protegidas. ADR-003 Aceita. DTOs convergidos para o shared.
+- **M6** 🚧 **Testes + QA** — cobertura ≥ 80% na API, integração + E2E, e nascimento da camada de testes em web e mobile. Escopo e ordem abaixo
+- **M7** ⏳ Documentação Final + Deploy + Entrega TCC
 
-### Auditoria M0-M3 (2026-05-11) — fechada
-
-As 8 recomendações de `audits/auditoria-completa-M0-M3-2026-05-11.md` foram endereçadas até 2026-05-14 (índice GiST depois descartado no pivô; shared alinhado; ferramental do shared; CI do mobile; fonte única de role; DLX/DLQ no qr-code; CORS allowlisted e Auth0 removido do mobile; higiene geral).
-
-## M5 — Interface do Veterinário (Web)
+## M6 — Testes + QA
 
 ### Objetivo
 
-Dar ao veterinário uma interface web própria para consultar pets e **escrever de volta no histórico de saúde** (escrita reversa). Até aqui o histórico só era alimentado pelo tutor; M5 abre o caminho clínico: o vet autenticado adiciona notas (diagnóstico + prescrição) que aparecem no histórico do pet e disparam push para o tutor.
+Levar o ecossistema a uma cobertura de testes confiável e automatizada no CI: subir a API de ~40% para **≥ 80%** com unit + integração + E2E, e **criar do zero** a camada de testes de web e mobile (hoje inexistente). O alvo é entregar a Parte 2 com QA verde e reproduzível.
+
+### Estado atual (linha de base)
+
+- **api:** 28 arquivos `*.spec.ts`. `coverageThreshold` rebaixado para **40/30/45/40** (statements/branches/functions/lines) — meta M6 é restaurar e subir até ≥ 80%. E2E roda por `test/jest-e2e.json` (`npm run test:e2e`). Jest configurado inline no `package.json`.
+- **web:** **0 testes, 0 infra** — sem Vitest/Jest, sem React Testing Library, sem jsdom. Tudo nasce em M6.
+- **mobile:** **0 testes, 0 infra** — sem runner, sem RN Testing Library. Tudo nasce em M6.
+- **shared:** sem issue de M6 (DTOs simples; testar só se algo concreto exigir).
 
 ### Escopo por repositório
 
-**`petcard-api`** (label milestone `M5 - Interface Veterinario (Web)`)
+**`petcard-api`** (milestone `M6 - Testes + QA`)
 
-| Issue  | Título                                           | Resumo                                                                                           |
-| ------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| PC-075 | CRUD módulo Veterinário                          | CRUD completo com validação de CRMV, vinculado a clínica                                         |
-| PC-076 | Módulo VetNote: Notas Clínicas (escrita reversa) | Vet autenticado escreve nota; aparece no histórico do pet; tutor **não** pode editar nota do vet |
-| PC-077 | Push ao tutor quando nota clínica é adicionada   | Push automático após criação da nota; mensagem inclui nome do pet e do veterinário               |
-| PC-083 | Migrations: `veterinario`, `nota_clinica`        | Tabelas com relacionamentos corretos; **CRMV como campo único**                                  |
+| Issue  | Título                                                 | Resumo                                                                     |
+| ------ | ------------------------------------------------------ | -------------------------------------------------------------------------- |
+| PC-086 | Testes unitários dos services (Jest) — cobertura ≥ 80% | Cobrir services mockando Prisma + clientes externos; subir o threshold     |
+| PC-087 | Testes de integração dos controllers (supertest)       | Controllers ponta-a-ponta com app Nest real + Prisma de teste              |
+| PC-088 | Testes E2E dos fluxos principais                       | Fluxos críticos (auth tutor/vet, pet, carteira, nota clínica) com Postgres |
+| PC-092 | Workflow de CD para staging (ECS Fargate)              | Deploy automatizado — **flavor de deploy, pode deslizar p/ M7**            |
+| PC-093 | Workflow de CD para produção (manual approval)         | Deploy com aprovação manual — **flavor de deploy, pode deslizar p/ M7**    |
+
+> ⚠️ PC-092/PC-093 estão rotuladas em M6 no GitHub, mas são **CD/deploy** (par natural de M7 com `petcard-infra`/Terraform). Em M6 o foco real é testes (PC-086/087/088); tratar CD junto do deploy de M7, salvo decisão em contrário do Ricardo.
 
 **`petcard-web`**
 
-| Issue  | Título                                                | Resumo                                                                          |
-| ------ | ----------------------------------------------------- | ------------------------------------------------------------------------------- |
-| PC-078 | Tela de Login do veterinário                          | Login + redirect para dashboard (ver decisão de auth abaixo — **JWT próprio**)  |
-| PC-079 | Dashboard do veterinário: lista de pets atendidos     | Lista de pets atendidos recentemente, busca por nome do pet ou tutor, paginação |
-| PC-080 | Tela de perfil do pet com histórico completo          | Vacinas, vermifugações, medicações e notas clínicas em timeline cronológica     |
-| PC-081 | Formulário de Nota Clínica (diagnóstico + prescrição) | Campos diagnóstico/prescrição/observações, validação no client, salva via API   |
-| PC-082 | Scanner de QR Code para acesso rápido à carteira      | Abre câmera do dispositivo, lê QR e redireciona para o perfil do pet            |
+| Issue  | Título                                        | Resumo                                                                |
+| ------ | --------------------------------------------- | --------------------------------------------------------------------- |
+| PC-089 | Testes de componentes (React Testing Library) | Bootstrap de Vitest + RTL + jsdom; cobrir login, rotas e form de nota |
 
-**`petcard-shared`**
+**`petcard-mobile`**
 
-| Issue  | Título                                        | Resumo                                                            |
-| ------ | --------------------------------------------- | ----------------------------------------------------------------- |
-| PC-084 | DTOs para Veterinario e NotaClinica           | Interfaces exportadas via `index.ts`, campos alinhados ao Prisma  |
-| PC-085 | Publicar release do shared com os DTOs do vet | Nova versão no GitHub Packages (a partir de `0.8.0` → bump minor) |
+| Issue  | Título                                               | Resumo                                                          |
+| ------ | ---------------------------------------------------- | --------------------------------------------------------------- |
+| PC-090 | Testes de componentes (React Native Testing Library) | Bootstrap de jest-expo + RN Testing Library; cobrir telas-chave |
 
-> ⚠️ **Números de versão nas issues estão desatualizados.** PC-085 menciona `@petcard/shared@0.3.0`, mas o pacote real é `@petcardorg/shared` e já está em `0.8.0` → o release de M5 será **`0.9.0`** (bump minor). Usar o nome e a numeração reais.
+### Ordem de execução ideal
 
-### Decisões de arquitetura M5 (fechadas com Ricardo em 2026-05-29)
+**Entre repositórios** (do mais alavancado/maduro ao mais novo):
 
-1. **Identidade do veterinário: tabela `veterinario` dedicada.** Entidade própria (CRMV único, vínculo com clínica), separada de `Tutor`. O `enum Role { VET, TUTOR }` existente em `Tutor` **não** é o caminho — o vet deixa de ser modelado como um Tutor com `role=VET`. Segue PC-083. Documentar em ADR-003 antes de mergear, incluindo o destino do `Role.VET` legado.
-2. **Auth da web: JWT próprio (HS256 + bcrypt), o mesmo da API.** A menção a "Auth0" na issue PC-078 está desatualizada — Auth0 foi abandonado (M0-#7) e **não será reintroduzido**. O login do vet emite/consome o mesmo JWT do resto do sistema.
+1. **`petcard-api` primeiro.** Já tem Jest e a maior superfície de risco. É onde se firmam os padrões (mocks de Prisma, helpers de E2E, Postgres no CI) que servem de referência. Maior ganho de cobertura por esforço.
+2. **`petcard-web` em seguida.** Bootstrap da infra (Vitest + RTL) e PC-089. Independe da API, mas vem depois para reaproveitar as decisões de padrão de teste.
+3. **`petcard-mobile` por último.** Bootstrap (jest-expo + RN Testing Library) e PC-090. Menor acoplamento, maior atrito de tooling (Expo/Metro) — fazer com a infra de teste já amadurecida nos outros repos.
+4. **`petcard-shared`** não tem trabalho em M6.
 
-### Decisões a fechar na sessão de arquitetura M5 (antes de codar — registrar em ADR-003)
+**Dentro de `petcard-api`** (ordem dependente):
 
-- **Sujeito do JWT com duas tabelas.** Hoje o `JwtStrategy` resolve o principal a partir de `tutor` (fonte única `tutor.role`). Com `veterinario` em tabela separada, definir como o token identifica o tipo de principal (claim de tipo? tabela-alvo no `sub`? estratégia/guard separados?). Isso afeta `@CurrentUser`, `@Roles(Role.VET)` e o `RolesGuard`.
-- **Relação nota clínica ↔ histórico.** `VaccineRecord`/`DewormingRecord` têm hoje `veterinarianName String?` (texto livre). Decidir se `nota_clinica` é uma entidade nova no histórico do pet (provável) e se/como conviver com o campo de nome livre legado.
-- **Vínculo vet ↔ pet ("pets atendidos").** O dashboard (PC-079) lista "pets atendidos recentemente" — definir a fonte (derivado de notas clínicas? tabela de vínculo? escopo por clínica?).
-- **Sessão/estado no web.** Onde guardar o token (memória + refresh? `localStorage`?), como proteger rotas (`react-router` v7) e se entra alguma lib de estado/query — manter YAGNI, só o necessário para login + dashboard + perfil.
+1. **PC-086 — unit dos services.** Cobrir service a service mockando `PrismaService` e clientes externos (S3, Firebase, Google, RabbitMQ). A cada faixa de cobertura ganha, **subir o `coverageThreshold`** em degraus (nunca rebaixar) até ≥ 80%.
+2. **PC-087 — integração de controllers (supertest).** App Nest real com `ValidationPipe`, guards e DTOs do shared; Prisma apontando para um banco de teste. Valida wiring, RBAC (`@Auth`/`@Roles`) e contratos HTTP.
+3. **PC-088 — E2E dos fluxos principais.** Postgres real no CI (service container ou testcontainers), migrations aplicadas, fluxos: login tutor + login vet, CRUD de pet, carteira/QR, criação de nota clínica (escrita reversa). Reusar helpers de PC-087.
+4. **CI:** garantir `test`, `test:e2e` e `test:cov` no workflow com Postgres provisionado e o gate de cobertura. PC-092/093 (CD) só depois de tudo verde — preferencialmente em M7.
 
-### Padrões específicos de M5
+**Dentro de `petcard-web`** (PC-089):
 
-- **Backend (vet/VetNote):** seguir o padrão module/controller/service/dto já usado (`PetService`, `TutorService`, `CardService`). Migrations com `prisma migrate dev`; CRMV com constraint `UNIQUE`. Push da PC-077 reusa a fila `notification.push` (DLX/DLQ + `x-retry-count`) montada em M4 — o service de nota só publica, o worker envia.
-- **Escrita reversa é só do vet.** Tutor não edita nem apaga nota do veterinário — impor via `@Roles` + checagem de propriedade no service. A nota é imutável pelo tutor.
-- **Frontend (web):** a área autenticada nasce agora. Estender `apiFetch` (`src/services/api.ts`) para enviar `Authorization: Bearer` e suportar `POST/PATCH` com body — hoje é GET-only. Reusar o padrão de `services/*.service.ts` (ex.: `card.service.ts`) para as chamadas de vet/nota/pet. Rotas protegidas com `react-router-dom` v7.
-- **i18n obrigatório no web.** Toda string de UID nova entra em `src/i18n/locales/pt-BR` **e** `en-US` — nada de texto hardcoded. Seguir o padrão do `LanguageSwitcher`/`PublicCard` existentes.
-- **DTOs no shared primeiro.** `Veterinario` e `NotaClinica` (PC-084) saem como DTOs em `@petcardorg/shared`, com campos alinhados ao schema Prisma, antes de api/web consumirem. Bump minor → publish `0.9.0` (PC-085) → alinhar `petcard-api` e `petcard-web` (web ainda em `^0.7.0`).
-- **Secret hygiene.** Qualquer variável nova (ex.: `VITE_API_URL` já existe no web) entra no `.env.example` com placeholder. Nada hardcoded.
+1. Bootstrap: adicionar Vitest + `@testing-library/react` + `@testing-library/jest-dom` + `jsdom`, script `test`, config (Vite `test` block) e setup file.
+2. Testar primeiro o que é crítico e estável: fluxo de **login**, **`ProtectedRoute`** (redirect sem token) e **submit do form de nota clínica** (validação client + chamada de service mockada).
+3. Subir gradualmente para dashboard e perfil do pet.
+
+**Dentro de `petcard-mobile`** (PC-090):
+
+1. Bootstrap: `jest-expo` como preset + `@testing-library/react-native` + `jest` config; script `test`.
+2. Cobrir telas/fluxos-chave (ex.: carteira do pet, scanner, render das listas de saúde) com mocks de navegação e de chamadas de API.
+
+### Padrões específicos de M6
+
+- **Subir o piso, nunca abaixar.** O `coverageThreshold` da API é um catraca: a cada PR que melhora cobertura, elevar o floor no mesmo PR. Meta final 80/.../80.
+- **Banco de teste isolado.** Integração/E2E não tocam o banco de dev. Usar Postgres dedicado (service container no CI; local via compose com DB próprio) + migrations + reset entre suites. Nada de mock de Prisma em E2E — o objetivo é exercitar o caminho real.
+- **Determinismo.** Sem dependência de relógio/rede real. Mockar tempo onde a lógica depende de datas; clientes externos (S3, FCM, Google, RabbitMQ) sempre mockados em unit e integração.
+- **Reaproveitar fixtures/helpers.** Um único `createTestApp()` + factories de dados para api; um `renderWithProviders()` (router + i18n + context) para web/mobile. Não duplicar setup por arquivo.
+- **i18n no web/mobile.** Renderizar componentes dentro do provider de i18n; asserir por papel/rótulo acessível, não por string crua de um idioma.
+- **CI verde é o DoD.** Toda issue de M6 só fecha com o teste rodando no GitHub Actions, não só localmente.
 
 ## Padrões a seguir (gerais)
 
-- **Investigar antes de codar.** Ler módulos existentes antes de propor arquitetura nova. No web, ler `pages/PublicCard`, `services/api.ts`, `services/card.service.ts` e o setup de i18n/router em `main.tsx`. No api, ler `PetService`/`TutorService`/`CardService` e o módulo de notificação de M4.
-- **DTOs no `@petcardorg/shared`.** Toda request/response nova vai como DTO no shared, com bump minor + publish. Atualizar consumidores (api/web) na mesma PR ou em PR encadeada.
-- **Testes.** Unit para o service (mockando Prisma e clientes externos), e2e para endpoints novos no api. No web, cobrir ao menos o fluxo de login e o submit da nota. Manter `coverageThreshold` global no api (40/30/45/40 hoje — subir floor conforme cobertura melhora; meta ≥ 80% é M6).
-- **Migrations.** `npx prisma migrate dev --name <descricao_snake_case>`. Para SQL fora do que o Prisma cobre, `--create-only` + edição manual.
-- **Auth (api).** Usar `@Auth()` + `@Roles(Role.VET)` / `Role.TUTOR`; recuperar usuário via `@CurrentUser()` — nunca ler claim JWT direto em controller.
-- **RBAC.** Não reintroduzir leitura do claim `permissions`. Resolver o principal pelo `JwtStrategy` (ver decisão aberta sobre duas tabelas acima).
-- **Filas.** Toda nova fila precisa de DLX/DLQ + retry — seguir o padrão de `qr-code.generate`/`notification.push` (ver `RabbitMqTopologyService` + headers `x-retry-count`).
-- **Configuração.** Variáveis sensíveis em `.env` (com entrada no `.env.example`). Nada de fallback hardcoded. Em produção, faltar variável crítica = falha rápida no boot.
+- **Investigar antes de codar.** Ler o módulo/serviço alvo e seus testes vizinhos antes de escrever novos. No api, espelhar o estilo dos `*.spec.ts` existentes (ex.: `pet.service.spec.ts`, módulo de notificação).
+- **DTOs no `@petcardorg/shared`.** Toda request/response nova vai como DTO no shared (bump minor + publish), consumida por api/web/mobile. Em M5 a duplicação local foi removida — não reintroduzir DTOs locais que já existem no shared.
+- **Testes.** Unit para services (mock de Prisma + externos), integração para controllers (supertest), E2E para fluxos. Cobertura é catraca crescente.
+- **Migrations.** `npx prisma migrate dev --name <descricao_snake_case>`. Para SQL fora do Prisma, `--create-only` + edição manual.
+- **Auth (api).** `@Auth()` + `@Roles(Role.VET)`/`Role.TUTOR`; usuário via `@CurrentUser()` — nunca ler claim JWT direto no controller.
+- **Filas.** Toda fila nova precisa de DLX/DLQ + retry (padrão `qr-code.generate`/`notification.push`).
+- **Configuração.** Variáveis sensíveis em `.env` com entrada no `.env.example`. Sem fallback hardcoded; em produção, faltar variável crítica = falha rápida no boot.
 
 ## Convenções gerais
 
-- **Branches:** `feat/pc-XXX-descricao`, `fix/pc-XXX-...`, `chore/...`
-- **Commits:** Conventional Commits (`feat(vet): add clinical note endpoint`)
-- **PRs:** título `feat: PC-XXX - Descrição`, com checklist de DoD na descrição
-- **DTOs compartilhados:** sempre em `@petcardorg/shared`, bump minor para nova feature, patch para fix de tipo
-- **ADRs:** decisões arquiteturais relevantes documentadas em `petcard-docs/architecture/adr/` antes de mergear (M5 → ADR-003)
+- **Branches:** `feat/pc-XXX-descricao`, `fix/pc-XXX-...`, `chore/...`, `test/pc-XXX-...`, `docs/...`
+- **Commits:** Conventional Commits (`test(vet): cobrir VetNoteService`)
+- **PRs:** mirar `develop`; título `tipo: PC-XXX - Descrição`, com checklist de DoD
+- **DTOs compartilhados:** sempre em `@petcardorg/shared`, bump minor para feature, patch para fix de tipo
+- **ADRs:** decisões arquiteturais relevantes em `petcard-docs/architecture/adr/` antes de mergear
 
 ## Princípios de trabalho
 
-- **YAGNI.** Sem cache, sem fila, sem gerenciador de estado/query no web sem demanda real. Login + dashboard + perfil + form de nota não exigem Redux/React Query por padrão — só entram se houver uso concreto.
-- **Reutilizar antes de criar.** Antes de novo service/util, procurar equivalente em `petcard-api`, `petcard-web` e `@petcardorg/shared`.
-- **Falha de serviço externo não derruba a API.** Google, Firebase, S3 — todos têm caminho de degradação. O push da PC-077 não pode fazer a criação da nota falhar.
-- **Validação na borda.** `ValidationPipe` global + `class-validator` nos DTOs do api; validação no client nos forms do web (PC-081).
-- **Atualizar `@petcardorg/shared` exige bump + publish** (workflow `publish.yaml` no shared).
+- **YAGNI.** Não montar infra de teste além do necessário (sem E2E de browser real no web se RTL cobre; sem testcontainers se service container do Actions resolve).
+- **Reutilizar antes de criar.** Antes de novo helper/factory, procurar equivalente no repo e nos outros.
+- **Falha de serviço externo não derruba a API.** Manter os caminhos de degradação cobertos por teste (ex.: push falho não invalida criação de nota).
+- **Validação na borda.** `ValidationPipe` global + `class-validator` nos DTOs; cobrir os casos de rejeição nos testes de integração.
 
-## Escopo fora desta sessão (não fazer agora)
+## Escopo fora desta milestone (não fazer agora)
 
-- Reintroduzir Auth0 (abandonado em M0-#7) — login do vet usa JWT próprio
-- Trabalho no `petcard-mobile` (M5 não toca o mobile)
-- Cobertura ≥ 80% e E2E amplo (é M6); deploy de produção e relatório (é M7)
-- Webhooks de entrada, email transacional, SMS (seguem fora de escopo desde M4)
-- Sync bidirecional do Google Calendar (PC-065, candidata a futuro)
+- Reintroduzir Auth0 (abandonado em M0-#7) ou DTOs locais já no shared
+- Deploy de produção / `petcard-infra` / Terraform e o relatório/slides da Parte 2 (é M7; PC-092/093 vão junto)
+- Sync bidirecional do Google Calendar (PC-065, futuro)
 - Reintroduzir tabela `clinica` local + PostGIS (descartado em 2026-05-12)
-- Refactors amplos não relacionados ao módulo veterinário / interface web
+- Refactors amplos não relacionados a teste/QA
 
 ## Ambiente de desenvolvimento
 
 - API: Docker Compose em `docker/docker-compose.yml` (postgis/postgis:16-3.4, redis:7-alpine, rabbitmq:3-management-alpine) + `npm run start:dev`
 - Web: `npm run dev` (Vite :5173). `VITE_API_URL` aponta para a API (default `http://localhost:3000`)
-- Resolver `@petcardorg/shared` do GitHub Packages exige `NODE_AUTH_TOKEN=$GITHUB_TOKEN`
+- Resolver `@petcardorg/shared` do GitHub Packages exige `NODE_AUTH_TOKEN` (PAT com `read:packages`)
 - API obriga `CORS_ORIGINS` em produção; em dev usa defaults de localhost (Vite :5173, API :3000, Expo :8081/:19006)
+- Swagger/OpenAPI da API em `GET /docs` (M5/PC-097)
 
 ## Comandos úteis
 
 ```bash
-# API
-docker compose -f docker/docker-compose.yml up -d
-npm run start:dev
-npx prisma migrate dev --name <descricao>           # ex.: add_veterinario_nota_clinica
-npx prisma migrate dev --create-only --name <desc>  # editar SQL antes de aplicar
-npm test && npm run test:e2e
-npm run db:seed
+# API — testes
+npm test                       # unit (jest, *.spec.ts)
+npm run test:cov               # com cobertura (verifica o coverageThreshold)
+npm run test:e2e               # E2E (test/jest-e2e.json) — precisa de Postgres
+docker compose -f docker/docker-compose.yml up -d   # subir Postgres/RabbitMQ para E2E local
+npx prisma migrate deploy      # aplicar migrations no banco de teste
 
-# Web (no petcard-web)
-npm run dev          # Vite :5173
-npm run build        # tsc -b && vite build
+# Web (no petcard-web) — após bootstrap de Vitest
+npm test
+npm run build                  # tsc -b && vite build
 npm run lint
 
-# Shared — publicar 0.9.0 com DTOs do vet (PC-084/PC-085)
-# bump version em package.json → push → workflow publish.yaml
+# Mobile (no petcard-mobile) — após bootstrap de jest-expo
+npm test
+npm run typecheck
 
-# Issues da M5 (por repo)
-gh issue list --repo PetCardOrg/petcard-api    --milestone "M5 - Interface Veterinario (Web)" --state all
-gh issue list --repo PetCardOrg/petcard-web    --milestone "M5 - Interface Veterinario (Web)" --state all
-gh issue list --repo PetCardOrg/petcard-shared --milestone "M5 - Interface Veterinario (Web)" --state all
-
-# Fila — limpar fila com args divergentes antes de redeploy
-docker exec petcard-rabbitmq rabbitmqctl delete_queue notification.push
+# Issues da M6 (por repo)
+gh issue list --repo PetCardOrg/petcard-api    --milestone "M6 - Testes + QA" --state all
+gh issue list --repo PetCardOrg/petcard-web    --milestone "M6 - Testes + QA" --state all
+gh issue list --repo PetCardOrg/petcard-mobile --milestone "M6 - Testes + QA" --state all
 ```
 
 ## Última atualização
 
-2026-05-29 — **Início da M5 (Interface do Veterinário / Web).** CLAUDE.md refocado de M4 para M5. Escopo levantado das issues nos repos `petcard-api` (PC-075/076/077/083), `petcard-web` (PC-078/079/080/081/082) e `petcard-shared` (PC-084/085). Duas decisões fechadas com Ricardo: (1) **tabela `veterinario` dedicada** (CRMV único, vínculo com clínica) em vez de reusar `Tutor`+`Role.VET`; (2) **auth do vet via JWT próprio** — a menção a Auth0 na PC-078 está desatualizada e não será seguida. Pendências para a sessão de arquitetura M5 / ADR-003 registradas (sujeito do JWT com duas tabelas, modelo de `nota_clinica` vs `veterinarianName` legado, vínculo vet↔pet do dashboard, sessão/estado no web). Correções de fatos: shared real é `@petcardorg/shared@0.8.0` (não `@petcard/shared@0.3.0` da issue) → release de M5 será `0.9.0`; `petcard-web` ainda consome `^0.7.0` e precisa alinhar.
+2026-06-17 — **Início da M6 (Testes + QA).** CLAUDE.md refocado de M5 para M6. M5 marcada concluída (escrita reversa, dashboard do vet, login/rotas protegidas, ADR-003 Aceita, DTOs convergidos para o shared, Swagger em `/docs`). Escopo de M6 levantado das issues reais: api PC-086 (unit ≥80%), PC-087 (integração/supertest), PC-088 (E2E); web PC-089 (RTL); mobile PC-090 (RN Testing Library); PC-092/093 (CD) ficam rotuladas em M6 mas são deploy (par de M7). Linha de base registrada: api com 28 specs e threshold 40/30/45/40; web e mobile **sem nenhuma infra de teste**. Ordem de execução ideal definida — entre repos (api → web → mobile; shared sem trabalho) e dentro da api (PC-086 → PC-087 → PC-088 → CI/cobertura). Contexto de prazo: Parte 1 já apresentada, Parte 2 até dezembro/2026.
