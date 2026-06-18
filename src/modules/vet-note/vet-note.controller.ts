@@ -12,8 +12,11 @@ import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
-import { CreateVetNoteDto } from './dto/create-vet-note.dto';
-import { VetNoteResponseDto, VetNoteService } from './vet-note.service';
+import {
+  CreateNotaClinicaDto,
+  NotaClinicaResponseDto,
+} from '@petcardorg/shared';
+import { VetNoteService } from './vet-note.service';
 
 @Controller()
 export class VetNoteController {
@@ -24,8 +27,8 @@ export class VetNoteController {
   async create(
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
-    @Body() dto: CreateVetNoteDto,
-  ): Promise<VetNoteResponseDto> {
+    @Body() dto: CreateNotaClinicaDto,
+  ): Promise<NotaClinicaResponseDto> {
     return this.vetNoteService.create(petId, user.sub, dto);
   }
 
@@ -34,7 +37,7 @@ export class VetNoteController {
   async findAllForPet(
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
-  ): Promise<VetNoteResponseDto[]> {
+  ): Promise<NotaClinicaResponseDto[]> {
     const isVet = user.role === Role.VET;
     return this.vetNoteService.findAllForPet(petId, user.sub, isVet);
   }
@@ -44,7 +47,7 @@ export class VetNoteController {
   async findOne(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
-  ): Promise<VetNoteResponseDto> {
+  ): Promise<NotaClinicaResponseDto> {
     const isVet = user.role === Role.VET;
     return this.vetNoteService.findOne(id, user.sub, isVet);
   }

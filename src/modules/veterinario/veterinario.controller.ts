@@ -14,9 +14,8 @@ import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
-import { CreateVeterinarioDto } from './dto/create-veterinario.dto';
+import { CreateVeterinarioDto, UpdateVeterinarioDto } from '@petcardorg/shared';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
-import { UpdateVeterinarioDto } from './dto/update-veterinario.dto';
 import {
   DashboardPetItem,
   PaginatedResponse,

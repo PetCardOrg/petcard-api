@@ -23,13 +23,13 @@ Este repositório faz parte de um conjunto de 5 repos:
 
 | Camada         | Tecnologia                   |
 | -------------- | ---------------------------- |
-| Framework      | NestJS 10 + Node.js 20 LTS   |
+| Framework      | NestJS 11 + Node.js 20 LTS   |
 | Linguagem      | TypeScript 5.x (strict mode) |
 | Banco de Dados | PostgreSQL 16 + PostGIS 3.4  |
 | ORM            | Prisma 6                     |
 | Cache          | Redis 7                      |
 | Fila           | RabbitMQ 3                   |
-| Autenticação   | Auth0 (OAuth 2.0 + JWT)      |
+| Autenticação   | JWT próprio (HS256 + bcrypt) |
 | Storage        | AWS S3                       |
 | Notificações   | Firebase Cloud Messaging     |
 
@@ -38,7 +38,7 @@ Este repositório faz parte de um conjunto de 5 repos:
 - Node.js >= 20 LTS
 - npm >= 10
 - Docker e Docker Compose
-- Conta Auth0 (dev tenant)
+- GitHub Personal Access Token com escopo `read:packages` (para baixar `@petcardorg/shared` do GitHub Packages)
 
 ## Instalação
 
@@ -47,20 +47,28 @@ Este repositório faz parte de um conjunto de 5 repos:
 git clone https://github.com/PetCardOrg/petcard-api.git
 cd petcard-api
 
-# 2. Instale as dependências
+# 2. Autentique no GitHub Packages (necessário para @petcardorg/shared)
+# Crie um token em https://github.com/settings/tokens com escopo read:packages
+export NODE_AUTH_TOKEN=<seu_personal_access_token>
+
+# 3. Instale as dependências
 npm install
 
-# 3. Configure as variáveis de ambiente
+# 4. Configure as variáveis de ambiente
 cp .env.example .env
-# Edite o .env com suas credenciais
+# Os defaults já casam com o docker-compose local; edite só credenciais externas
+# (AWS, Firebase, Google) se for usar esses serviços.
 
-# 4. Suba os serviços de infraestrutura
+# 5. Suba os serviços de infraestrutura
 docker compose -f docker/docker-compose.yml up -d
 
-# 5. Execute as migrations do banco
+# 6. Execute as migrations do banco
 npx prisma migrate dev
 
-# 6. Inicie o servidor
+# 7. (Opcional) Popule o banco com dados de exemplo
+npm run db:seed
+
+# 8. Inicie o servidor
 npm run start:dev
 # API disponível em http://localhost:3000
 ```
@@ -75,6 +83,18 @@ npm run start:dev
 | `npm run test:e2e`  | Executa testes end-to-end              |
 | `npm run test:cov`  | Relatório de cobertura                 |
 | `npm run lint`      | Executa ESLint                         |
+
+## Documentação da API (Swagger / OpenAPI)
+
+Com a API rodando, a documentação interativa fica disponível em:
+
+```
+http://localhost:3000/docs
+```
+
+A interface lista os endpoints (tutor, pet, prontuário, carteira/QR, clínicas,
+agendamento/Calendar, notificações e veterinário) e permite autenticar com o
+JWT pelo botão **Authorize** (esquema Bearer).
 
 ## Infraestrutura Local (Docker)
 
