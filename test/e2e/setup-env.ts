@@ -13,3 +13,6 @@ process.env.JWT_EXPIRES_IN ??= '1h';
 process.env.ENCRYPTION_KEY ??= '0'.repeat(64);
 process.env.RABBITMQ_URL ??= 'amqp://localhost:5672';
 process.env.FCM_ENABLED ??= 'false';
+// Geocoding/Places exigem a chave no construtor; os fluxos de clínica não são
+// exercitados no e2e, então um valor dummy só satisfaz o boot.
+process.env.GOOGLE_MAPS_API_KEY ??= 'test-google-maps-key';
