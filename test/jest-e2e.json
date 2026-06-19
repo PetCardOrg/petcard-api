@@ -6,5 +6,8 @@
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
-  "transformIgnorePatterns": ["node_modules/(?!jose)"]
+  "transformIgnorePatterns": ["node_modules/(?!jose)"],
+  "globalSetup": "<rootDir>/e2e/global-setup.ts",
+  "setupFiles": ["<rootDir>/e2e/setup-env.ts"],
+  "testTimeout": 30000
 }
