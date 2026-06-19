@@ -13,7 +13,7 @@ jobs:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgis/postgis:16-3.4
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
