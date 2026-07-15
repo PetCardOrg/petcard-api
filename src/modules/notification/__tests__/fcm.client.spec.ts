@@ -1,18 +1,19 @@
 import { ConfigService } from '@nestjs/config';
-import * as admin from 'firebase-admin';
+import { initializeApp } from 'firebase-admin/app';
 import { FcmClient } from '../fcm.client';
 
-jest.mock('firebase-admin', () => {
-  const send = jest.fn();
-  const messaging = jest.fn(() => ({ send }));
-  return {
-    __esModule: true,
-    initializeApp: jest.fn(() => ({ name: 'test-app' })),
-    credential: { cert: jest.fn((c: unknown) => c) },
-    messaging,
-    __send: send,
-  };
-});
+const mockSend = jest.fn();
+
+jest.mock('firebase-admin/app', () => ({
+  __esModule: true,
+  initializeApp: jest.fn(() => ({ name: 'test-app' })),
+  cert: jest.fn((c: unknown) => c),
+}));
+
+jest.mock('firebase-admin/messaging', () => ({
+  __esModule: true,
+  getMessaging: jest.fn(() => ({ send: mockSend })),
+}));
 
 describe('FcmClient', () => {
   const cfg = (values: Record<string, unknown>) =>
@@ -25,7 +26,7 @@ describe('FcmClient', () => {
   it('skips initialization when FCM_ENABLED=false', () => {
     const client = new FcmClient(cfg({ 'firebase.enabled': false }));
     client.onModuleInit();
-    expect(admin.initializeApp).not.toHaveBeenCalled();
+    expect(initializeApp).not.toHaveBeenCalled();
   });
 
   it('returns empty result when send is called while disabled', async () => {
@@ -45,7 +46,7 @@ describe('FcmClient', () => {
       }),
     );
     client.onModuleInit();
-    expect(admin.initializeApp).toHaveBeenCalled();
+    expect(initializeApp).toHaveBeenCalled();
   });
 
   it('returns messageId on successful send', async () => {
@@ -58,9 +59,7 @@ describe('FcmClient', () => {
       }),
     );
     client.onModuleInit();
-    (admin as unknown as { __send: jest.Mock }).__send.mockResolvedValueOnce(
-      'msg-123',
-    );
+    mockSend.mockResolvedValueOnce('msg-123');
 
     const result = await client.send('token-xyz', { title: 't', body: 'b' });
     expect(result).toEqual({ messageId: 'msg-123' });
@@ -80,9 +79,7 @@ describe('FcmClient', () => {
     const err = Object.assign(new Error('boom'), {
       code: 'messaging/registration-token-not-registered',
     });
-    (admin as unknown as { __send: jest.Mock }).__send.mockRejectedValueOnce(
-      err,
-    );
+    mockSend.mockRejectedValueOnce(err);
 
     const result = await client.send('token-xyz', { title: 't', body: 'b' });
     expect(result).toEqual({
