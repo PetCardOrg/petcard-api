@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as admin from 'firebase-admin';
+import { App, cert, initializeApp } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
 
 export interface FcmPayload {
   title: string;
@@ -16,7 +17,7 @@ export interface FcmSendResult {
 @Injectable()
 export class FcmClient implements OnModuleInit {
   private readonly logger = new Logger(FcmClient.name);
-  private app?: admin.app.App;
+  private app?: App;
   private enabled = false;
 
   constructor(private readonly config: ConfigService) {}
@@ -33,8 +34,8 @@ export class FcmClient implements OnModuleInit {
     const clientEmail = this.config.get<string>('firebase.clientEmail')!;
     const privateKey = this.config.get<string>('firebase.privateKey')!;
 
-    this.app = admin.initializeApp({
-      credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
+    this.app = initializeApp({
+      credential: cert({ projectId, clientEmail, privateKey }),
     });
     this.logger.log(`Firebase Admin initialized for project ${projectId}`);
   }
@@ -48,7 +49,7 @@ export class FcmClient implements OnModuleInit {
     }
 
     try {
-      const messageId = await admin.messaging(this.app).send({
+      const messageId = await getMessaging(this.app).send({
         token,
         notification: { title: payload.title, body: payload.body },
         data: payload.data,
