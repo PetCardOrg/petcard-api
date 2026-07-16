@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
     services:
@@ -39,3 +41,24 @@ jobs:
       - run: npm run test:cov
       - run: npm run test:e2e
       - run: npm run build
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          if-no-files-found: warn
+
+      # Atualiza o badge de cobertura no push da develop (não em PRs).
+      - name: Update coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        run: |
+          node scripts/coverage-badge.mjs
+          if [ -n "$(git status --porcelain .github/badges/coverage.svg)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/badges/coverage.svg
+            git commit -m "chore: atualizar badge de cobertura [skip ci]"
+            git push origin HEAD:develop
+          fi
