@@ -1,6 +1,7 @@
 # 🐾 PetCard API
 
 [![CI](https://github.com/PetCardOrg/petcard-api/actions/workflows/ci.yml/badge.svg)](https://github.com/PetCardOrg/petcard-api/actions)
+[![Coverage](.github/badges/coverage.svg)](https://github.com/PetCardOrg/petcard-api/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Backend do ecossistema PetCard. API REST construída com NestJS para gestão inteligente da saúde de animais de estimação.
