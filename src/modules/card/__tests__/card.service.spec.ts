@@ -202,6 +202,174 @@ describe('CardService', () => {
       });
     });
 
+    it('should map optional fields of every health record when present', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue(
+        makeCard({
+          pet: {
+            ...makeCard().pet,
+            vaccineRecords: [
+              {
+                id: 'v1',
+                petId: 'pet-1',
+                vaccineName: 'V8',
+                appliedAt: baseDate,
+                nextDoseAt: new Date('2026-05-01T10:00:00Z'),
+                veterinarianName: 'Dra. Camila',
+                notes: 'reforço anual',
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+            dewormingRecords: [
+              {
+                id: 'd1',
+                petId: 'pet-1',
+                productName: 'Drontal',
+                appliedAt: baseDate,
+                nextDoseAt: new Date('2026-07-01T10:00:00Z'),
+                veterinarianName: 'Dra. Camila',
+                notes: 'dose única',
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+            medicationRecords: [
+              {
+                id: 'm1',
+                petId: 'pet-1',
+                medicationName: 'Apoquel',
+                dosage: '16mg',
+                frequency: '1x ao dia',
+                startDate: baseDate,
+                endDate: new Date('2026-04-15T10:00:00Z'),
+                notes: 'com alimento',
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+            notasClinicas: [
+              {
+                id: 'n1',
+                petId: 'pet-1',
+                veterinarioId: 'vet-1',
+                veterinario: { nome: 'Camila Ferreira', crmv: 'CRMV-SP 12345' },
+                googlePlaceId: 'place-123',
+                diagnostico: 'Dermatite',
+                prescricao: 'Apoquel 16mg',
+                observacoes: 'retorno em 15 dias',
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+          },
+        }),
+      );
+
+      const result = await service.findPublicByToken('tok-abc');
+
+      expect(result.vaccines[0]).toMatchObject({
+        next_dose_at: '2026-05-01T10:00:00.000Z',
+        veterinarian_name: 'Dra. Camila',
+        notes: 'reforço anual',
+      });
+      expect(result.dewormings[0]).toMatchObject({
+        product_name: 'Drontal',
+        next_dose_at: '2026-07-01T10:00:00.000Z',
+        veterinarian_name: 'Dra. Camila',
+        notes: 'dose única',
+      });
+      expect(result.medications[0]).toMatchObject({
+        medication_name: 'Apoquel',
+        end_date: '2026-04-15T10:00:00.000Z',
+        notes: 'com alimento',
+      });
+      expect(result.clinical_notes[0]).toMatchObject({
+        veterinario_nome: 'Camila Ferreira',
+        veterinario_crmv: 'CRMV-SP 12345',
+        google_place_id: 'place-123',
+        prescricao: 'Apoquel 16mg',
+        observacoes: 'retorno em 15 dias',
+      });
+    });
+
+    it('should map absent optional fields to undefined', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue(
+        makeCard({
+          qrCodeUrl: null,
+          pet: {
+            ...makeCard().pet,
+            breed: null,
+            birthDate: null,
+            weight: null,
+            photoUrl: null,
+            dewormingRecords: [
+              {
+                id: 'd1',
+                petId: 'pet-1',
+                productName: 'Drontal',
+                appliedAt: baseDate,
+                nextDoseAt: null,
+                veterinarianName: null,
+                notes: null,
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+            medicationRecords: [
+              {
+                id: 'm1',
+                petId: 'pet-1',
+                medicationName: 'Apoquel',
+                dosage: '16mg',
+                frequency: '1x ao dia',
+                startDate: baseDate,
+                endDate: null,
+                notes: null,
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+            notasClinicas: [
+              {
+                id: 'n1',
+                petId: 'pet-1',
+                veterinarioId: 'vet-1',
+                veterinario: { nome: 'Camila Ferreira', crmv: 'CRMV-SP 12345' },
+                googlePlaceId: null,
+                diagnostico: 'Dermatite',
+                prescricao: null,
+                observacoes: null,
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+          },
+        }),
+      );
+
+      const result = await service.findPublicByToken('tok-abc');
+
+      expect(result.breed).toBeUndefined();
+      expect(result.birth_date).toBeUndefined();
+      expect(result.weight).toBeUndefined();
+      expect(result.photo_url).toBeUndefined();
+      expect(result.qr_code_url).toBeUndefined();
+      expect(result.dewormings[0]).toMatchObject({
+        next_dose_at: undefined,
+        veterinarian_name: undefined,
+        notes: undefined,
+      });
+      expect(result.medications[0]).toMatchObject({
+        end_date: undefined,
+        notes: undefined,
+      });
+      expect(result.clinical_notes[0]).toMatchObject({
+        google_place_id: undefined,
+        prescricao: undefined,
+        observacoes: undefined,
+      });
+    });
+
     it('should throw NotFoundException for invalid token', async () => {
       prisma.carteiraDigital.findUnique.mockResolvedValue(null);
 
