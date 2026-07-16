@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: read
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
     services:
