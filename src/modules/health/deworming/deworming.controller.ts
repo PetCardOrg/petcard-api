@@ -10,6 +10,13 @@ import {
   Post,
 } from '@nestjs/common';
 import {
+  ApiCreatedResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
+import {
   CreateDewormingRecordDto,
   DewormingRecordResponseDto,
   UpdateDewormingRecordDto,
@@ -20,12 +27,16 @@ import { Role } from '../../auth/enums/role.enum';
 import type { JwtPayload } from '../../auth/strategies/jwt.strategy';
 import { DewormingService } from './deworming.service';
 
+@ApiTags('dewormings')
 @Controller()
 export class DewormingController {
   constructor(private readonly dewormingService: DewormingService) {}
 
   @Post('pets/:petId/dewormings')
   @Auth(Role.TUTOR, Role.VET)
+  @ApiOperation({ summary: 'Registrar vermífugo no prontuário do pet' })
+  @ApiCreatedResponse({ type: DewormingRecordResponseDto })
+  @ApiNotFoundResponse({ description: 'Pet não encontrado' })
   async create(
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
@@ -37,6 +48,9 @@ export class DewormingController {
 
   @Get('pets/:petId/dewormings')
   @Auth(Role.TUTOR, Role.VET)
+  @ApiOperation({ summary: 'Listar vermífugos do pet' })
+  @ApiOkResponse({ type: DewormingRecordResponseDto, isArray: true })
+  @ApiNotFoundResponse({ description: 'Pet não encontrado' })
   async findAll(
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
@@ -47,6 +61,9 @@ export class DewormingController {
 
   @Patch('dewormings/:id')
   @Auth(Role.TUTOR, Role.VET)
+  @ApiOperation({ summary: 'Atualizar registro de vermífugo' })
+  @ApiOkResponse({ type: DewormingRecordResponseDto })
+  @ApiNotFoundResponse({ description: 'Registro não encontrado' })
   async update(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
@@ -59,6 +76,8 @@ export class DewormingController {
   @Delete('dewormings/:id')
   @Auth(Role.TUTOR)
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remover registro de vermífugo' })
+  @ApiNotFoundResponse({ description: 'Registro não encontrado' })
   async remove(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,

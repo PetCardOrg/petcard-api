@@ -8,6 +8,13 @@ import {
   Param,
   Post,
 } from '@nestjs/common';
+import {
+  ApiCreatedResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '../auth/enums/role.enum';
@@ -18,12 +25,18 @@ import {
 } from '@petcardorg/shared';
 import { VetNoteService } from './vet-note.service';
 
+@ApiTags('clinical-notes')
 @Controller()
 export class VetNoteController {
   constructor(private readonly vetNoteService: VetNoteService) {}
 
   @Post('pets/:petId/clinical-notes')
   @Auth(Role.VET)
+  @ApiOperation({
+    summary: 'Criar nota clínica no prontuário do pet (escrita reversa do vet)',
+  })
+  @ApiCreatedResponse({ type: NotaClinicaResponseDto })
+  @ApiNotFoundResponse({ description: 'Pet não encontrado' })
   async create(
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
@@ -34,6 +47,9 @@ export class VetNoteController {
 
   @Get('pets/:petId/clinical-notes')
   @Auth(Role.TUTOR, Role.VET)
+  @ApiOperation({ summary: 'Listar notas clínicas do pet' })
+  @ApiOkResponse({ type: NotaClinicaResponseDto, isArray: true })
+  @ApiNotFoundResponse({ description: 'Pet não encontrado' })
   async findAllForPet(
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
@@ -44,6 +60,9 @@ export class VetNoteController {
 
   @Get('clinical-notes/:id')
   @Auth(Role.TUTOR, Role.VET)
+  @ApiOperation({ summary: 'Buscar nota clínica por id' })
+  @ApiOkResponse({ type: NotaClinicaResponseDto })
+  @ApiNotFoundResponse({ description: 'Nota clínica não encontrada' })
   async findOne(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
@@ -55,6 +74,8 @@ export class VetNoteController {
   @Delete('clinical-notes/:id')
   @Auth(Role.VET)
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remover nota clínica (somente o vet autor)' })
+  @ApiNotFoundResponse({ description: 'Nota clínica não encontrada' })
   async remove(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,

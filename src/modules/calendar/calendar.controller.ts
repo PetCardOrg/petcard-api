@@ -9,6 +9,12 @@ import {
   Res,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  ApiExcludeEndpoint,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Response } from 'express';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -16,6 +22,7 @@ import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { GoogleCalendarService } from './google-calendar.service';
 
+@ApiTags('calendar')
 @Controller('calendar')
 export class CalendarController {
   constructor(
@@ -25,6 +32,9 @@ export class CalendarController {
 
   @Get('connect')
   @Auth(Role.TUTOR)
+  @ApiOperation({
+    summary: 'Obter URL de autorização OAuth do Google Calendar',
+  })
   connect(@CurrentUser() user: JwtPayload) {
     const url = this.googleCalendarService.getAuthUrl(user.sub);
     if (!url) {
@@ -37,6 +47,11 @@ export class CalendarController {
   }
 
   @Get('callback')
+  @ApiOperation({
+    summary: 'Callback OAuth do Google (redirecionamento do consentimento)',
+  })
+  @ApiQuery({ name: 'code', description: 'Código de autorização do Google' })
+  @ApiQuery({ name: 'state', description: 'Id do tutor originador do fluxo' })
   async callback(
     @Query('code') code: string,
     @Query('state') tutorId: string,
@@ -49,6 +64,7 @@ export class CalendarController {
   }
 
   @Get('dev-connect')
+  @ApiExcludeEndpoint()
   devConnect(@Res() res: Response) {
     if (this.configService.get('NODE_ENV') !== 'development') {
       res.status(404).send('Not found');
@@ -110,6 +126,7 @@ async function login() {
 
   @Get('status')
   @Auth(Role.TUTOR)
+  @ApiOperation({ summary: 'Status da conexão com o Google Calendar' })
   async status(@CurrentUser() user: JwtPayload) {
     const connected = await this.googleCalendarService.isConnected(user.sub);
     return { connected };
@@ -118,12 +135,18 @@ async function login() {
   @Delete('disconnect')
   @Auth(Role.TUTOR)
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Desconectar Google Calendar (remove tokens do tutor)',
+  })
   async disconnect(@CurrentUser() user: JwtPayload) {
     await this.googleCalendarService.disconnect(user.sub);
   }
 
   @Post('sync')
   @Auth(Role.TUTOR)
+  @ApiOperation({
+    summary: 'Sincronizar compromissos pendentes com o Google Calendar',
+  })
   async sync(@CurrentUser() user: JwtPayload) {
     const count = await this.googleCalendarService.syncAllPending(user.sub);
     return { synced: count };
