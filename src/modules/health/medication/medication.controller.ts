@@ -10,6 +10,13 @@ import {
   Post,
 } from '@nestjs/common';
 import {
+  ApiCreatedResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
+import {
   CreateMedicationRecordDto,
   MedicationRecordResponseDto,
   UpdateMedicationRecordDto,
@@ -20,12 +27,16 @@ import { Role } from '../../auth/enums/role.enum';
 import type { JwtPayload } from '../../auth/strategies/jwt.strategy';
 import { MedicationService } from './medication.service';
 
+@ApiTags('medications')
 @Controller()
 export class MedicationController {
   constructor(private readonly medicationService: MedicationService) {}
 
   @Post('pets/:petId/medications')
   @Auth(Role.TUTOR, Role.VET)
+  @ApiOperation({ summary: 'Registrar medicação no prontuário do pet' })
+  @ApiCreatedResponse({ type: MedicationRecordResponseDto })
+  @ApiNotFoundResponse({ description: 'Pet não encontrado' })
   async create(
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
@@ -37,6 +48,9 @@ export class MedicationController {
 
   @Get('pets/:petId/medications')
   @Auth(Role.TUTOR, Role.VET)
+  @ApiOperation({ summary: 'Listar medicações do pet' })
+  @ApiOkResponse({ type: MedicationRecordResponseDto, isArray: true })
+  @ApiNotFoundResponse({ description: 'Pet não encontrado' })
   async findAll(
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
@@ -47,6 +61,9 @@ export class MedicationController {
 
   @Patch('medications/:id')
   @Auth(Role.TUTOR, Role.VET)
+  @ApiOperation({ summary: 'Atualizar registro de medicação' })
+  @ApiOkResponse({ type: MedicationRecordResponseDto })
+  @ApiNotFoundResponse({ description: 'Registro não encontrado' })
   async update(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
@@ -59,6 +76,8 @@ export class MedicationController {
   @Delete('medications/:id')
   @Auth(Role.TUTOR)
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remover registro de medicação' })
+  @ApiNotFoundResponse({ description: 'Registro não encontrado' })
   async remove(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,

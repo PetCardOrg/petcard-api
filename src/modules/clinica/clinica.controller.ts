@@ -1,5 +1,12 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import {
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
+import {
   FindNearbyPlacesQueryDto,
   GeocodeResponseDto,
   PlacesClinicResponseDto,
@@ -9,6 +16,7 @@ import { Role } from '../auth/enums/role.enum';
 import { GeocodingService } from './geocoding.service';
 import { PlacesService } from './places.service';
 
+@ApiTags('clinicas')
 @Controller('clinicas')
 export class ClinicaController {
   constructor(
@@ -18,6 +26,10 @@ export class ClinicaController {
 
   @Get('places')
   @Auth(Role.TUTOR, Role.VET)
+  @ApiOperation({
+    summary: 'Buscar clínicas veterinárias próximas (Google Places)',
+  })
+  @ApiOkResponse({ type: PlacesClinicResponseDto, isArray: true })
   async findNearbyPlaces(
     @Query() query: FindNearbyPlacesQueryDto,
   ): Promise<PlacesClinicResponseDto[]> {
@@ -32,6 +44,10 @@ export class ClinicaController {
 
   @Get('geocode')
   @Auth(Role.TUTOR, Role.VET)
+  @ApiOperation({ summary: 'Geocodificar endereço em lat/lng' })
+  @ApiOkResponse({ type: GeocodeResponseDto })
+  @ApiQuery({ name: 'address', description: 'Endereço a geocodificar' })
+  @ApiNotFoundResponse({ description: 'Endereço não encontrado' })
   async geocode(
     @Query('address') address: string,
   ): Promise<GeocodeResponseDto> {
