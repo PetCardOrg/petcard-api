@@ -120,9 +120,12 @@ export class PlacesService {
       return [];
     }
 
+    // O locationRestriction do Places é aplicado de forma aproximada e devolve
+    // resultados fora do círculo. Reforçamos o raio com a distância real.
     return data.places
       .filter((place) => place.location)
-      .map((place) => this.mapPlaceToDto(place, params.lat, params.lng));
+      .map((place) => this.mapPlaceToDto(place, params.lat, params.lng))
+      .filter((clinic) => clinic.distanceMeters <= params.radiusMeters);
   }
 
   getPhotoUrl(photoName: string, maxWidth = 400): string {
