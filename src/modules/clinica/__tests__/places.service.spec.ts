@@ -174,7 +174,7 @@ describe('PlacesService', () => {
     expect(result).toEqual([]);
   });
 
-  it('inclui openNow no corpo da requisição quando solicitado', async () => {
+  it('não envia openNow ao Google — o searchNearby não aceita esse campo', async () => {
     const fetchMock = jest.fn().mockResolvedValue(okResponse({ places: [] }));
     global.fetch = fetchMock;
 
@@ -187,12 +187,61 @@ describe('PlacesService', () => {
     });
 
     const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
-    const body = JSON.parse(requestInit.body as string) as {
-      openNow?: boolean;
-      includedTypes: string[];
-    };
-    expect(body.openNow).toBe(true);
+    const body = JSON.parse(requestInit.body as string) as Record<
+      string,
+      unknown
+    >;
+    expect(body).not.toHaveProperty('openNow');
     expect(body.includedTypes).toContain('veterinary_care');
+  });
+
+  it('filtra por aberto agora usando o horário devolvido pelo Google', async () => {
+    const fechada = {
+      id: 'place-fechada',
+      displayName: { text: 'Clínica Fechada' },
+      location: { latitude: -3.735, longitude: -38.528 },
+      currentOpeningHours: { openNow: false },
+    };
+    const semHorario = {
+      id: 'place-sem-horario',
+      displayName: { text: 'Clínica Sem Horário' },
+      location: { latitude: -3.733, longitude: -38.527 },
+    };
+    global.fetch = jest.fn().mockResolvedValue(
+      okResponse({
+        places: [fullPlace, fechada, semHorario],
+      }),
+    );
+
+    const service = new PlacesService(makeConfig('key'));
+    const result = await service.searchNearbyVetClinics({
+      lat: userLat,
+      lng: userLng,
+      radiusMeters: 5000,
+      openNow: true,
+    });
+
+    expect(result.map((c) => c.placeId)).toEqual(['place-1']);
+  });
+
+  it('mantém clínicas fechadas quando openNow não é solicitado', async () => {
+    const fechada = {
+      id: 'place-fechada',
+      location: { latitude: -3.735, longitude: -38.528 },
+      currentOpeningHours: { openNow: false },
+    };
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue(okResponse({ places: [fullPlace, fechada] }));
+
+    const service = new PlacesService(makeConfig('key'));
+    const result = await service.searchNearbyVetClinics({
+      lat: userLat,
+      lng: userLng,
+      radiusMeters: 5000,
+    });
+
+    expect(result).toHaveLength(2);
   });
 
   it('lança 502 (BAD_GATEWAY) quando a resposta do Google não é ok', async () => {
