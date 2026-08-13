@@ -88,10 +88,6 @@ export class PlacesService {
       },
     };
 
-    if (params.openNow) {
-      body.openNow = true;
-    }
-
     const response = await fetch(
       'https://places.googleapis.com/v1/places:searchNearby',
       {
@@ -120,9 +116,15 @@ export class PlacesService {
       return [];
     }
 
+    // O locationRestriction do Places é aplicado de forma aproximada e devolve
+    // resultados fora do círculo. Reforçamos o raio com a distância real.
+    // O searchNearby também não aceita filtro de "aberto agora" na requisição,
+    // então ele é aplicado sobre o horário que vem na resposta.
     return data.places
       .filter((place) => place.location)
-      .map((place) => this.mapPlaceToDto(place, params.lat, params.lng));
+      .map((place) => this.mapPlaceToDto(place, params.lat, params.lng))
+      .filter((clinic) => clinic.distanceMeters <= params.radiusMeters)
+      .filter((clinic) => !params.openNow || clinic.openNow === true);
   }
 
   getPhotoUrl(photoName: string, maxWidth = 400): string {
