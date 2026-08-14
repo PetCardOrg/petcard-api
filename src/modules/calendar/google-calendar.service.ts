@@ -121,6 +121,18 @@ export class GoogleCalendarService {
         scopes: SCOPES,
       },
     });
+
+    // Recupera o que ficou para trás enquanto não havia conexão válida. Sem
+    // isso, quem reconecta depois de uma revogação nunca mais veria esses
+    // agendamentos na agenda — não há mais botão de sincronizar no app.
+    // Fora do caminho da resposta: a página de sucesso não espera o catch-up.
+    void this.syncAllPending(tutorId).catch((error: unknown) => {
+      this.logger.warn(
+        `Catch-up de sincronização falhou para o tutor ${tutorId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
   }
 
   async isConnected(tutorId: string): Promise<boolean> {

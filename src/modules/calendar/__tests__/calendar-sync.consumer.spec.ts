@@ -39,6 +39,7 @@ describe('CalendarSyncConsumer', () => {
   let calendarService: {
     syncAppointment: jest.Mock;
     deleteEvent: jest.Mock;
+    disconnect: jest.Mock;
   };
   let channel: { ack: jest.Mock; nack: jest.Mock; publish: jest.Mock };
 
@@ -46,6 +47,7 @@ describe('CalendarSyncConsumer', () => {
     calendarService = {
       syncAppointment: jest.fn().mockResolvedValue(undefined),
       deleteEvent: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
     };
     channel = { ack: jest.fn(), nack: jest.fn(), publish: jest.fn() };
 
@@ -136,6 +138,21 @@ describe('CalendarSyncConsumer', () => {
     expect(channel.ack).toHaveBeenCalledWith(message);
     expect(channel.publish).not.toHaveBeenCalled();
     expect(channel.nack).not.toHaveBeenCalled();
+    // Token morto é descartado para o status refletir a desconexão.
+    expect(calendarService.disconnect).toHaveBeenCalledWith('tutor-1');
+  });
+
+  it('não descarta o token em erro transitório', async () => {
+    const transient = Object.assign(new Error('Service Unavailable'), {
+      code: 503,
+    });
+    calendarService.syncAppointment.mockRejectedValue(transient);
+    const payload = createMessage({ action: 'UPDATE' });
+    const { context } = buildContext(channel, payload);
+
+    await consumer.handleSync(payload, context);
+
+    expect(calendarService.disconnect).not.toHaveBeenCalled();
   });
 
   it('acks UPDATE when the event is already gone (404)', async () => {

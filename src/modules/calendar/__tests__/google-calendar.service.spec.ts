@@ -168,6 +168,43 @@ describe('GoogleCalendarService', () => {
       expect(arg.update.expiresAt).toBeInstanceOf(Date);
     });
 
+    it('dispara o catch-up dos pendentes após conectar', async () => {
+      // Sem botão de sincronizar no app, reconectar é o momento de recuperar
+      // o que ficou para trás enquanto o token estava revogado.
+      const catchUp = jest
+        .spyOn(service, 'syncAllPending')
+        .mockResolvedValue(0);
+      mockOAuth2Instance.getToken.mockResolvedValue({
+        tokens: {
+          access_token: 'at-raw',
+          refresh_token: 'rt-raw',
+          expiry_date: 1_800_000_000_000,
+        },
+      });
+
+      await service.handleCallback('auth-code', 'tutor-1');
+
+      expect(catchUp).toHaveBeenCalledWith('tutor-1');
+    });
+
+    it('conclui a conexão mesmo se o catch-up falhar', async () => {
+      jest
+        .spyOn(service, 'syncAllPending')
+        .mockRejectedValue(new Error('google fora do ar'));
+      mockOAuth2Instance.getToken.mockResolvedValue({
+        tokens: {
+          access_token: 'at-raw',
+          refresh_token: 'rt-raw',
+          expiry_date: 1_800_000_000_000,
+        },
+      });
+
+      await expect(
+        service.handleCallback('auth-code', 'tutor-1'),
+      ).resolves.toBeUndefined();
+      expect(prisma.googleOAuthToken.upsert).toHaveBeenCalled();
+    });
+
     it('não re-cifra refresh token ausente no update', async () => {
       // Reconexão: o Google só manda refresh_token no primeiro consentimento.
       prisma.googleOAuthToken.findUnique.mockResolvedValue({

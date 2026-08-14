@@ -62,10 +62,14 @@ export class CalendarSyncConsumer {
       channel.ack(message);
     } catch (error) {
       // Refresh token revoked — only the tutor can fix this by reconnecting.
+      // Descarta o token morto para que /calendar/status pare de dizer que está
+      // conectado: é assim que o banner do app vira "conectar" e o tutor
+      // descobre que os agendamentos deixaram de ir para a agenda.
       if (this.isPermanentAuthError(error)) {
         this.logger.warn(
-          `Calendar OAuth revoked for appointment ${data.appointment_id}; ack without retry`,
+          `Calendar OAuth revoked for appointment ${data.appointment_id}; dropping stored token`,
         );
+        await this.calendarService.disconnect(data.tutor_id);
         channel.ack(message);
         return;
       }
