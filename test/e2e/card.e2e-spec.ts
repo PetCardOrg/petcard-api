@@ -58,7 +58,9 @@ describe('Carteira digital (e2e)', () => {
     expect(res.body.pet_name).toBe('Rex');
     expect(res.body.tutor_name).toBe('Alice Tutora');
     expect(res.body.vaccines).toEqual([]);
-    expect(res.body.clinical_notes).toEqual([]);
+    // api#114: a carteira pública não expõe medicações nem notas clínicas.
+    expect(res.body.medications).toEqual([]);
+    expect(res.body.clinical_notes).toBeUndefined();
   });
 
   it('retorna 404 para token inexistente', async () => {

@@ -200,9 +200,14 @@ describe('CardService', () => {
         id: 'v1',
         vaccine_name: 'V8',
       });
+      // api#114: a carteira pública não expõe medicações nem notas clínicas.
+      expect(result.medications).toEqual([]);
+      expect(
+        (result as Record<string, unknown>).clinical_notes,
+      ).toBeUndefined();
     });
 
-    it('should map optional fields of every health record when present', async () => {
+    it('should map vaccine/deworming optional fields and withhold sensitive clinical data (api#114)', async () => {
       prisma.carteiraDigital.findUnique.mockResolvedValue(
         makeCard({
           pet: {
@@ -278,18 +283,13 @@ describe('CardService', () => {
         veterinarian_name: 'Dra. Camila',
         notes: 'dose única',
       });
-      expect(result.medications[0]).toMatchObject({
-        medication_name: 'Apoquel',
-        end_date: '2026-04-15T10:00:00.000Z',
-        notes: 'com alimento',
-      });
-      expect(result.clinical_notes[0]).toMatchObject({
-        veterinario_nome: 'Camila Ferreira',
-        veterinario_crmv: 'CRMV-SP 12345',
-        google_place_id: 'place-123',
-        prescricao: 'Apoquel 16mg',
-        observacoes: 'retorno em 15 dias',
-      });
+      // api#114: mesmo com medicações e notas clínicas presentes no banco, a
+      // carteira pública NÃO as expõe — ficam restritas aos endpoints
+      // autenticados do tutor/veterinário.
+      expect(result.medications).toEqual([]);
+      expect(
+        (result as Record<string, unknown>).clinical_notes,
+      ).toBeUndefined();
     });
 
     it('should map absent optional fields to undefined', async () => {
@@ -359,15 +359,7 @@ describe('CardService', () => {
         veterinarian_name: undefined,
         notes: undefined,
       });
-      expect(result.medications[0]).toMatchObject({
-        end_date: undefined,
-        notes: undefined,
-      });
-      expect(result.clinical_notes[0]).toMatchObject({
-        google_place_id: undefined,
-        prescricao: undefined,
-        observacoes: undefined,
-      });
+      expect(result.medications).toEqual([]);
     });
 
     it('should throw NotFoundException for invalid token', async () => {
