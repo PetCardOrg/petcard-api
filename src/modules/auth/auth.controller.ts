@@ -11,6 +11,7 @@ import { CurrentUser } from './decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { Auth } from './decorators/auth.decorator';
+import { Public } from './decorators/public.decorator';
 import { Role } from './enums/role.enum';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import type { JwtPayload } from './strategies/jwt.strategy';
@@ -21,6 +22,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
+  @Public()
   @ApiOperation({ summary: 'Registrar novo tutor' })
   @ApiConflictResponse({ description: 'Email já cadastrado' })
   register(@Body() dto: RegisterDto) {
@@ -28,6 +30,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @Public()
   @ApiOperation({ summary: 'Login do tutor (JWT com role TUTOR)' })
   @ApiUnauthorizedResponse({ description: 'Credenciais inválidas' })
   login(@Body() dto: LoginDto) {
@@ -44,6 +47,7 @@ export class AuthController {
   }
 
   @Post('veterinario/login')
+  @Public()
   @ApiOperation({ summary: 'Login do veterinário (JWT com role VET)' })
   @ApiUnauthorizedResponse({ description: 'Credenciais inválidas' })
   loginVeterinario(@Body() dto: LoginDto) {

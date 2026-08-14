@@ -19,6 +19,7 @@ import {
 import type { Response } from 'express';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { GoogleCalendarService } from './google-calendar.service';
@@ -62,6 +63,7 @@ export class CalendarController {
   }
 
   @Get('callback')
+  @Public()
   @ApiOperation({
     summary: 'Callback OAuth do Google (redirecionamento do consentimento)',
   })
@@ -156,6 +158,7 @@ export class CalendarController {
   }
 
   @Get('dev-connect')
+  @Public()
   @ApiExcludeEndpoint()
   devConnect(@Res() res: Response) {
     if (this.configService.get('NODE_ENV') !== 'development') {
