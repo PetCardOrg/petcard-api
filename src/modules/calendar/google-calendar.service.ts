@@ -1,11 +1,20 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadGatewayException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { google, calendar_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EncryptionService } from '../../common/crypto/encryption.service';
+import { isAlreadyGoneError } from './google-api-error';
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
+
+/** Validade assumida quando o Google não informa expiry_date. */
+const DEFAULT_TOKEN_TTL_MS = 3_600_000;
 
 @Injectable()
 export class GoogleCalendarService {
@@ -52,26 +61,77 @@ export class GoogleCalendarService {
   }
 
   async handleCallback(code: string, tutorId: string): Promise<void> {
+    if (!this.isConfigured) {
+      throw new ServiceUnavailableException(
+        'Integração com o Google Calendar não está configurada no servidor.',
+      );
+    }
+
+    // O código do Google é de uso único: valida a chave antes de trocá-lo, senão
+    // o usuário precisa refazer o consentimento por uma falha de configuração.
+    this.encryption.assertConfigured();
+
     const oauth2Client = this.createOAuth2Client();
     const { tokens } = await oauth2Client.getToken(code);
+
+    if (!tokens.access_token) {
+      throw new BadGatewayException(
+        'O Google não devolveu um access token para esta autorização.',
+      );
+    }
+
+    // O refresh token só vem no primeiro consentimento. Numa reconexão, o Google
+    // pode omiti-lo — nesse caso mantemos o que já está salvo.
+    const novoRefreshToken = tokens.refresh_token
+      ? this.encryption.encrypt(tokens.refresh_token)
+      : undefined;
+
+    const existente = await this.prisma.googleOAuthToken.findUnique({
+      where: { tutorId },
+      select: { refreshToken: true },
+    });
+
+    const refreshTokenParaCriar = novoRefreshToken ?? existente?.refreshToken;
+    if (!refreshTokenParaCriar) {
+      throw new BadGatewayException(
+        'O Google não devolveu um refresh token. Remova o acesso do PetCard em ' +
+          'myaccount.google.com/permissions e conecte novamente.',
+      );
+    }
+
+    const accessToken = this.encryption.encrypt(tokens.access_token);
+    const expiresAt = tokens.expiry_date
+      ? new Date(tokens.expiry_date)
+      : new Date(Date.now() + DEFAULT_TOKEN_TTL_MS);
 
     await this.prisma.googleOAuthToken.upsert({
       where: { tutorId },
       update: {
-        accessToken: this.encryption.encrypt(tokens.access_token!),
-        refreshToken: tokens.refresh_token
-          ? this.encryption.encrypt(tokens.refresh_token)
-          : undefined,
-        expiresAt: new Date(tokens.expiry_date!),
+        accessToken,
+        // undefined preserva o refresh token já salvo.
+        refreshToken: novoRefreshToken,
+        expiresAt,
         scopes: SCOPES,
       },
       create: {
         tutorId,
-        accessToken: this.encryption.encrypt(tokens.access_token!),
-        refreshToken: this.encryption.encrypt(tokens.refresh_token!),
-        expiresAt: new Date(tokens.expiry_date!),
+        accessToken,
+        refreshToken: refreshTokenParaCriar,
+        expiresAt,
         scopes: SCOPES,
       },
+    });
+
+    // Recupera o que ficou para trás enquanto não havia conexão válida. Sem
+    // isso, quem reconecta depois de uma revogação nunca mais veria esses
+    // agendamentos na agenda — não há mais botão de sincronizar no app.
+    // Fora do caminho da resposta: a página de sucesso não espera o catch-up.
+    void this.syncAllPending(tutorId).catch((error: unknown) => {
+      this.logger.warn(
+        `Catch-up de sincronização falhou para o tutor ${tutorId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     });
   }
 
@@ -248,6 +308,14 @@ export class GoogleCalendarService {
         eventId: googleEventId,
       });
     } catch (error) {
+      // Apagar é idempotente: se o evento já não está lá, o objetivo foi
+      // atingido. Sem isso, apagar duas vezes virava erro, 3 retries e DLQ.
+      if (isAlreadyGoneError(error)) {
+        this.logger.log(
+          `Calendar event ${googleEventId} já não existe no Google; nada a apagar`,
+        );
+        return;
+      }
       this.logger.error(
         `Failed to delete calendar event ${googleEventId}`,
         error instanceof Error ? error.stack : error,

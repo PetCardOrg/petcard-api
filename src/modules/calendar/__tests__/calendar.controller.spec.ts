@@ -95,6 +95,59 @@ describe('CalendarController (integração)', () => {
       expect(res.text).toContain('conectado com sucesso');
       expect(calendar.handleCallback).toHaveBeenCalledWith('abc', 'tutor-1');
     });
+
+    it('responde 400 em página quando o usuário nega o consentimento', async () => {
+      harness.setUser(null);
+
+      const res = await request(harness.app.getHttpServer())
+        .get('/calendar/callback?error=access_denied&state=tutor-1')
+        .expect(400);
+
+      expect(res.text).toContain('Autorização não concluída');
+      expect(calendar.handleCallback).not.toHaveBeenCalled();
+    });
+
+    it('responde 400 em página quando faltam code ou state', async () => {
+      harness.setUser(null);
+
+      const res = await request(harness.app.getHttpServer())
+        .get('/calendar/callback?code=abc')
+        .expect(400);
+
+      expect(res.text).toContain('Link inválido');
+      expect(calendar.handleCallback).not.toHaveBeenCalled();
+    });
+
+    it('converte falha do serviço em página de erro, sem stack trace', async () => {
+      harness.setUser(null);
+      calendar.handleCallback.mockRejectedValue(
+        new Error(
+          'ENCRYPTION_KEY é obrigatória para cifrar/decifrar tokens OAuth.',
+        ),
+      );
+
+      const res = await request(harness.app.getHttpServer())
+        .get('/calendar/callback?code=abc&state=tutor-1')
+        .expect(500);
+
+      expect(res.text).toContain('Não foi possível conectar');
+      expect(res.text).toContain('ENCRYPTION_KEY');
+      expect(res.text).not.toContain('at GoogleCalendarService');
+    });
+
+    it('escapa HTML vindo da mensagem de erro', async () => {
+      harness.setUser(null);
+      calendar.handleCallback.mockRejectedValue(
+        new Error('<img src=x onerror=alert(1)>'),
+      );
+
+      const res = await request(harness.app.getHttpServer())
+        .get('/calendar/callback?code=abc&state=tutor-1')
+        .expect(500);
+
+      expect(res.text).not.toContain('<img src=x');
+      expect(res.text).toContain('&lt;img src=x');
+    });
   });
 
   describe('GET /calendar/dev-connect', () => {

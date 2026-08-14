@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Post,
   Query,
   Res,
@@ -22,9 +23,23 @@ import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { GoogleCalendarService } from './google-calendar.service';
 
+const HTML_ESCAPES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+};
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => HTML_ESCAPES[char]);
+}
+
 @ApiTags('calendar')
 @Controller('calendar')
 export class CalendarController {
+  private readonly logger = new Logger(CalendarController.name);
+
   constructor(
     private readonly googleCalendarService: GoogleCalendarService,
     private readonly configService: ConfigService,
@@ -52,15 +67,92 @@ export class CalendarController {
   })
   @ApiQuery({ name: 'code', description: 'Código de autorização do Google' })
   @ApiQuery({ name: 'state', description: 'Id do tutor originador do fluxo' })
+  @ApiQuery({
+    name: 'error',
+    required: false,
+    description: 'Preenchido pelo Google quando o consentimento é negado',
+  })
   async callback(
     @Query('code') code: string,
     @Query('state') tutorId: string,
+    @Query('error') error: string,
     @Res() res: Response,
   ) {
-    await this.googleCalendarService.handleCallback(code, tutorId);
-    res.send(
-      '<html><body><h2>Google Calendar conectado com sucesso!</h2><p>Pode fechar esta janela e voltar ao app.</p></body></html>',
-    );
+    // Esta rota é o retorno do navegador: qualquer falha precisa virar página,
+    // não um 500 com stack trace na cara do usuário.
+    if (error) {
+      this.logger.warn(`Consentimento negado no Google Calendar: ${error}`);
+      res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          this.renderCallbackPage(
+            false,
+            'Autorização não concluída',
+            'Você não autorizou o acesso ao Google Agenda. Volte ao app e tente de novo se quiser conectar.',
+          ),
+        );
+      return;
+    }
+
+    if (!code || !tutorId) {
+      this.logger.warn(
+        `Callback do Google Calendar sem parâmetros (code=${!!code}, state=${!!tutorId})`,
+      );
+      res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          this.renderCallbackPage(
+            false,
+            'Link inválido',
+            'Este endereço não veio de uma autorização válida do Google. Inicie a conexão pelo app.',
+          ),
+        );
+      return;
+    }
+
+    try {
+      await this.googleCalendarService.handleCallback(code, tutorId);
+      res.send(
+        this.renderCallbackPage(
+          true,
+          'Google Calendar conectado com sucesso!',
+          'Pode fechar esta janela e voltar ao app.',
+        ),
+      );
+    } catch (err) {
+      this.logger.error(
+        `Falha ao concluir o callback do Google Calendar (tutor ${tutorId})`,
+        err instanceof Error ? err.stack : err,
+      );
+      res
+        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .send(
+          this.renderCallbackPage(
+            false,
+            'Não foi possível conectar',
+            err instanceof Error
+              ? err.message
+              : 'Erro inesperado ao conectar o Google Agenda.',
+          ),
+        );
+    }
+  }
+
+  private renderCallbackPage(
+    ok: boolean,
+    title: string,
+    message: string,
+  ): string {
+    const accent = ok ? '#06A77D' : '#E63946';
+    return `<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>PetCard - Google Calendar</title>
+<style>
+  body { font-family: system-ui; max-width: 480px; margin: 40px auto; padding: 0 20px; background: #F6FBFE; color: #14313F; }
+  .card { background: #fff; border: 1px solid #D8EEF6; border-left: 4px solid ${accent}; border-radius: 12px; padding: 24px; }
+  h2 { color: ${accent}; margin-top: 0; }
+</style></head><body>
+<div class="card"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p></div>
+</body></html>`;
   }
 
   @Get('dev-connect')

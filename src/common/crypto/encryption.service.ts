@@ -35,6 +35,15 @@ export class EncryptionService {
     return key;
   }
 
+  /**
+   * Valida a configuração sem cifrar nada. Serve para falhar antes de operações
+   * irreversíveis — o código OAuth do Google é de uso único, então descobrir a
+   * chave ausente só na hora de cifrar obriga o usuário a refazer o consentimento.
+   */
+  assertConfigured(): void {
+    this.getKey();
+  }
+
   encrypt(plaintext: string): string {
     const key = this.getKey();
     const iv = randomBytes(IV_LENGTH);
