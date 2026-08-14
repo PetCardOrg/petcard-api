@@ -9,6 +9,7 @@ import { google, calendar_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EncryptionService } from '../../common/crypto/encryption.service';
+import { isAlreadyGoneError } from './google-api-error';
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
 
@@ -295,6 +296,14 @@ export class GoogleCalendarService {
         eventId: googleEventId,
       });
     } catch (error) {
+      // Apagar é idempotente: se o evento já não está lá, o objetivo foi
+      // atingido. Sem isso, apagar duas vezes virava erro, 3 retries e DLQ.
+      if (isAlreadyGoneError(error)) {
+        this.logger.log(
+          `Calendar event ${googleEventId} já não existe no Google; nada a apagar`,
+        );
+        return;
+      }
       this.logger.error(
         `Failed to delete calendar event ${googleEventId}`,
         error instanceof Error ? error.stack : error,

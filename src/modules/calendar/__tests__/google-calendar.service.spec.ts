@@ -445,6 +445,20 @@ describe('GoogleCalendarService', () => {
         'boom',
       );
     });
+
+    it.each([
+      ['410 (evento já apagado)', 410, 'Resource has been deleted'],
+      ['404 (evento inexistente)', 404, 'Not Found'],
+    ])('trata %s como sucesso — apagar é idempotente', async (_, code, msg) => {
+      prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
+      mockCalendarEvents.delete.mockRejectedValue(
+        Object.assign(new Error(msg), { code }),
+      );
+
+      await expect(
+        service.deleteEvent('tutor-1', 'evt-1'),
+      ).resolves.toBeUndefined();
+    });
   });
 
   describe('syncAppointment', () => {

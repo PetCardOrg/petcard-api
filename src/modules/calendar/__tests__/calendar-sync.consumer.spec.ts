@@ -150,6 +150,26 @@ describe('CalendarSyncConsumer', () => {
     expect(channel.publish).not.toHaveBeenCalled();
   });
 
+  it('acks DELETE when the event was already deleted (410)', async () => {
+    // O Google devolve 410 "Resource has been deleted" ao apagar o que já foi
+    // apagado. Antes isso rendia 3 retries e DLQ.
+    const gone = Object.assign(new Error('Resource has been deleted'), {
+      code: 410,
+    });
+    calendarService.deleteEvent.mockRejectedValue(gone);
+    const payload = createMessage({
+      action: 'DELETE',
+      google_event_id: 'evt-1',
+    });
+    const { context, message } = buildContext(channel, payload);
+
+    await consumer.handleSync(payload, context);
+
+    expect(channel.ack).toHaveBeenCalledWith(message);
+    expect(channel.publish).not.toHaveBeenCalled();
+    expect(channel.nack).not.toHaveBeenCalled();
+  });
+
   it('retries with incremented counter on a transient error', async () => {
     const transient = Object.assign(new Error('Service Unavailable'), {
       code: 503,
