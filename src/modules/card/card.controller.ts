@@ -13,6 +13,7 @@ import {
 } from '@petcardorg/shared';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { CardService } from './card.service';
@@ -35,6 +36,7 @@ export class CardController {
   }
 
   @Get(':token')
+  @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ 'public-card': {} })
   @ApiOperation({
