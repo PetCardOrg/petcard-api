@@ -35,6 +35,17 @@ describe('CrmvVerifiedGuard', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('bloqueia quando o sub do token não é um veterinário', async () => {
+    // Token de tutor com role VET: os dois logins leem tabelas diferentes.
+    verification.getStatus.mockRejectedValue(
+      new Error('Veterinário não encontrado'),
+    );
+
+    await expect(
+      guard.canActivate(contextComUsuario({ sub: 'tutor-1' })),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
   it('bloqueia quando não há usuário autenticado', async () => {
     await expect(
       guard.canActivate(contextComUsuario(undefined)),

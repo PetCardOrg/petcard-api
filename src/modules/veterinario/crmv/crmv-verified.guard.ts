@@ -26,7 +26,13 @@ export class CrmvVerifiedGuard implements CanActivate {
       throw new ForbiddenException('Autenticação de veterinário necessária.');
     }
 
-    const status = await this.crmvVerification.getStatus(user.sub);
+    // Um token pode trazer role VET sem que o sub seja um veterinário — os
+    // logins de tutor e de veterinário leem tabelas diferentes. Aqui isso é
+    // recusa de acesso, não "registro não encontrado".
+    const status = await this.crmvVerification
+      .getStatus(user.sub)
+      .catch(() => ({ verified: false }));
+
     if (!status.verified) {
       throw new ForbiddenException(
         'Seu CRMV precisa estar verificado para acessar dados clínicos. ' +
