@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { VeterinarioController } from '../veterinario.controller';
 import { VeterinarioService } from '../veterinario.service';
+import { CrmvVerificationService } from '../crmv/crmv-verification.service';
 
 describe('VeterinarioController (integração)', () => {
   let harness: ControllerHarness;
@@ -53,6 +54,13 @@ describe('VeterinarioController (integração)', () => {
       providers: [
         VeterinarioService,
         { provide: PrismaService, useValue: prisma },
+        {
+          provide: CrmvVerificationService,
+          useValue: {
+            getStatus: jest.fn().mockResolvedValue({ verified: false }),
+            verify: jest.fn().mockResolvedValue({ verified: true }),
+          },
+        },
       ],
     });
   });

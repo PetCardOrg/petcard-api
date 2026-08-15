@@ -1,6 +1,7 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import {
+  ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -8,6 +9,7 @@ import {
   ApiTooManyRequestsResponse,
 } from '@nestjs/swagger';
 import {
+  CarteiraDigitalClinicaResponseDto,
   CarteiraDigitalPublicResponseDto,
   CarteiraDigitalResponseDto,
 } from '@petcardorg/shared';
@@ -16,6 +18,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
+import { CrmvVerifiedGuard } from '../veterinario/crmv/crmv-verified.guard';
 import { CardService } from './card.service';
 
 @ApiTags('cards')
@@ -33,6 +36,26 @@ export class CardController {
     @CurrentUser() user: JwtPayload,
   ): Promise<CarteiraDigitalResponseDto> {
     return this.cardService.findByPetIdForTutor(petId, user.sub);
+  }
+
+  @Get(':token/clinico')
+  @Auth(Role.VET)
+  @UseGuards(CrmvVerifiedGuard)
+  @ApiOperation({
+    summary:
+      'Carteira clínica por token do QR (veterinário com CRMV verificado)',
+    description:
+      'Mesma carteira do QR, acrescida de medicações e notas clínicas — os ' +
+      'dados que a carteira pública não expõe. Exige CRMV verificado (api#113).',
+  })
+  @ApiOkResponse({ type: CarteiraDigitalClinicaResponseDto })
+  @ApiForbiddenResponse({ description: 'CRMV não verificado' })
+  @ApiNotFoundResponse({ description: 'Carteira não encontrada' })
+  async getClinicalCard(
+    @Param('token') token: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<CarteiraDigitalClinicaResponseDto> {
+    return this.cardService.findClinicaByToken(token, user.sub);
   }
 
   @Get(':token')

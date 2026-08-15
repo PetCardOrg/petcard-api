@@ -43,7 +43,7 @@
     "@nestjs/schedule": "^6.1.3",
     "@nestjs/swagger": "^11.4.4",
     "@nestjs/throttler": "^6.5.0",
-    "@petcardorg/shared": "^0.10.0",
+    "@petcardorg/shared": "^0.11.0",
     "@prisma/client": "^6.19.3",
     "amqp-connection-manager": "^5.0.0",
     "amqplib": "^1.0.3",

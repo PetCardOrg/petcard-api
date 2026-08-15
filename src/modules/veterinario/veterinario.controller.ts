@@ -10,13 +10,22 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiNotFoundResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiNotFoundResponse,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { CreateVeterinarioDto, UpdateVeterinarioDto } from '@petcardorg/shared';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
+import {
+  CrmvVerificationService,
+  type CrmvVerificationStatus,
+} from './crmv/crmv-verification.service';
 import {
   DashboardPetItem,
   PaginatedResponse,
@@ -27,7 +36,10 @@ import {
 @ApiTags('veterinarios')
 @Controller('veterinarios')
 export class VeterinarioController {
-  constructor(private readonly veterinarioService: VeterinarioService) {}
+  constructor(
+    private readonly veterinarioService: VeterinarioService,
+    private readonly crmvVerification: CrmvVerificationService,
+  ) {}
 
   @Post()
   @Auth(Role.VET)
@@ -36,6 +48,33 @@ export class VeterinarioController {
     @Body() dto: CreateVeterinarioDto,
   ): Promise<VeterinarioResponse> {
     return this.veterinarioService.create(dto);
+  }
+
+  // Declaradas antes de @Get(':id'), senão "me" seria capturado como id.
+  @Get('me/crmv')
+  @Auth(Role.VET)
+  @ApiOperation({ summary: 'Situação da verificação do meu CRMV' })
+  async crmvStatus(
+    @CurrentUser() user: JwtPayload,
+  ): Promise<CrmvVerificationStatus> {
+    return this.crmvVerification.getStatus(user.sub);
+  }
+
+  @Post('me/crmv/verificar')
+  @Auth(Role.VET)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verificar meu CRMV na base externa',
+    description:
+      'A consulta é paga por chamada: uma verificação dentro do prazo é ' +
+      'reaproveitada. Use force=true para consultar de novo mesmo assim.',
+  })
+  @ApiQuery({ name: 'force', required: false, type: Boolean })
+  async verificarCrmv(
+    @CurrentUser() user: JwtPayload,
+    @Query('force') force?: string,
+  ): Promise<CrmvVerificationStatus> {
+    return this.crmvVerification.verify(user.sub, force === 'true');
   }
 
   @Get('dashboard/pets')
