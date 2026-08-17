@@ -11,6 +11,8 @@ export const crmvConfig = registerAs('crmv', () => ({
   provider: process.env.CRMV_PROVIDER ?? 'stub',
   infosimplesToken: process.env.INFOSIMPLES_TOKEN,
   infosimplesUrl: process.env.INFOSIMPLES_CFMV_URL,
+  /** Filtro opcional de tipo de inscrição na consulta do CFMV. */
+  tipoInscricao: process.env.INFOSIMPLES_TIPO_INSCRICAO,
   timeoutMs: Number(process.env.CRMV_TIMEOUT_MS ?? 15000),
   /** Consulta é paga: revalidar só depois deste prazo. */
   ttlDays: Number(process.env.CRMV_TTL_DAYS ?? DEFAULT_TTL_DAYS),

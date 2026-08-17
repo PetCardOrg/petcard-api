@@ -29,6 +29,7 @@ export class InfosimplesCrmvValidator implements CrmvValidator {
   private readonly token: string;
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly tipoInscricao?: string;
 
   constructor(private readonly configService: ConfigService) {
     this.token = this.configService.get<string>('crmv.infosimplesToken') ?? '';
@@ -36,6 +37,7 @@ export class InfosimplesCrmvValidator implements CrmvValidator {
       this.configService.get<string>('crmv.infosimplesUrl') ??
       'https://api.infosimples.com/api/v2/consultas/cfmv/cadastro';
     this.timeoutMs = this.configService.get<number>('crmv.timeoutMs') ?? 15000;
+    this.tipoInscricao = this.configService.get<string>('crmv.tipoInscricao');
   }
 
   async validate(crmv: string, uf: string): Promise<CrmvValidationResult> {
@@ -50,6 +52,11 @@ export class InfosimplesCrmvValidator implements CrmvValidator {
     url.searchParams.set('token', this.token);
     url.searchParams.set('query', crmv);
     url.searchParams.set('uf', uf);
+    // A consulta aceita filtrar por tipo de inscrição (pessoa física/jurídica).
+    // Só é enviado quando configurado, para não engessar o contrato.
+    if (this.tipoInscricao) {
+      url.searchParams.set('tipo_inscricao', this.tipoInscricao);
+    }
     url.searchParams.set('timeout', String(Math.floor(this.timeoutMs / 1000)));
 
     let response: Response;
