@@ -3,7 +3,6 @@ import request from 'supertest';
 import {
   createControllerTestApp,
   ControllerHarness,
-  TUTOR,
   VET,
 } from '../../../../test/utils/controller-harness';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -24,6 +23,7 @@ describe('VeterinarioController (integração)', () => {
     notaClinica: { findMany: jest.Mock };
     pet: { findMany: jest.Mock };
   };
+  let crmv: { getStatus: jest.Mock; verify: jest.Mock };
 
   const vet = {
     id: 'vet-1',
@@ -48,19 +48,17 @@ describe('VeterinarioController (integração)', () => {
       notaClinica: { findMany: jest.fn() },
       pet: { findMany: jest.fn() },
     };
+    crmv = {
+      getStatus: jest.fn().mockResolvedValue({ verified: false }),
+      verify: jest.fn().mockResolvedValue({ verified: true }),
+    };
 
     harness = await createControllerTestApp({
       controllers: [VeterinarioController],
       providers: [
         VeterinarioService,
         { provide: PrismaService, useValue: prisma },
-        {
-          provide: CrmvVerificationService,
-          useValue: {
-            getStatus: jest.fn().mockResolvedValue({ verified: false }),
-            verify: jest.fn().mockResolvedValue({ verified: true }),
-          },
-        },
+        { provide: CrmvVerificationService, useValue: crmv },
       ],
     });
   });
@@ -74,63 +72,30 @@ describe('VeterinarioController (integração)', () => {
     harness.setUser(VET);
   });
 
-  describe('POST /veterinarios', () => {
-    it('cria um veterinário e não expõe o password (201)', async () => {
-      prisma.veterinario.findUnique.mockResolvedValue(null);
-      prisma.veterinario.create.mockResolvedValue(vet);
-
+  describe('CRMV do próprio veterinário', () => {
+    it('GET /veterinarios/me/crmv devolve a situação (200)', async () => {
       const res = await request(harness.app.getHttpServer())
-        .post('/veterinarios')
-        .send({
-          nome: 'Dra. Vet',
-          email: 'vet@petcard.com',
-          password: 'senha-forte',
-          crmv: 'CRMV-123',
-        })
-        .expect(201);
+        .get('/veterinarios/me/crmv')
+        .expect(200);
 
-      expect(res.body.id).toBe('vet-1');
-      expect(res.body.password).toBeUndefined();
+      expect(res.body.verified).toBe(false);
     });
 
-    it('proíbe TUTOR de criar veterinário (403)', async () => {
-      harness.setUser(TUTOR);
+    it('POST /veterinarios/me/crmv/verificar dispara a consulta (200)', async () => {
+      const res = await request(harness.app.getHttpServer())
+        .post('/veterinarios/me/crmv/verificar')
+        .expect(200);
 
-      await request(harness.app.getHttpServer())
-        .post('/veterinarios')
-        .send({
-          nome: 'Dra. Vet',
-          email: 'vet@petcard.com',
-          password: 'senha-forte',
-          crmv: 'CRMV-123',
-        })
-        .expect(403);
+      expect(res.body.verified).toBe(true);
+      expect(crmv.verify).toHaveBeenCalledWith('vet-1', false);
     });
 
-    it('rejeita payload inválido (400)', async () => {
+    it('POST .../verificar?force=true reconsulta mesmo dentro do prazo', async () => {
       await request(harness.app.getHttpServer())
-        .post('/veterinarios')
-        .send({ nome: 'Dra. Vet' })
-        .expect(400);
+        .post('/veterinarios/me/crmv/verificar?force=true')
+        .expect(200);
 
-      expect(prisma.veterinario.create).not.toHaveBeenCalled();
-    });
-
-    it('rejeita email já cadastrado (409)', async () => {
-      prisma.veterinario.findUnique.mockResolvedValue({
-        ...vet,
-        id: 'outro',
-      });
-
-      await request(harness.app.getHttpServer())
-        .post('/veterinarios')
-        .send({
-          nome: 'Dra. Vet',
-          email: 'vet@petcard.com',
-          password: 'senha-forte',
-          crmv: 'CRMV-123',
-        })
-        .expect(409);
+      expect(crmv.verify).toHaveBeenCalledWith('vet-1', true);
     });
   });
 

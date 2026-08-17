@@ -15,6 +15,7 @@ describe('AuthController (integração)', () => {
     register: jest.Mock;
     login: jest.Mock;
     loginVeterinario: jest.Mock;
+    registerVeterinario: jest.Mock;
     getVeterinarioProfile: jest.Mock;
   };
 
@@ -23,6 +24,7 @@ describe('AuthController (integração)', () => {
       register: jest.fn(),
       login: jest.fn(),
       loginVeterinario: jest.fn(),
+      registerVeterinario: jest.fn(),
       getVeterinarioProfile: jest.fn(),
     };
 
@@ -106,6 +108,35 @@ describe('AuthController (integração)', () => {
   });
 
   describe('Veterinário', () => {
+    it('POST /auth/veterinario/register cadastra sem autenticação (201)', async () => {
+      auth.registerVeterinario.mockResolvedValue({
+        access_token: 'jwt-vet',
+        crmv_verificado: true,
+      });
+
+      const res = await request(harness.app.getHttpServer())
+        .post('/auth/veterinario/register')
+        .send({
+          nome: 'Dr. Carlos',
+          email: 'carlos@vet.com',
+          password: 'senha-forte',
+          crmv: 'CRMV-SP 12345',
+        })
+        .expect(201);
+
+      expect(res.body.access_token).toBe('jwt-vet');
+      expect(res.body.crmv_verificado).toBe(true);
+    });
+
+    it('POST /auth/veterinario/register rejeita payload inválido (400)', async () => {
+      await request(harness.app.getHttpServer())
+        .post('/auth/veterinario/register')
+        .send({ nome: 'Dr. Carlos' })
+        .expect(400);
+
+      expect(auth.registerVeterinario).not.toHaveBeenCalled();
+    });
+
     it('POST /auth/veterinario/login autentica (201)', async () => {
       auth.loginVeterinario.mockResolvedValue({ access_token: 'jwt-vet' });
 

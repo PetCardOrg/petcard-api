@@ -3,22 +3,19 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { VeterinarioService } from '../veterinario.service';
 
-// bcrypt is not installed in the local node_modules (native dependency —
-// same issue as auth.service.spec.ts). We mock the entire module so the
-// test suite can run without the native binary.
-jest.mock(
-  'bcrypt',
-  () => ({
+// Mock do bcrypt para o teste não pagar o custo do hash real.
+// Sem `virtual: true`: bcrypt existe em disco, e marcá-lo como virtual fazia o
+// Jest às vezes resolver o módulo real a partir do cache de transform, o que
+// derrubava os testes em execuções alternadas (api#107).
+jest.mock('bcrypt', () => ({
+  hash: jest.fn().mockResolvedValue('hashed-password'),
+  compare: jest.fn(),
+  __esModule: true,
+  default: {
     hash: jest.fn().mockResolvedValue('hashed-password'),
     compare: jest.fn(),
-    __esModule: true,
-    default: {
-      hash: jest.fn().mockResolvedValue('hashed-password'),
-      compare: jest.fn(),
-    },
-  }),
-  { virtual: true },
-);
+  },
+}));
 
 describe('VeterinarioService', () => {
   let service: VeterinarioService;
@@ -62,53 +59,6 @@ describe('VeterinarioService', () => {
     }).compile();
 
     service = module.get<VeterinarioService>(VeterinarioService);
-  });
-
-  describe('create', () => {
-    it('should create a veterinario and omit password from response', async () => {
-      prisma.veterinario.findUnique.mockResolvedValue(null);
-      prisma.veterinario.create.mockResolvedValue(vetFixture);
-
-      const result = await service.create({
-        nome: 'Dr. Carlos',
-        email: 'carlos@vet.com',
-        password: 'secret123',
-        crmv: 'CRMV-CE-12345',
-        telefone: '85999999999',
-      });
-
-      expect(result).not.toHaveProperty('password');
-      expect(result.nome).toBe('Dr. Carlos');
-      expect(result.crmv).toBe('CRMV-CE-12345');
-    });
-
-    it('should throw ConflictException when email is duplicated', async () => {
-      prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);
-
-      await expect(
-        service.create({
-          nome: 'Dr. Ana',
-          email: 'carlos@vet.com',
-          password: 'secret123',
-          crmv: 'CRMV-CE-99999',
-        }),
-      ).rejects.toThrow(ConflictException);
-    });
-
-    it('should throw ConflictException when CRMV is duplicated', async () => {
-      prisma.veterinario.findUnique
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(vetFixture);
-
-      await expect(
-        service.create({
-          nome: 'Dr. Ana',
-          email: 'ana@vet.com',
-          password: 'secret123',
-          crmv: 'CRMV-CE-12345',
-        }),
-      ).rejects.toThrow(ConflictException);
-    });
   });
 
   describe('findAll', () => {

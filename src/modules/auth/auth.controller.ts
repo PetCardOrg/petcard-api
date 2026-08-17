@@ -6,6 +6,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { CreateVeterinarioDto } from '@petcardorg/shared';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
@@ -44,6 +45,20 @@ export class AuthController {
   @ApiUnauthorizedResponse({ description: 'Token ausente ou inválido' })
   getProfile(@CurrentUser() user: JwtPayload): JwtPayload {
     return user;
+  }
+
+  @Post('veterinario/register')
+  @Public()
+  @ApiOperation({
+    summary: 'Cadastrar veterinário (JWT com role VET)',
+    description:
+      'O CRMV é validado na base externa durante o cadastro. Se o provedor ' +
+      'estiver indisponível, a conta é criada mesmo assim como não ' +
+      'verificada — veja `crmv_verificado` na resposta.',
+  })
+  @ApiConflictResponse({ description: 'Email ou CRMV já cadastrado' })
+  registerVeterinario(@Body() dto: CreateVeterinarioDto) {
+    return this.authService.registerVeterinario(dto);
   }
 
   @Post('veterinario/login')

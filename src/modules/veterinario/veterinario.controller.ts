@@ -20,7 +20,7 @@ import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
-import { CreateVeterinarioDto, UpdateVeterinarioDto } from '@petcardorg/shared';
+import { UpdateVeterinarioDto } from '@petcardorg/shared';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import {
   CrmvVerificationService,
@@ -40,15 +40,6 @@ export class VeterinarioController {
     private readonly veterinarioService: VeterinarioService,
     private readonly crmvVerification: CrmvVerificationService,
   ) {}
-
-  @Post()
-  @Auth(Role.VET)
-  @ApiOperation({ summary: 'Cadastrar veterinário' })
-  async create(
-    @Body() dto: CreateVeterinarioDto,
-  ): Promise<VeterinarioResponse> {
-    return this.veterinarioService.create(dto);
-  }
 
   // Declaradas antes de @Get(':id'), senão "me" seria capturado como id.
   @Get('me/crmv')

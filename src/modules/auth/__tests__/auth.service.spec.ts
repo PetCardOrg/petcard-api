@@ -1,26 +1,32 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { CrmvVerificationService } from '../../veterinario/crmv/crmv-verification.service';
 import { AuthService } from '../auth.service';
 
-jest.mock(
-  'bcrypt',
-  () => ({
-    hash: jest.fn(),
-    compare: jest.fn(),
-  }),
-  { virtual: true },
-);
+// Sem `virtual: true`: bcrypt existe em disco, e marcá-lo como virtual fazia o
+// Jest às vezes resolver o módulo real a partir do cache de transform. O hash
+// verdadeiro então não batia com a fixture e o login falhava em execuções
+// alternadas — a instabilidade da api#107.
+jest.mock('bcrypt', () => ({
+  hash: jest.fn(),
+  compare: jest.fn(),
+}));
 
 describe('AuthService', () => {
   let service: AuthService;
   let prisma: {
     tutor: { findUnique: jest.Mock; create: jest.Mock };
-    veterinario: { findUnique: jest.Mock };
+    veterinario: { findUnique: jest.Mock; create: jest.Mock };
   };
   let jwtService: { sign: jest.Mock };
+  let crmvVerification: { parseCrmv: jest.Mock; verify: jest.Mock };
 
   const tutorFixture = {
     id: 'tutor-1',
@@ -38,15 +44,21 @@ describe('AuthService', () => {
       },
       veterinario: {
         findUnique: jest.fn(),
+        create: jest.fn(),
       },
     };
     jwtService = { sign: jest.fn().mockReturnValue('jwt-token') };
+    crmvVerification = {
+      parseCrmv: jest.fn().mockReturnValue({ numero: '12345', uf: 'SP' }),
+      verify: jest.fn().mockResolvedValue({ verified: true }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
         { provide: PrismaService, useValue: prisma },
         { provide: JwtService, useValue: jwtService },
+        { provide: CrmvVerificationService, useValue: crmvVerification },
       ],
     }).compile();
 
@@ -114,6 +126,107 @@ describe('AuthService', () => {
       await expect(
         service.login({ email: 'unknown@example.com', password: '123456' }),
       ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('registerVeterinario', () => {
+    const novoVet = {
+      nome: 'Dr. Carlos',
+      email: 'carlos@vet.com',
+      password: 'senha-forte',
+      crmv: 'CRMV-SP 12345',
+      telefone: '85999999999',
+    };
+    const vetCriado = {
+      id: 'vet-9',
+      nome: 'Dr. Carlos',
+      email: 'carlos@vet.com',
+      password: 'hashed-password',
+      crmv: 'CRMV-SP 12345',
+      telefone: '85999999999',
+    };
+
+    beforeEach(() => {
+      prisma.veterinario.findUnique.mockResolvedValue(null);
+      prisma.veterinario.create.mockResolvedValue(vetCriado);
+      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
+    });
+
+    it('cria o veterinário, verifica o CRMV e devolve token', async () => {
+      const result = await service.registerVeterinario(novoVet);
+
+      expect(result.access_token).toBe('jwt-token');
+      expect(result.user.crmv).toBe('CRMV-SP 12345');
+      expect(result.user.role).toBe('VET');
+      expect(result.crmv_verificado).toBe(true);
+      expect(crmvVerification.verify).toHaveBeenCalledWith('vet-9');
+    });
+
+    it('não devolve o hash da senha', async () => {
+      const result = await service.registerVeterinario(novoVet);
+
+      expect(result.user).not.toHaveProperty('password');
+    });
+
+    it('grava a senha cifrada, nunca em texto puro', async () => {
+      await service.registerVeterinario(novoVet);
+
+      const [[chamada]] = prisma.veterinario.create.mock.calls as Array<
+        [{ data: { password: string } }]
+      >;
+      expect(chamada.data.password).toBe('hashed-password');
+      expect(chamada.data.password).not.toBe('senha-forte');
+    });
+
+    it('recusa email já cadastrado (409)', async () => {
+      prisma.veterinario.findUnique.mockResolvedValueOnce(vetCriado);
+
+      await expect(service.registerVeterinario(novoVet)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(prisma.veterinario.create).not.toHaveBeenCalled();
+    });
+
+    it('recusa CRMV já cadastrado (409)', async () => {
+      prisma.veterinario.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(vetCriado);
+
+      await expect(service.registerVeterinario(novoVet)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(prisma.veterinario.create).not.toHaveBeenCalled();
+    });
+
+    it('recusa CRMV mal formatado antes de criar a conta', async () => {
+      crmvVerification.parseCrmv.mockImplementation(() => {
+        throw new BadRequestException('formato inválido');
+      });
+
+      await expect(service.registerVeterinario(novoVet)).rejects.toThrow(
+        BadRequestException,
+      );
+      // Não pode sobrar conta órfã de um CRMV que nunca será verificável.
+      expect(prisma.veterinario.create).not.toHaveBeenCalled();
+    });
+
+    it('cria a conta mesmo se o provedor de CRMV estiver fora do ar', async () => {
+      crmvVerification.verify.mockRejectedValue(
+        new Error('provedor indisponível'),
+      );
+
+      const result = await service.registerVeterinario(novoVet);
+
+      expect(result.access_token).toBe('jwt-token');
+      expect(result.crmv_verificado).toBe(false);
+    });
+
+    it('marca como não verificado quando o registro é recusado', async () => {
+      crmvVerification.verify.mockResolvedValue({ verified: false });
+
+      const result = await service.registerVeterinario(novoVet);
+
+      expect(result.crmv_verificado).toBe(false);
     });
   });
 
