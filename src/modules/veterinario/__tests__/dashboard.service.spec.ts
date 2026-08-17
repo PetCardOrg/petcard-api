@@ -2,19 +2,15 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { VeterinarioService } from '../veterinario.service';
 
-jest.mock(
-  'bcrypt',
-  () => ({
+jest.mock('bcrypt', () => ({
+  hash: jest.fn().mockResolvedValue('hashed-password'),
+  compare: jest.fn(),
+  __esModule: true,
+  default: {
     hash: jest.fn().mockResolvedValue('hashed-password'),
     compare: jest.fn(),
-    __esModule: true,
-    default: {
-      hash: jest.fn().mockResolvedValue('hashed-password'),
-      compare: jest.fn(),
-    },
-  }),
-  { virtual: true },
-);
+  },
+}));
 
 describe('VeterinarioService - findAttendedPets', () => {
   let service: VeterinarioService;

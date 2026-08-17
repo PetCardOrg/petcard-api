@@ -16,3 +16,7 @@ process.env.FCM_ENABLED ??= 'false';
 // Geocoding/Places exigem a chave no construtor; os fluxos de clínica não são
 // exercitados no e2e, então um valor dummy só satisfaz o boot.
 process.env.GOOGLE_MAPS_API_KEY ??= 'test-google-maps-key';
+// Atribuição direta, não `??=`: a consulta de CRMV é paga por chamada, e um
+// `.env` de desenvolvimento com CRMV_PROVIDER=infosimples faria o e2e gastar
+// dinheiro de verdade. O teste nunca fala com o provedor real.
+process.env.CRMV_PROVIDER = 'stub';

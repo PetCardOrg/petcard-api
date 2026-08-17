@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, Veterinario } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateVeterinarioDto, UpdateVeterinarioDto } from '@petcardorg/shared';
+import { UpdateVeterinarioDto } from '@petcardorg/shared';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -43,24 +43,6 @@ function toResponse(vet: Veterinario): VeterinarioResponse {
 @Injectable()
 export class VeterinarioService {
   constructor(private readonly prisma: PrismaService) {}
-
-  async create(dto: CreateVeterinarioDto): Promise<VeterinarioResponse> {
-    await this.assertUniqueFields(dto.email, dto.crmv);
-
-    const hashedPassword = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
-
-    const vet = await this.prisma.veterinario.create({
-      data: {
-        nome: dto.nome,
-        email: dto.email,
-        password: hashedPassword,
-        crmv: dto.crmv,
-        telefone: dto.telefone,
-      },
-    });
-
-    return toResponse(vet);
-  }
 
   async findAll(): Promise<VeterinarioResponse[]> {
     const vets = await this.prisma.veterinario.findMany({

@@ -1,9 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule, type JwtModuleOptions } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { PrismaModule } from '../../prisma/prisma.module';
+import { VeterinarioModule } from '../veterinario/veterinario.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -23,6 +24,9 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       }),
     }),
     PrismaModule,
+    // O cadastro de veterinário verifica o CRMV; o módulo de veterinário, por
+    // sua vez, depende dos guards daqui. forwardRef resolve o ciclo.
+    forwardRef(() => VeterinarioModule),
   ],
   controllers: [AuthController],
   providers: [

@@ -83,6 +83,77 @@ describe('Auth (e2e)', () => {
   });
 
   describe('Veterinário', () => {
+    const novoVet = {
+      nome: 'Dr. Carlos',
+      email: 'carlos@vet.com',
+      password: 'senha-forte',
+      crmv: 'CRMV-SP 12345',
+    };
+
+    it('cadastra sem autenticação, já verificado, e acessa a área do vet', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/auth/veterinario/register')
+        .send(novoVet)
+        .expect(201);
+
+      // O stub aprova qualquer CRMV bem formado, então o cadastro já sai
+      // verificado e o vet não esbarra no bloqueio da api#113.
+      expect(res.body.crmv_verificado).toBe(true);
+      expect(res.body.user.password).toBeUndefined();
+
+      const profile = await request(app.getHttpServer())
+        .get('/auth/veterinario/profile')
+        .set('Authorization', `Bearer ${res.body.access_token as string}`)
+        .expect(200);
+      expect(profile.body.crmv).toBe('CRMV-SP 12345');
+    });
+
+    it('cadastra como não verificado quando o CRMV é recusado', async () => {
+      // 00000 é o número reservado que o stub recusa.
+      const res = await request(app.getHttpServer())
+        .post('/auth/veterinario/register')
+        .send({ ...novoVet, crmv: 'CRMV-SP 00000' })
+        .expect(201);
+
+      expect(res.body.crmv_verificado).toBe(false);
+      expect(res.body.access_token).toBeDefined();
+    });
+
+    it('rejeita CRMV em formato irreconhecível (400)', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/veterinario/register')
+        .send({ ...novoVet, crmv: 'não é um crmv' })
+        .expect(400);
+
+      expect(await prisma.veterinario.count()).toBe(0);
+    });
+
+    it('rejeita CRMV já cadastrado (409)', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/veterinario/register')
+        .send(novoVet)
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/auth/veterinario/register')
+        .send({ ...novoVet, email: 'outro@vet.com' })
+        .expect(409);
+    });
+
+    it('faz login com a conta recém-cadastrada', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/veterinario/register')
+        .send(novoVet)
+        .expect(201);
+
+      const login = await request(app.getHttpServer())
+        .post('/auth/veterinario/login')
+        .send({ email: novoVet.email, password: novoVet.password })
+        .expect(201);
+
+      expect(login.body.access_token).toBeDefined();
+    });
+
     it('faz login e acessa o perfil de vet', async () => {
       const { token, user } = await createAndLoginVet(app, prisma);
       expect(user.crmv).toBe('CRMV-CE-1234');
