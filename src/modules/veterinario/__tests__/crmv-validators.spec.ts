@@ -15,6 +15,16 @@ const makeConfig = (token?: string): ConfigService =>
 const okResponse = (body: unknown) =>
   ({ ok: true, json: () => Promise.resolve(body) }) as unknown as Response;
 
+/** Envelope real da Infosimples: data[] agrupa consultas, resultados[] traz os registros. */
+const respostaCfmv = (resultados: unknown[]) =>
+  okResponse({
+    code: 200,
+    code_message: 'A requisição foi processada com sucesso.',
+    errors: [],
+    data_count: 1,
+    data: [{ resultados, site_receipt: 'https://exemplo/recibo' }],
+  });
+
 describe('StubCrmvValidator', () => {
   const validator = new StubCrmvValidator();
 
@@ -53,29 +63,46 @@ describe('InfosimplesCrmvValidator', () => {
     );
   });
 
-  it('considera regular quando a situação é Ativo', async () => {
+  it('considera regular quando a situação é ativo', async () => {
+    // A API devolve a situação em minúsculas.
     global.fetch = jest.fn().mockResolvedValue(
-      okResponse({
-        code: 600,
-        data: [{ nome: 'Camila Ferreira', crmv: '12345', situacao: 'Ativo' }],
-      }),
+      respostaCfmv([
+        {
+          nome: 'Camila Ferreira',
+          crmv: '12345',
+          situacao: 'ativo',
+          uf: 'SP',
+        },
+      ]),
     );
     const validator = new InfosimplesCrmvValidator(makeConfig('tok'));
 
     await expect(validator.validate('12345', 'SP')).resolves.toEqual({
       valid: true,
-      situacao: 'Ativo',
+      situacao: 'ativo',
       nome: 'Camila Ferreira',
     });
   });
 
+  it('lê o registro dentro de data[].resultados[], não de data[]', async () => {
+    // Guarda contra a leitura ingênua do envelope: sem descer em `resultados`
+    // nenhum registro é encontrado e todo vet seria recusado.
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue(respostaCfmv([{ situacao: 'ativo', nome: 'X' }]));
+    const validator = new InfosimplesCrmvValidator(makeConfig('tok'));
+
+    await expect(validator.validate('12345', 'SP')).resolves.toMatchObject({
+      valid: true,
+    });
+  });
+
   it('recusa situação irregular', async () => {
-    global.fetch = jest.fn().mockResolvedValue(
-      okResponse({
-        code: 600,
-        data: [{ nome: 'Fulano', crmv: '12345', situacao: 'Suspenso' }],
-      }),
-    );
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue(
+        respostaCfmv([{ nome: 'Fulano', crmv: '12345', situacao: 'Suspenso' }]),
+      );
     const validator = new InfosimplesCrmvValidator(makeConfig('tok'));
 
     await expect(validator.validate('12345', 'SP')).resolves.toMatchObject({
@@ -118,9 +145,7 @@ describe('InfosimplesCrmvValidator', () => {
   });
 
   it('envia token, crmv e uf na consulta', async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValue(okResponse({ code: 600, data: [] }));
+    const fetchMock = jest.fn().mockResolvedValue(respostaCfmv([]));
     global.fetch = fetchMock;
     const validator = new InfosimplesCrmvValidator(makeConfig('tok-123'));
 
@@ -130,5 +155,16 @@ describe('InfosimplesCrmvValidator', () => {
     expect(url.searchParams.get('token')).toBe('tok-123');
     expect(url.searchParams.get('query')).toBe('12345');
     expect(url.searchParams.get('uf')).toBe('SP');
+    // Veterinário é pessoa física (0); a clínica seria 1.
+    expect(url.searchParams.get('tipo_inscricao')).toBe('0');
+  });
+
+  it('recusa quando a consulta volta sem resultados', async () => {
+    global.fetch = jest.fn().mockResolvedValue(respostaCfmv([]));
+    const validator = new InfosimplesCrmvValidator(makeConfig('tok'));
+
+    await expect(validator.validate('12345', 'SP')).resolves.toMatchObject({
+      valid: false,
+    });
   });
 });
