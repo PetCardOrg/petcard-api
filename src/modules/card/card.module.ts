@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from '../auth/auth.module';
 import { TutorModule } from '../tutor/tutor.module';
+import { VeterinarioModule } from '../veterinario/veterinario.module';
 import { CardController } from './card.controller';
 import { CardService } from './card.service';
 
@@ -10,6 +11,7 @@ import { CardService } from './card.service';
   imports: [
     AuthModule,
     TutorModule,
+    VeterinarioModule,
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

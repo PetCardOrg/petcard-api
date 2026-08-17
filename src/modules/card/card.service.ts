@@ -9,6 +9,7 @@ import * as QRCode from 'qrcode';
 import {
   CarteiraDigitalResponseDto,
   CarteiraDigitalPublicResponseDto,
+  CarteiraDigitalClinicaResponseDto,
   Sex,
   Species,
 } from '@petcardorg/shared';
@@ -133,6 +134,67 @@ export class CardService {
       // mantido (vazio) por compatibilidade com o DTO/consumidores (web).
       medications: [],
       issued_at: card.createdAt,
+    };
+  }
+
+  /**
+   * Carteira vista por veterinário com CRMV verificado que possui o token do
+   * QR (api#113). Reaproveita a carteira pública e devolve, por cima, o que a
+   * api#114 tirou dela por ser sensível: medicações e notas clínicas.
+   *
+   * O controle de acesso mora nos guards da rota — aqui já se assume que o
+   * chamador foi autenticado, tem papel VET e está com o CRMV verificado.
+   */
+  async findClinicaByToken(
+    token: string,
+    veterinarioId: string,
+  ): Promise<CarteiraDigitalClinicaResponseDto> {
+    const publica = await this.findPublicByToken(token);
+
+    const [vet, medications, notas] = await Promise.all([
+      this.prisma.veterinario.findUnique({
+        where: { id: veterinarioId },
+        select: { crmv: true },
+      }),
+      this.prisma.medicationRecord.findMany({
+        where: { petId: publica.pet_id },
+        orderBy: { startDate: 'desc' },
+      }),
+      this.prisma.notaClinica.findMany({
+        where: { petId: publica.pet_id },
+        orderBy: { createdAt: 'desc' },
+        include: { veterinario: { select: { nome: true, crmv: true } } },
+      }),
+    ]);
+
+    return {
+      ...publica,
+      medications: medications.map((r) => ({
+        id: r.id,
+        pet_id: r.petId,
+        medication_name: r.medicationName,
+        dosage: r.dosage,
+        frequency: r.frequency,
+        start_date: r.startDate.toISOString(),
+        end_date: r.endDate?.toISOString(),
+        notes: r.notes ?? undefined,
+        created_at: r.createdAt,
+        updated_at: r.updatedAt,
+      })),
+      clinical_notes: notas.map((n) => ({
+        id: n.id,
+        pet_id: n.petId,
+        veterinario_id: n.veterinarioId,
+        veterinario_nome: n.veterinario.nome,
+        veterinario_crmv: n.veterinario.crmv,
+        google_place_id: n.googlePlaceId ?? undefined,
+        diagnostico: n.diagnostico,
+        prescricao: n.prescricao ?? undefined,
+        observacoes: n.observacoes ?? undefined,
+        created_at: n.createdAt,
+        updated_at: n.updatedAt,
+      })),
+      accessed_by_crmv: vet?.crmv ?? '',
     };
   }
 

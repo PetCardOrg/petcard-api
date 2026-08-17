@@ -23,6 +23,9 @@ describe('CardService', () => {
     pet: {
       findUnique: jest.Mock;
     };
+    veterinario: { findUnique: jest.Mock };
+    medicationRecord: { findMany: jest.Mock };
+    notaClinica: { findMany: jest.Mock };
   };
   let configService: { get: jest.Mock };
   let tutorService: { findById: jest.Mock };
@@ -38,6 +41,9 @@ describe('CardService', () => {
       pet: {
         findUnique: jest.fn(),
       },
+      veterinario: { findUnique: jest.fn() },
+      medicationRecord: { findMany: jest.fn().mockResolvedValue([]) },
+      notaClinica: { findMany: jest.fn().mockResolvedValue([]) },
     };
     configService = {
       get: jest.fn().mockReturnValue('https://card.petcard.app'),
@@ -368,6 +374,97 @@ describe('CardService', () => {
       await expect(service.findPublicByToken('bad')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('findClinicaByToken (api#113)', () => {
+    const baseDate = new Date('2026-04-01T10:00:00Z');
+
+    beforeEach(() => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue({
+        id: 'card-1',
+        petId: 'pet-1',
+        token: 'tok-abc',
+        qrCodeUrl: null,
+        createdAt: baseDate,
+        pet: {
+          id: 'pet-1',
+          name: 'Rex',
+          species: Species.DOG,
+          breed: null,
+          sex: Sex.MALE,
+          birthDate: null,
+          weight: null,
+          photoUrl: null,
+          tutor: { name: 'Alice' },
+          vaccineRecords: [],
+          dewormingRecords: [],
+        },
+      });
+      prisma.veterinario.findUnique.mockResolvedValue({
+        crmv: 'CRMV-SP 12345',
+      });
+    });
+
+    it('devolve o que a carteira pública esconde: medicações e notas', async () => {
+      prisma.medicationRecord.findMany.mockResolvedValue([
+        {
+          id: 'm1',
+          petId: 'pet-1',
+          medicationName: 'Dipirona',
+          dosage: '10mg',
+          frequency: '8h',
+          startDate: baseDate,
+          endDate: null,
+          notes: null,
+          createdAt: baseDate,
+          updatedAt: baseDate,
+        },
+      ]);
+      prisma.notaClinica.findMany.mockResolvedValue([
+        {
+          id: 'n1',
+          petId: 'pet-1',
+          veterinarioId: 'vet-9',
+          googlePlaceId: null,
+          diagnostico: 'Otite',
+          prescricao: 'Gotas',
+          observacoes: null,
+          createdAt: baseDate,
+          updatedAt: baseDate,
+          veterinario: { nome: 'Dra. Camila', crmv: 'CRMV-SP 999' },
+        },
+      ]);
+
+      const result = await service.findClinicaByToken('tok-abc', 'vet-1');
+
+      expect(result.medications).toHaveLength(1);
+      expect(result.medications[0].medication_name).toBe('Dipirona');
+      expect(result.clinical_notes).toHaveLength(1);
+      expect(result.clinical_notes[0]).toMatchObject({
+        diagnostico: 'Otite',
+        veterinario_crmv: 'CRMV-SP 999',
+      });
+    });
+
+    it('registra o CRMV de quem acessou', async () => {
+      const result = await service.findClinicaByToken('tok-abc', 'vet-1');
+
+      expect(result.accessed_by_crmv).toBe('CRMV-SP 12345');
+    });
+
+    it('mantém os dados da carteira pública', async () => {
+      const result = await service.findClinicaByToken('tok-abc', 'vet-1');
+
+      expect(result).toMatchObject({ pet_id: 'pet-1', pet_name: 'Rex' });
+    });
+
+    it('propaga 404 quando o token não existe', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.findClinicaByToken('inexistente', 'vet-1'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 

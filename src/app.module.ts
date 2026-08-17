@@ -7,6 +7,7 @@ import { appConfig } from './config/app.config';
 import { authConfig } from './config/auth.config';
 import { awsConfig } from './config/aws.config';
 import { cardConfig } from './config/card.config';
+import { crmvConfig } from './config/crmv.config';
 import { firebaseConfig } from './config/firebase.config';
 import { googleMapsConfig } from './config/google-maps.config';
 import { rabbitmqConfig } from './config/rabbitmq.config';
@@ -41,6 +42,7 @@ import { PrismaModule } from './prisma/prisma.module';
         authConfig,
         awsConfig,
         cardConfig,
+        crmvConfig,
         firebaseConfig,
         googleMapsConfig,
         rabbitmqConfig,

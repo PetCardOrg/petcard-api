@@ -26,6 +26,27 @@ const tutors = [
   },
 ];
 
+/**
+ * Veterinários vivem em tabela própria, com CRMV e login separado
+ * (`POST /auth/veterinario/login`) — não são tutores com papel VET.
+ */
+const veterinarios = [
+  {
+    nome: 'Dra. Camila Ferreira',
+    email: 'camila.ferreira@vet.example.com',
+    crmv: 'CRMV-SP 12345',
+    telefone: '+5531988887777',
+  },
+  {
+    // CRMV reservado que o validador stub recusa: permite demonstrar o
+    // bloqueio de acesso clínico sem depender da consulta externa (api#113).
+    nome: 'Dr. Marcos Andrade',
+    email: 'marcos.andrade@vet.example.com',
+    crmv: 'CRMV-SP 00000',
+    telefone: '+5531977776666',
+  },
+];
+
 type PetSeed = {
   name: string;
   species: Species;
@@ -247,6 +268,17 @@ async function main() {
     }
     console.log(
       `✅ ${tutors.length} tutores criados/atualizados (senha: ${SEED_PASSWORD})`,
+    );
+
+    for (const vet of veterinarios) {
+      await tx.veterinario.upsert({
+        where: { email: vet.email },
+        update: { nome: vet.nome, crmv: vet.crmv, telefone: vet.telefone },
+        create: { ...vet, password: hashedPassword },
+      });
+    }
+    console.log(
+      `✅ ${veterinarios.length} veterinários criados/atualizados (senha: ${SEED_PASSWORD})`,
     );
 
     const tutorByEmail = new Map<string, string>();

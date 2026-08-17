@@ -51,6 +51,9 @@ export async function registerTutor(
 /**
  * Cria um veterinário direto no banco (não há endpoint público de cadastro de
  * vet) e faz login pelo endpoint real para obter o JWT.
+ *
+ * Nasce com o CRMV verificado porque a maioria dos cenários quer o caminho
+ * feliz; passe `crmvVerificado: false` para exercitar o bloqueio da api#113.
  */
 export async function createAndLoginVet(
   app: INestApplication<App>,
@@ -60,15 +63,19 @@ export async function createAndLoginVet(
     email?: string;
     password?: string;
     crmv?: string;
+    crmvVerificado?: boolean;
   } = {},
 ): Promise<AuthedUser> {
   const password = overrides.password ?? 'senha123';
+  const verificado = overrides.crmvVerificado ?? true;
   await prisma.veterinario.create({
     data: {
       nome: overrides.nome ?? 'Dra. Camila',
       email: overrides.email ?? 'vet@petcard.com',
       crmv: overrides.crmv ?? 'CRMV-CE-1234',
       password: await bcrypt.hash(password, 10),
+      crmvVerifiedAt: verificado ? new Date() : null,
+      crmvSituacao: verificado ? 'Ativo' : null,
     },
   });
 

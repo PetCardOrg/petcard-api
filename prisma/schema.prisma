@@ -243,6 +243,11 @@ model Veterinario {
   password  String
   crmv      String   @unique
   telefone  String?
+
+  /// Verificação do CRMV numa base externa (api#113). Nulo = não verificado.
+  crmvVerifiedAt DateTime? @map("crmv_verified_at")
+  /// Situação devolvida pela consulta (ex.: "Ativo"), para auditoria.
+  crmvSituacao   String?   @map("crmv_situacao")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

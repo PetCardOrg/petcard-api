@@ -25,6 +25,7 @@ import { Auth } from '../../auth/decorators/auth.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { Role } from '../../auth/enums/role.enum';
 import type { JwtPayload } from '../../auth/strategies/jwt.strategy';
+import { AuthCrmvVerificado } from '../../veterinario/crmv/auth-crmv.decorator';
 import { MedicationService } from './medication.service';
 
 @ApiTags('medications')
@@ -47,7 +48,7 @@ export class MedicationController {
   }
 
   @Get('pets/:petId/medications')
-  @Auth(Role.TUTOR, Role.VET)
+  @AuthCrmvVerificado(Role.TUTOR, Role.VET)
   @ApiOperation({ summary: 'Listar medicações do pet' })
   @ApiOkResponse({ type: MedicationRecordResponseDto, isArray: true })
   @ApiNotFoundResponse({ description: 'Pet não encontrado' })

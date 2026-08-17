@@ -83,6 +83,23 @@ describe('Nota clínica — escrita reversa (e2e)', () => {
       .expect(400);
   });
 
+  it('proíbe VET sem CRMV verificado de criar nota (403)', async () => {
+    const { token: naoVerificado } = await createAndLoginVet(app, prisma, {
+      nome: 'Dr. Marcos',
+      email: 'marcos@petcard.com',
+      crmv: 'CRMV-CE-9999',
+      crmvVerificado: false,
+    });
+
+    await request(app.getHttpServer())
+      .post(`/pets/${petId}/clinical-notes`)
+      .set('Authorization', `Bearer ${naoVerificado}`)
+      .send({ diagnostico: 'Sem registro verificado' })
+      .expect(403);
+
+    expect(await prisma.notaClinica.count()).toBe(0);
+  });
+
   it('proíbe tutor que não é dono de listar as notas (403)', async () => {
     const { token: outroToken } = await registerTutor(app, {
       email: 'outro@petcard.com',
