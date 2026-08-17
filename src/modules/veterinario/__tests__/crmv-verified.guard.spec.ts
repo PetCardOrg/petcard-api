@@ -1,4 +1,5 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { Role } from '../../auth/enums/role.enum';
 import { CrmvVerificationService } from '../crmv/crmv-verification.service';
 import { CrmvVerifiedGuard } from '../crmv/crmv-verified.guard';
 
@@ -22,16 +23,25 @@ describe('CrmvVerifiedGuard', () => {
     verification.getStatus.mockResolvedValue({ verified: true });
 
     await expect(
-      guard.canActivate(contextComUsuario({ sub: 'vet-1' })),
+      guard.canActivate(contextComUsuario({ sub: 'vet-1', role: Role.VET })),
     ).resolves.toBe(true);
     expect(verification.getStatus).toHaveBeenCalledWith('vet-1');
+  });
+
+  it('ignora quem não é veterinário — o tutor vê o próprio pet', async () => {
+    await expect(
+      guard.canActivate(
+        contextComUsuario({ sub: 'tutor-1', role: Role.TUTOR }),
+      ),
+    ).resolves.toBe(true);
+    expect(verification.getStatus).not.toHaveBeenCalled();
   });
 
   it('bloqueia quando o CRMV não está verificado', async () => {
     verification.getStatus.mockResolvedValue({ verified: false });
 
     await expect(
-      guard.canActivate(contextComUsuario({ sub: 'vet-1' })),
+      guard.canActivate(contextComUsuario({ sub: 'vet-1', role: Role.VET })),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
@@ -42,7 +52,7 @@ describe('CrmvVerifiedGuard', () => {
     );
 
     await expect(
-      guard.canActivate(contextComUsuario({ sub: 'tutor-1' })),
+      guard.canActivate(contextComUsuario({ sub: 'tutor-1', role: Role.VET })),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 

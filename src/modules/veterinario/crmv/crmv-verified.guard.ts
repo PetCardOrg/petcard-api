@@ -5,6 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { Role } from '../../auth/enums/role.enum';
 import type { JwtPayload } from '../../auth/strategies/jwt.strategy';
 import { CrmvVerificationService } from './crmv-verification.service';
 
@@ -24,6 +25,12 @@ export class CrmvVerifiedGuard implements CanActivate {
 
     if (!user?.sub) {
       throw new ForbiddenException('Autenticação de veterinário necessária.');
+    }
+
+    // Rotas compartilhadas com o tutor: ele acessa o próprio pet sem precisar
+    // de CRMV. A exigência vale só para quem entra como veterinário.
+    if (user.role !== Role.VET) {
+      return true;
     }
 
     // Um token pode trazer role VET sem que o sub seja um veterinário — os

@@ -10,6 +10,7 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { NotificationService } from '../../notification/notification.service';
 import { VetNoteController } from '../vet-note.controller';
+import { CrmvVerificationService } from '../../veterinario/crmv/crmv-verification.service';
 import { VetNoteService } from '../vet-note.service';
 
 describe('VetNoteController (integração)', () => {
@@ -60,6 +61,13 @@ describe('VetNoteController (integração)', () => {
         VetNoteService,
         { provide: PrismaService, useValue: prisma },
         { provide: NotificationService, useValue: notifications },
+        {
+          // O guard real roda; só a consulta de verificação é mockada.
+          provide: CrmvVerificationService,
+          useValue: {
+            getStatus: jest.fn().mockResolvedValue({ verified: true }),
+          },
+        },
       ],
     });
   });

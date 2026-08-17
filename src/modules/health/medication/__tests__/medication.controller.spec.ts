@@ -11,6 +11,7 @@ import { QrCodePublisher } from '../../../queue/qr-code.publisher';
 import { PetService } from '../../../pet/pet.service';
 import { TutorService } from '../../../tutor/tutor.service';
 import { MedicationController } from '../medication.controller';
+import { CrmvVerificationService } from '../../../veterinario/crmv/crmv-verification.service';
 import { MedicationService } from '../medication.service';
 
 describe('MedicationController (integração)', () => {
@@ -62,6 +63,13 @@ describe('MedicationController (integração)', () => {
         {
           provide: QrCodePublisher,
           useValue: { publishGenerate: jest.fn() },
+        },
+        {
+          // O guard real roda; só a consulta de verificação é mockada.
+          provide: CrmvVerificationService,
+          useValue: {
+            getStatus: jest.fn().mockResolvedValue({ verified: true }),
+          },
         },
       ],
     });

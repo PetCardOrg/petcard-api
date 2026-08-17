@@ -18,7 +18,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
-import { CrmvVerifiedGuard } from '../veterinario/crmv/crmv-verified.guard';
+import { AuthCrmvVerificado } from '../veterinario/crmv/auth-crmv.decorator';
 import { CardService } from './card.service';
 
 @ApiTags('cards')
@@ -39,8 +39,7 @@ export class CardController {
   }
 
   @Get(':token/clinico')
-  @Auth(Role.VET)
-  @UseGuards(CrmvVerifiedGuard)
+  @AuthCrmvVerificado(Role.VET)
   @ApiOperation({
     summary:
       'Carteira clínica por token do QR (veterinário com CRMV verificado)',

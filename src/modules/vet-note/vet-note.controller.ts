@@ -16,6 +16,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Auth } from '../auth/decorators/auth.decorator';
+import { AuthCrmvVerificado } from '../veterinario/crmv/auth-crmv.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
@@ -31,7 +32,7 @@ export class VetNoteController {
   constructor(private readonly vetNoteService: VetNoteService) {}
 
   @Post('pets/:petId/clinical-notes')
-  @Auth(Role.VET)
+  @AuthCrmvVerificado(Role.VET)
   @ApiOperation({
     summary: 'Criar nota clínica no prontuário do pet (escrita reversa do vet)',
   })
@@ -46,7 +47,7 @@ export class VetNoteController {
   }
 
   @Get('pets/:petId/clinical-notes')
-  @Auth(Role.TUTOR, Role.VET)
+  @AuthCrmvVerificado(Role.TUTOR, Role.VET)
   @ApiOperation({ summary: 'Listar notas clínicas do pet' })
   @ApiOkResponse({ type: NotaClinicaResponseDto, isArray: true })
   @ApiNotFoundResponse({ description: 'Pet não encontrado' })
