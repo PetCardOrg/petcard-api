@@ -181,4 +181,56 @@ describe('VaccineService', () => {
       );
     });
   });
+  describe('assinatura do veterinário (web#34)', () => {
+    it('grava o nome do veterinário logado no registro', async () => {
+      prisma.veterinario = { findUnique: jest.fn() } as never;
+      (
+        prisma as unknown as { veterinario: { findUnique: jest.Mock } }
+      ).veterinario.findUnique.mockResolvedValue({ nome: 'Dra. Camila' });
+      prisma.vaccineRecord.create.mockResolvedValue(record);
+
+      await service.create('pet-1', 'vet-1', true, {
+        vaccine_name: 'Raiva',
+        applied_at: '2026-03-10',
+      });
+
+      // Resolvido no servidor: aceitar o nome vindo do corpo deixaria assinar
+      // um registro clínico com o nome de outra pessoa.
+      const [[chamada]] = prisma.vaccineRecord.create.mock.calls as Array<
+        [{ data: { veterinarianName?: string; veterinarioId?: string } }]
+      >;
+      expect(chamada.data.veterinarianName).toBe('Dra. Camila');
+      expect(chamada.data.veterinarioId).toBe('vet-1');
+    });
+
+    it('respeita o nome digitado quando quem registra é o tutor', async () => {
+      prisma.veterinario = { findUnique: jest.fn() } as never;
+      prisma.vaccineRecord.create.mockResolvedValue(record);
+
+      await service.create('pet-1', 'tutor-1', false, {
+        vaccine_name: 'Raiva',
+        applied_at: '2026-03-10',
+        veterinarian_name: 'Dr. Fulano (clínica de fora)',
+      });
+
+      const [[chamada]] = prisma.vaccineRecord.create.mock.calls as Array<
+        [{ data: { veterinarianName?: string; veterinarioId?: string | null } }]
+      >;
+      expect(chamada.data.veterinarianName).toBe(
+        'Dr. Fulano (clínica de fora)',
+      );
+      expect(chamada.data.veterinarioId).toBeNull();
+    });
+
+    it('expõe o veterinario_id na resposta', async () => {
+      prisma.vaccineRecord.findMany.mockResolvedValue([
+        { ...record, veterinarioId: 'vet-1' },
+      ]);
+
+      const [dto] = await service.findAllForPet('pet-1', 'vet-1', true);
+
+      // A tela usa isto para oferecer editar/apagar só no que é do vet.
+      expect(dto.veterinario_id).toBe('vet-1');
+    });
+  });
 });

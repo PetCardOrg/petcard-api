@@ -13,7 +13,11 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PetService } from '../../pet/pet.service';
 import { AcaoClinicaService } from '../../historico/acao-clinica.service';
-import { assertPodeEditar, assertPodeRemover } from '../autoria-clinica';
+import {
+  assertPodeEditar,
+  assertPodeRemover,
+  nomeDoVeterinario,
+} from '../autoria-clinica';
 
 type DewormingInput = Omit<CreateDewormingRecordDto, 'pet_id'>;
 
@@ -27,6 +31,7 @@ function toResponseDto(record: DewormingRecord): DewormingRecordResponseDto {
       ? record.nextDoseAt.toISOString().split('T')[0]
       : undefined,
     veterinarian_name: record.veterinarianName ?? undefined,
+    veterinario_id: record.veterinarioId ?? undefined,
     notes: record.notes ?? undefined,
     created_at: record.createdAt,
     updated_at: record.updatedAt,
@@ -67,7 +72,11 @@ export class DewormingService {
           appliedAt: new Date(dto.applied_at),
           nextDoseAt: dto.next_dose_at ? new Date(dto.next_dose_at) : null,
           veterinarioId: isVet ? userId : null,
-          veterinarianName: dto.veterinarian_name,
+          // Assinado com o nome de quem registrou; o texto livre segue
+          // valendo para profissional de fora do PetCard.
+          veterinarianName: isVet
+            ? await nomeDoVeterinario(tx, userId)
+            : dto.veterinarian_name,
           notes: dto.notes,
         },
       });

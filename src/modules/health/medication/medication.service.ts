@@ -24,6 +24,7 @@ function toResponseDto(record: MedicationRecord): MedicationRecordResponseDto {
     medication_name: record.medicationName,
     dosage: record.dosage,
     frequency: record.frequency,
+    veterinario_id: record.veterinarioId ?? undefined,
     start_date: record.startDate.toISOString().split('T')[0],
     end_date: record.endDate
       ? record.endDate.toISOString().split('T')[0]

@@ -22,6 +22,7 @@ describe('VaccineController (integração)', () => {
   let harness: ControllerHarness;
   let prisma: {
     pet: { findUnique: jest.Mock };
+    veterinario: { findUnique: jest.Mock };
     vaccineRecord: {
       create: jest.Mock;
       findMany: jest.Mock;
@@ -49,6 +50,10 @@ describe('VaccineController (integração)', () => {
   beforeAll(async () => {
     prisma = {
       pet: { findUnique: jest.fn() },
+      // O create assina o registro com o nome do vet logado (web#34).
+      veterinario: {
+        findUnique: jest.fn().mockResolvedValue({ nome: 'Dra. Camila' }),
+      },
       vaccineRecord: {
         create: jest.fn(),
         findMany: jest.fn(),

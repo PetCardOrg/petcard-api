@@ -1,4 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 /** O que vacina, vermífugo e medicação têm em comum para efeito de autoria. */
 export interface RegistroComAutoria {
@@ -65,4 +66,22 @@ export function assertPodeRemover(
       'O veterinário só pode remover os registros que ele mesmo fez.',
     );
   }
+}
+
+/**
+ * Nome do veterinário que está registrando, para gravar junto com o registro.
+ *
+ * Resolvido no servidor de propósito: o cliente sabe o nome do próprio usuário,
+ * mas aceitar esse nome no corpo da requisição deixaria qualquer um assinar um
+ * registro clínico com o nome de outra pessoa.
+ */
+export async function nomeDoVeterinario(
+  tx: Prisma.TransactionClient,
+  veterinarioId: string,
+): Promise<string | undefined> {
+  const vet = await tx.veterinario.findUnique({
+    where: { id: veterinarioId },
+    select: { nome: true },
+  });
+  return vet?.nome;
 }

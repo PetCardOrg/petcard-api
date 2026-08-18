@@ -22,6 +22,7 @@ describe('DewormingController (integração)', () => {
   let harness: ControllerHarness;
   let prisma: {
     pet: { findUnique: jest.Mock };
+    veterinario: { findUnique: jest.Mock };
     dewormingRecord: {
       create: jest.Mock;
       findMany: jest.Mock;
@@ -49,6 +50,10 @@ describe('DewormingController (integração)', () => {
   beforeAll(async () => {
     prisma = {
       pet: { findUnique: jest.fn() },
+      // O create assina o registro com o nome do vet logado (web#34).
+      veterinario: {
+        findUnique: jest.fn().mockResolvedValue({ nome: 'Dra. Camila' }),
+      },
       dewormingRecord: {
         create: jest.fn(),
         findMany: jest.fn(),
