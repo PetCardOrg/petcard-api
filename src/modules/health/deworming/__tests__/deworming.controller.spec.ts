@@ -14,6 +14,7 @@ import { PrismaService } from '../../../../prisma/prisma.service';
 import { QrCodePublisher } from '../../../queue/qr-code.publisher';
 import { PetService } from '../../../pet/pet.service';
 import { TutorService } from '../../../tutor/tutor.service';
+import { CrmvVerificationService } from '../../../veterinario/crmv/crmv-verification.service';
 import { DewormingController } from '../deworming.controller';
 import { DewormingService } from '../deworming.service';
 
@@ -34,6 +35,8 @@ describe('DewormingController (integração)', () => {
   const record = {
     id: 'dew-1',
     petId: 'pet-1',
+    veterinarioId: null,
+    deletedAt: null,
     productName: 'Drontal',
     appliedAt: new Date('2026-02-01'),
     nextDoseAt: null,
@@ -68,6 +71,13 @@ describe('DewormingController (integração)', () => {
         {
           provide: QrCodePublisher,
           useValue: { publishGenerate: jest.fn() },
+        },
+        {
+          // O guard real roda; só a consulta de verificação é mockada.
+          provide: CrmvVerificationService,
+          useValue: {
+            getStatus: jest.fn().mockResolvedValue({ verified: true }),
+          },
         },
       ],
     });
@@ -157,11 +167,26 @@ describe('DewormingController (integração)', () => {
       .expect(204);
   });
 
-  it('DELETE é proibido para VET (403)', async () => {
+  it('DELETE é proibido ao VET sobre registro do tutor (403)', async () => {
+    // O que o tutor declarou não é do veterinário para apagar (web#34).
     harness.setUser(VET);
+    prisma.dewormingRecord.findFirst.mockResolvedValue(record);
 
     await request(harness.app.getHttpServer())
       .delete('/dewormings/dew-1')
       .expect(403);
+
+    expect(prisma.dewormingRecord.update).not.toHaveBeenCalled();
+  });
+
+  it('DELETE permite ao VET remover a própria prescrição (204)', async () => {
+    harness.setUser(VET);
+    const prescricao = { ...record, veterinarioId: 'vet-1' };
+    prisma.dewormingRecord.findFirst.mockResolvedValue(prescricao);
+    prisma.dewormingRecord.update.mockResolvedValue(prescricao);
+
+    await request(harness.app.getHttpServer())
+      .delete('/dewormings/dew-1')
+      .expect(204);
   });
 });

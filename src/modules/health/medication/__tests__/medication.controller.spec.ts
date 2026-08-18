@@ -166,11 +166,26 @@ describe('MedicationController (integração)', () => {
       .expect(204);
   });
 
-  it('DELETE é proibido para VET (403)', async () => {
+  it('DELETE é proibido ao VET sobre registro do tutor (403)', async () => {
+    // O que o tutor declarou não é do veterinário para apagar (web#34).
     harness.setUser(VET);
+    prisma.medicationRecord.findFirst.mockResolvedValue(record);
 
     await request(harness.app.getHttpServer())
       .delete('/medications/med-1')
       .expect(403);
+
+    expect(prisma.medicationRecord.update).not.toHaveBeenCalled();
+  });
+
+  it('DELETE permite ao VET remover a própria prescrição (204)', async () => {
+    harness.setUser(VET);
+    const prescricao = { ...record, veterinarioId: 'vet-1' };
+    prisma.medicationRecord.findFirst.mockResolvedValue(prescricao);
+    prisma.medicationRecord.update.mockResolvedValue(prescricao);
+
+    await request(harness.app.getHttpServer())
+      .delete('/medications/med-1')
+      .expect(204);
   });
 });

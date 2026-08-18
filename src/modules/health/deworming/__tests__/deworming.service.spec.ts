@@ -27,6 +27,8 @@ describe('DewormingService', () => {
   const record = {
     id: 'dew-1',
     petId: 'pet-1',
+    veterinarioId: null,
+    deletedAt: null,
     productName: 'Drontal',
     appliedAt: new Date('2026-01-01'),
     nextDoseAt: null,
@@ -107,10 +109,17 @@ describe('DewormingService', () => {
 
   it('should delete owned record', async () => {
     prisma.dewormingRecord.findFirst.mockResolvedValue(record);
-    prisma.dewormingRecord.delete.mockResolvedValue(record);
+    prisma.dewormingRecord.update.mockResolvedValue(record);
 
-    await service.remove('dew-1', 'tutor-1');
+    await service.remove('dew-1', 'tutor-1', false);
 
-    expect(petService.assertOwnership).toHaveBeenCalledWith('pet-1', 'tutor-1');
+    // O acesso ao pet passou a ser checado por `assertAccess`, porque o
+    // veterinário também remove — o que ele pode remover é decidido depois,
+    // pela autoria do registro (web#34).
+    expect(petService.assertAccess).toHaveBeenCalledWith(
+      'pet-1',
+      'tutor-1',
+      false,
+    );
   });
 });

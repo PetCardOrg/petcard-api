@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   acaoClinicaProvider,
@@ -27,6 +27,8 @@ describe('MedicationService', () => {
   const record = {
     id: 'med-1',
     petId: 'pet-1',
+    veterinarioId: null,
+    deletedAt: null,
     medicationName: 'Amoxicillin',
     dosage: '500mg',
     frequency: '8h',
@@ -122,7 +124,7 @@ describe('MedicationService', () => {
     prisma.medicationRecord.findFirst.mockResolvedValue(record);
     prisma.medicationRecord.update.mockResolvedValue(record);
 
-    await service.remove('med-1', 'tutor-1');
+    await service.remove('med-1', 'tutor-1', false);
 
     // O caso central da issue: o tutor decide não dar o remédio e apaga,
     // mas a prescrição do veterinário continua demonstrável.
@@ -132,5 +134,41 @@ describe('MedicationService', () => {
     >;
     expect(chamada.where).toEqual({ id: 'med-1' });
     expect(chamada.data.deletedAt).toBeInstanceOf(Date);
+  });
+
+  it('o veterinário remove a própria prescrição', async () => {
+    const prescricao = { ...record, veterinarioId: 'vet-camila' };
+    prisma.medicationRecord.findFirst.mockResolvedValue(prescricao);
+    prisma.medicationRecord.update.mockResolvedValue(prescricao);
+
+    // Antes da web#34 o delete era exclusivo do tutor: o veterinário
+    // prescrevia pela tela e não tinha como desfazer o próprio erro.
+    await service.remove('med-1', 'vet-camila', true);
+
+    expect(prisma.medicationRecord.update).toHaveBeenCalled();
+  });
+
+  it('o veterinário não remove a prescrição de outro', async () => {
+    prisma.medicationRecord.findFirst.mockResolvedValue({
+      ...record,
+      veterinarioId: 'vet-camila',
+    });
+
+    await expect(service.remove('med-1', 'vet-outro', true)).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(prisma.medicationRecord.update).not.toHaveBeenCalled();
+  });
+
+  it('o tutor não edita a prescrição do veterinário', async () => {
+    prisma.medicationRecord.findFirst.mockResolvedValue({
+      ...record,
+      veterinarioId: 'vet-camila',
+    });
+
+    await expect(
+      service.update('med-1', 'tutor-1', false, { dosage: '10mg' }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(prisma.medicationRecord.update).not.toHaveBeenCalled();
   });
 });

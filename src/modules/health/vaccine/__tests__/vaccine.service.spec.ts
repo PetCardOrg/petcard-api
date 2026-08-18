@@ -29,6 +29,8 @@ describe('VaccineService', () => {
   const record = {
     id: 'vac-1',
     petId: 'pet-1',
+    veterinarioId: null,
+    deletedAt: null,
     vaccineName: 'Rabies',
     appliedAt: new Date('2026-01-01'),
     nextDoseAt: null,
@@ -143,11 +145,14 @@ describe('VaccineService', () => {
       prisma.vaccineRecord.findFirst.mockResolvedValue(record);
       prisma.vaccineRecord.update.mockResolvedValue(record);
 
-      await service.remove('vac-1', 'tutor-1');
+      await service.remove('vac-1', 'tutor-1', false);
 
-      expect(petService.assertOwnership).toHaveBeenCalledWith(
+      // Ver a nota equivalente no spec do vermífugo: `assertAccess` porque o
+      // veterinário também remove; a autoria decide o que ele pode remover.
+      expect(petService.assertAccess).toHaveBeenCalledWith(
         'pet-1',
         'tutor-1',
+        false,
       );
       // O registro precisa sobreviver: é o que o histórico clínico mostra.
       expect(prisma.vaccineRecord.delete).not.toHaveBeenCalled();
@@ -162,7 +167,7 @@ describe('VaccineService', () => {
       prisma.vaccineRecord.findFirst.mockResolvedValue(record);
       prisma.vaccineRecord.update.mockResolvedValue(record);
 
-      await service.remove('vac-1', 'tutor-1');
+      await service.remove('vac-1', 'tutor-1', false);
 
       expect(registrarAcao).toHaveBeenCalledWith(
         expect.objectContaining({

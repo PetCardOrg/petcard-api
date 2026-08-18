@@ -13,6 +13,7 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PetService } from '../../pet/pet.service';
 import { AcaoClinicaService } from '../../historico/acao-clinica.service';
+import { assertPodeEditar, assertPodeRemover } from '../autoria-clinica';
 
 type VaccineInput = Omit<CreateVaccineRecordDto, 'pet_id'>;
 
@@ -108,6 +109,7 @@ export class VaccineService {
   ): Promise<VaccineRecordResponseDto> {
     const record = await this.getRecord(id);
     await this.petService.assertAccess(record.petId, userId, isVet);
+    assertPodeEditar(record, userId, isVet);
     const updated = await this.prisma.$transaction(async (tx) => {
       const alterado = await tx.vaccineRecord.update({
         where: { id },
@@ -141,9 +143,10 @@ export class VaccineService {
    * O tutor deixa de ver o registro, mas o que o veterinário aplicou continua
    * demonstrável.
    */
-  async remove(id: string, userId: string): Promise<void> {
+  async remove(id: string, userId: string, isVet: boolean): Promise<void> {
     const record = await this.getRecord(id);
-    await this.petService.assertOwnership(record.petId, userId);
+    await this.petService.assertAccess(record.petId, userId, isVet);
+    assertPodeRemover(record, userId, isVet);
     await this.prisma.$transaction(async (tx) => {
       await tx.vaccineRecord.update({
         where: { id },
@@ -156,7 +159,7 @@ export class VaccineService {
           entidade: EntidadeClinica.VACINA,
           entidadeId: id,
           autorId: userId,
-          autorTipo: Role.TUTOR,
+          autorTipo: isVet ? Role.VET : Role.TUTOR,
           detalhes: { antes: toSnapshot(record) },
         },
         tx,

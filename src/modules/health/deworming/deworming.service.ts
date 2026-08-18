@@ -13,6 +13,7 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PetService } from '../../pet/pet.service';
 import { AcaoClinicaService } from '../../historico/acao-clinica.service';
+import { assertPodeEditar, assertPodeRemover } from '../autoria-clinica';
 
 type DewormingInput = Omit<CreateDewormingRecordDto, 'pet_id'>;
 
@@ -107,6 +108,7 @@ export class DewormingService {
   ): Promise<DewormingRecordResponseDto> {
     const record = await this.getRecord(id);
     await this.petService.assertAccess(record.petId, userId, isVet);
+    assertPodeEditar(record, userId, isVet);
     const updated = await this.prisma.$transaction(async (tx) => {
       const alterado = await tx.dewormingRecord.update({
         where: { id },
@@ -138,9 +140,10 @@ export class DewormingService {
   /**
    * Exclusão lógica (api#117): sai da listagem, permanece no histórico.
    */
-  async remove(id: string, userId: string): Promise<void> {
+  async remove(id: string, userId: string, isVet: boolean): Promise<void> {
     const record = await this.getRecord(id);
-    await this.petService.assertOwnership(record.petId, userId);
+    await this.petService.assertAccess(record.petId, userId, isVet);
+    assertPodeRemover(record, userId, isVet);
     await this.prisma.$transaction(async (tx) => {
       await tx.dewormingRecord.update({
         where: { id },
@@ -153,7 +156,7 @@ export class DewormingService {
           entidade: EntidadeClinica.VERMIFUGO,
           entidadeId: id,
           autorId: userId,
-          autorTipo: Role.TUTOR,
+          autorTipo: isVet ? Role.VET : Role.TUTOR,
           detalhes: { antes: toSnapshot(record) },
         },
         tx,

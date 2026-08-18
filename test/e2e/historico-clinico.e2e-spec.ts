@@ -151,7 +151,7 @@ describe('Histórico clínico (e2e)', () => {
 
     await request(app.getHttpServer())
       .patch(`/medications/${medId}`)
-      .set('Authorization', `Bearer ${tutorToken}`)
+      .set('Authorization', `Bearer ${vetToken}`)
       .send({ dosage: '500mg' })
       .expect(200);
 
@@ -165,6 +165,51 @@ describe('Histórico clínico (e2e)', () => {
     };
     expect(detalhes.antes.dosage).toBe('250mg');
     expect(detalhes.depois.dosage).toBe('500mg');
+  });
+
+  it('o tutor não edita a prescrição do veterinário (403)', async () => {
+    const medId = await prescreverMedicacao();
+
+    // Editar mantendo a assinatura do veterinário falsificaria a autoria: a
+    // carteira continuaria dizendo "prescrito por Dra. Camila, CRMV-CE-1234"
+    // sobre uma dosagem que ela não prescreveu (web#34).
+    await request(app.getHttpServer())
+      .patch(`/medications/${medId}`)
+      .set('Authorization', `Bearer ${tutorToken}`)
+      .send({ dosage: '500mg' })
+      .expect(403);
+
+    const noBanco = await prisma.medicationRecord.findUnique({
+      where: { id: medId },
+    });
+    expect(noBanco?.dosage).toBe('250mg');
+  });
+
+  it('o veterinário remove a própria prescrição, o tutor não perde a dele', async () => {
+    const medId = await prescreverMedicacao();
+
+    // Registro declarado pelo tutor: não é do veterinário para apagar.
+    const doTutor = await request(app.getHttpServer())
+      .post(`/pets/${petId}/medications`)
+      .set('Authorization', `Bearer ${tutorToken}`)
+      .send({
+        pet_id: petId,
+        medication_name: 'Suplemento',
+        dosage: '1 comprimido',
+        frequency: '24/24h',
+        start_date: '2026-03-10',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete(`/medications/${medId}`)
+      .set('Authorization', `Bearer ${vetToken}`)
+      .expect(204);
+
+    await request(app.getHttpServer())
+      .delete(`/medications/${doTutor.body.id as string}`)
+      .set('Authorization', `Bearer ${vetToken}`)
+      .expect(403);
   });
 
   it('proíbe tutor que não é dono de ver o histórico (403)', async () => {

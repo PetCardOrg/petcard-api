@@ -13,6 +13,7 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PetService } from '../../pet/pet.service';
 import { AcaoClinicaService } from '../../historico/acao-clinica.service';
+import { assertPodeEditar, assertPodeRemover } from '../autoria-clinica';
 
 type MedicationInput = Omit<CreateMedicationRecordDto, 'pet_id'>;
 
@@ -111,6 +112,7 @@ export class MedicationService {
   ): Promise<MedicationRecordResponseDto> {
     const record = await this.getRecord(id);
     await this.petService.assertAccess(record.petId, userId, isVet);
+    assertPodeEditar(record, userId, isVet);
     const updated = await this.prisma.$transaction(async (tx) => {
       const alterado = await tx.medicationRecord.update({
         where: { id },
@@ -145,9 +147,10 @@ export class MedicationService {
    * dar o remédio e apaga o registro — a prescrição do veterinário continua
    * no histórico.
    */
-  async remove(id: string, userId: string): Promise<void> {
+  async remove(id: string, userId: string, isVet: boolean): Promise<void> {
     const record = await this.getRecord(id);
-    await this.petService.assertOwnership(record.petId, userId);
+    await this.petService.assertAccess(record.petId, userId, isVet);
+    assertPodeRemover(record, userId, isVet);
     await this.prisma.$transaction(async (tx) => {
       await tx.medicationRecord.update({
         where: { id },
@@ -160,7 +163,7 @@ export class MedicationService {
           entidade: EntidadeClinica.MEDICACAO,
           entidadeId: id,
           autorId: userId,
-          autorTipo: Role.TUTOR,
+          autorTipo: isVet ? Role.VET : Role.TUTOR,
           detalhes: { antes: toSnapshot(record) },
         },
         tx,

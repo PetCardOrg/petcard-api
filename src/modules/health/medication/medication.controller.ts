@@ -21,7 +21,6 @@ import {
   MedicationRecordResponseDto,
   UpdateMedicationRecordDto,
 } from '@petcardorg/shared';
-import { Auth } from '../../auth/decorators/auth.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { Role } from '../../auth/enums/role.enum';
 import type { JwtPayload } from '../../auth/strategies/jwt.strategy';
@@ -34,7 +33,7 @@ export class MedicationController {
   constructor(private readonly medicationService: MedicationService) {}
 
   @Post('pets/:petId/medications')
-  @Auth(Role.TUTOR, Role.VET)
+  @AuthCrmvVerificado(Role.TUTOR, Role.VET)
   @ApiOperation({ summary: 'Registrar medicação no prontuário do pet' })
   @ApiCreatedResponse({ type: MedicationRecordResponseDto })
   @ApiNotFoundResponse({ description: 'Pet não encontrado' })
@@ -61,7 +60,7 @@ export class MedicationController {
   }
 
   @Patch('medications/:id')
-  @Auth(Role.TUTOR, Role.VET)
+  @AuthCrmvVerificado(Role.TUTOR, Role.VET)
   @ApiOperation({ summary: 'Atualizar registro de medicação' })
   @ApiOkResponse({ type: MedicationRecordResponseDto })
   @ApiNotFoundResponse({ description: 'Registro não encontrado' })
@@ -75,7 +74,7 @@ export class MedicationController {
   }
 
   @Delete('medications/:id')
-  @Auth(Role.TUTOR)
+  @AuthCrmvVerificado(Role.TUTOR, Role.VET)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remover registro de medicação' })
   @ApiNotFoundResponse({ description: 'Registro não encontrado' })
@@ -83,6 +82,7 @@ export class MedicationController {
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<void> {
-    return this.medicationService.remove(id, user.sub);
+    const isVet = user.role === Role.VET;
+    return this.medicationService.remove(id, user.sub, isVet);
   }
 }
