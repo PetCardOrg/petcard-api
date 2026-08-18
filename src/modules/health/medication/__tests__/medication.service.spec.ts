@@ -18,6 +18,7 @@ describe('MedicationService', () => {
       update: jest.Mock;
       delete: jest.Mock;
     };
+    veterinario: { findUnique: jest.Mock };
   };
   let petService: {
     assertAccess: jest.Mock;
@@ -47,6 +48,10 @@ describe('MedicationService', () => {
         findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
+      },
+      // O create resolve o nome de quem prescreve (web#34).
+      veterinario: {
+        findUnique: jest.fn().mockResolvedValue({ nome: 'Dra. Camila' }),
       },
     };
     petService = {
@@ -170,5 +175,20 @@ describe('MedicationService', () => {
       service.update('med-1', 'tutor-1', false, { dosage: '10mg' }),
     ).rejects.toThrow(ForbiddenException);
     expect(prisma.medicationRecord.update).not.toHaveBeenCalled();
+  });
+  it('assina a prescrição com o nome do veterinário logado', async () => {
+    prisma.medicationRecord.create.mockResolvedValue(record);
+
+    await service.create('pet-1', 'vet-1', true, {
+      medication_name: 'Amoxicilina',
+      dosage: '250mg',
+      frequency: '12/12h',
+      start_date: '2026-03-10',
+    });
+
+    const [[chamada]] = prisma.medicationRecord.create.mock.calls as Array<
+      [{ data: { veterinarianName?: string } }]
+    >;
+    expect(chamada.data.veterinarianName).toBe('Dra. Camila');
   });
 });

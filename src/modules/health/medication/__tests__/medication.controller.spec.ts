@@ -22,6 +22,7 @@ describe('MedicationController (integração)', () => {
   let harness: ControllerHarness;
   let prisma: {
     pet: { findUnique: jest.Mock };
+    veterinario: { findUnique: jest.Mock };
     medicationRecord: {
       create: jest.Mock;
       findMany: jest.Mock;
@@ -48,6 +49,10 @@ describe('MedicationController (integração)', () => {
   beforeAll(async () => {
     prisma = {
       pet: { findUnique: jest.fn() },
+      // O create assina a prescrição com o nome do vet logado (web#34).
+      veterinario: {
+        findUnique: jest.fn().mockResolvedValue({ nome: 'Dra. Camila' }),
+      },
       medicationRecord: {
         create: jest.fn(),
         findMany: jest.fn(),

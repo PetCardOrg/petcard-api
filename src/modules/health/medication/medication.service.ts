@@ -13,7 +13,11 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PetService } from '../../pet/pet.service';
 import { AcaoClinicaService } from '../../historico/acao-clinica.service';
-import { assertPodeEditar, assertPodeRemover } from '../autoria-clinica';
+import {
+  assertPodeEditar,
+  assertPodeRemover,
+  nomeDoVeterinario,
+} from '../autoria-clinica';
 
 type MedicationInput = Omit<CreateMedicationRecordDto, 'pet_id'>;
 
@@ -25,6 +29,7 @@ function toResponseDto(record: MedicationRecord): MedicationRecordResponseDto {
     dosage: record.dosage,
     frequency: record.frequency,
     veterinario_id: record.veterinarioId ?? undefined,
+    veterinarian_name: record.veterinarianName ?? undefined,
     start_date: record.startDate.toISOString().split('T')[0],
     end_date: record.endDate
       ? record.endDate.toISOString().split('T')[0]
@@ -41,6 +46,7 @@ function toSnapshot(record: MedicationRecord) {
     medication_name: record.medicationName,
     dosage: record.dosage,
     frequency: record.frequency,
+    veterinarian_name: record.veterinarianName,
     start_date: record.startDate.toISOString(),
     end_date: record.endDate?.toISOString() ?? null,
     notes: record.notes,
@@ -73,6 +79,11 @@ export class MedicationService {
           endDate: dto.end_date ? new Date(dto.end_date) : null,
           // Quem prescreveu, quando é um vet do PetCard.
           veterinarioId: isVet ? userId : null,
+          // Assinado com o nome de quem prescreveu; o texto livre segue
+          // valendo para profissional de fora do PetCard.
+          veterinarianName: isVet
+            ? await nomeDoVeterinario(tx, userId)
+            : dto.veterinarian_name,
           notes: dto.notes,
         },
       });
@@ -121,6 +132,7 @@ export class MedicationService {
           medicationName: dto.medication_name,
           dosage: dto.dosage,
           frequency: dto.frequency,
+          veterinarianName: dto.veterinarian_name,
           startDate: dto.start_date ? new Date(dto.start_date) : undefined,
           endDate: dto.end_date ? new Date(dto.end_date) : undefined,
           notes: dto.notes,
