@@ -1,5 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { DewormingRecord } from '@prisma/client';
+import {
+  AcaoClinicaTipo,
+  DewormingRecord,
+  EntidadeClinica,
+  Role,
+} from '@prisma/client';
 import {
   CreateDewormingRecordDto,
   DewormingRecordResponseDto,
@@ -7,6 +12,7 @@ import {
 } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PetService } from '../../pet/pet.service';
+import { AcaoClinicaService } from '../../historico/acao-clinica.service';
 
 type DewormingInput = Omit<CreateDewormingRecordDto, 'pet_id'>;
 
@@ -26,11 +32,23 @@ function toResponseDto(record: DewormingRecord): DewormingRecordResponseDto {
   };
 }
 
+/** Só os campos clínicos; o snapshot é evidência, não cópia de linha. */
+function toSnapshot(record: DewormingRecord) {
+  return {
+    product_name: record.productName,
+    applied_at: record.appliedAt.toISOString(),
+    next_dose_at: record.nextDoseAt?.toISOString() ?? null,
+    veterinarian_name: record.veterinarianName,
+    notes: record.notes,
+  };
+}
+
 @Injectable()
 export class DewormingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly petService: PetService,
+    private readonly acoes: AcaoClinicaService,
   ) {}
 
   async create(
@@ -40,15 +58,30 @@ export class DewormingService {
     dto: DewormingInput,
   ): Promise<DewormingRecordResponseDto> {
     await this.petService.assertAccess(petId, userId, isVet);
-    const record = await this.prisma.dewormingRecord.create({
-      data: {
-        petId,
-        productName: dto.product_name,
-        appliedAt: new Date(dto.applied_at),
-        nextDoseAt: dto.next_dose_at ? new Date(dto.next_dose_at) : null,
-        veterinarianName: dto.veterinarian_name,
-        notes: dto.notes,
-      },
+    const record = await this.prisma.$transaction(async (tx) => {
+      const criado = await tx.dewormingRecord.create({
+        data: {
+          petId,
+          productName: dto.product_name,
+          appliedAt: new Date(dto.applied_at),
+          nextDoseAt: dto.next_dose_at ? new Date(dto.next_dose_at) : null,
+          veterinarioId: isVet ? userId : null,
+          veterinarianName: dto.veterinarian_name,
+          notes: dto.notes,
+        },
+      });
+      await this.acoes.registrar(
+        {
+          petId,
+          tipo: AcaoClinicaTipo.CRIACAO,
+          entidade: EntidadeClinica.VERMIFUGO,
+          entidadeId: criado.id,
+          autorId: userId,
+          autorTipo: isVet ? Role.VET : Role.TUTOR,
+        },
+        tx,
+      );
+      return criado;
     });
     return toResponseDto(record);
   }
@@ -60,7 +93,7 @@ export class DewormingService {
   ): Promise<DewormingRecordResponseDto[]> {
     await this.petService.assertAccess(petId, userId, isVet);
     const records = await this.prisma.dewormingRecord.findMany({
-      where: { petId },
+      where: { petId, deletedAt: null },
       orderBy: { appliedAt: 'desc' },
     });
     return records.map(toResponseDto);
@@ -74,28 +107,63 @@ export class DewormingService {
   ): Promise<DewormingRecordResponseDto> {
     const record = await this.getRecord(id);
     await this.petService.assertAccess(record.petId, userId, isVet);
-    const updated = await this.prisma.dewormingRecord.update({
-      where: { id },
-      data: {
-        productName: dto.product_name,
-        appliedAt: dto.applied_at ? new Date(dto.applied_at) : undefined,
-        nextDoseAt: dto.next_dose_at ? new Date(dto.next_dose_at) : undefined,
-        veterinarianName: dto.veterinarian_name,
-        notes: dto.notes,
-      },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const alterado = await tx.dewormingRecord.update({
+        where: { id },
+        data: {
+          productName: dto.product_name,
+          appliedAt: dto.applied_at ? new Date(dto.applied_at) : undefined,
+          nextDoseAt: dto.next_dose_at ? new Date(dto.next_dose_at) : undefined,
+          veterinarianName: dto.veterinarian_name,
+          notes: dto.notes,
+        },
+      });
+      await this.acoes.registrar(
+        {
+          petId: record.petId,
+          tipo: AcaoClinicaTipo.EDICAO,
+          entidade: EntidadeClinica.VERMIFUGO,
+          entidadeId: id,
+          autorId: userId,
+          autorTipo: isVet ? Role.VET : Role.TUTOR,
+          detalhes: { antes: toSnapshot(record), depois: toSnapshot(alterado) },
+        },
+        tx,
+      );
+      return alterado;
     });
     return toResponseDto(updated);
   }
 
+  /**
+   * Exclusão lógica (api#117): sai da listagem, permanece no histórico.
+   */
   async remove(id: string, userId: string): Promise<void> {
     const record = await this.getRecord(id);
     await this.petService.assertOwnership(record.petId, userId);
-    await this.prisma.dewormingRecord.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.dewormingRecord.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      await this.acoes.registrar(
+        {
+          petId: record.petId,
+          tipo: AcaoClinicaTipo.EXCLUSAO,
+          entidade: EntidadeClinica.VERMIFUGO,
+          entidadeId: id,
+          autorId: userId,
+          autorTipo: Role.TUTOR,
+          detalhes: { antes: toSnapshot(record) },
+        },
+        tx,
+      );
+    });
   }
 
   private async getRecord(id: string): Promise<DewormingRecord> {
-    const record = await this.prisma.dewormingRecord.findUnique({
-      where: { id },
+    const record = await this.prisma.dewormingRecord.findFirst({
+      where: { id, deletedAt: null },
     });
     if (!record) {
       throw new NotFoundException(`Deworming record with id ${id} not found`);

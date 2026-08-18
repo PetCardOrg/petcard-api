@@ -2,6 +2,10 @@
 import { Logger } from '@nestjs/common';
 import request from 'supertest';
 import {
+  acaoClinicaProvider,
+  comTransacao,
+} from '../../../../test/utils/acao-clinica';
+import {
   createControllerTestApp,
   ControllerHarness,
   TUTOR,
@@ -21,7 +25,8 @@ describe('VetNoteController (integração)', () => {
     notaClinica: {
       create: jest.Mock;
       findMany: jest.Mock;
-      findUnique: jest.Mock;
+      findFirst: jest.Mock;
+      update: jest.Mock;
       delete: jest.Mock;
     };
   };
@@ -49,15 +54,20 @@ describe('VetNoteController (integração)', () => {
       notaClinica: {
         create: jest.fn(),
         findMany: jest.fn(),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
         delete: jest.fn(),
+        update: jest.fn(),
       },
     };
     notifications = { schedulePush: jest.fn().mockResolvedValue(undefined) };
 
+    comTransacao(prisma);
+
     harness = await createControllerTestApp({
       controllers: [VetNoteController],
       providers: [
+        acaoClinicaProvider().provider,
         VetNoteService,
         { provide: PrismaService, useValue: prisma },
         { provide: NotificationService, useValue: notifications },
@@ -151,7 +161,7 @@ describe('VetNoteController (integração)', () => {
   describe('GET /clinical-notes/:id', () => {
     it('retorna a nota para o dono do pet (200)', async () => {
       harness.setUser(TUTOR);
-      prisma.notaClinica.findUnique.mockResolvedValue({
+      prisma.notaClinica.findFirst.mockResolvedValue({
         ...nota,
         pet: { tutorId: 'tutor-1' },
       });
@@ -164,7 +174,7 @@ describe('VetNoteController (integração)', () => {
     });
 
     it('retorna 404 para nota inexistente', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue(null);
+      prisma.notaClinica.findFirst.mockResolvedValue(null);
 
       await request(harness.app.getHttpServer())
         .get('/clinical-notes/missing')
@@ -174,16 +184,18 @@ describe('VetNoteController (integração)', () => {
 
   describe('DELETE /clinical-notes/:id', () => {
     it('o autor (VET) remove a própria nota (204)', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue(nota);
-      prisma.notaClinica.delete.mockResolvedValue(nota);
+      prisma.notaClinica.findFirst.mockResolvedValue(nota);
+      prisma.notaClinica.update.mockResolvedValue(nota);
 
       await request(harness.app.getHttpServer())
         .delete('/clinical-notes/nota-1')
         .expect(204);
+
+      expect(prisma.notaClinica.delete).not.toHaveBeenCalled();
     });
 
     it('proíbe VET de apagar nota de outro vet (403)', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue({
+      prisma.notaClinica.findFirst.mockResolvedValue({
         ...nota,
         veterinarioId: 'outro-vet',
       });

@@ -1,5 +1,9 @@
 import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import {
+  acaoClinicaProvider,
+  comTransacao,
+} from '../../../../../test/utils/acao-clinica';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { PetService } from '../../../pet/pet.service';
 import { DewormingService } from '../deworming.service';
@@ -10,7 +14,7 @@ describe('DewormingService', () => {
     dewormingRecord: {
       create: jest.Mock;
       findMany: jest.Mock;
-      findUnique: jest.Mock;
+      findFirst: jest.Mock;
       update: jest.Mock;
       delete: jest.Mock;
     };
@@ -37,7 +41,7 @@ describe('DewormingService', () => {
       dewormingRecord: {
         create: jest.fn(),
         findMany: jest.fn(),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
       },
@@ -47,8 +51,11 @@ describe('DewormingService', () => {
       assertOwnership: jest.fn().mockResolvedValue({ id: 'pet-1' }),
     };
 
+    comTransacao(prisma);
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        acaoClinicaProvider().provider,
         DewormingService,
         { provide: PrismaService, useValue: prisma },
         { provide: PetService, useValue: petService },
@@ -91,7 +98,7 @@ describe('DewormingService', () => {
   });
 
   it('should throw when updating missing record', async () => {
-    prisma.dewormingRecord.findUnique.mockResolvedValue(null);
+    prisma.dewormingRecord.findFirst.mockResolvedValue(null);
 
     await expect(
       service.update('missing', 'tutor-1', false, {}),
@@ -99,7 +106,7 @@ describe('DewormingService', () => {
   });
 
   it('should delete owned record', async () => {
-    prisma.dewormingRecord.findUnique.mockResolvedValue(record);
+    prisma.dewormingRecord.findFirst.mockResolvedValue(record);
     prisma.dewormingRecord.delete.mockResolvedValue(record);
 
     await service.remove('dew-1', 'tutor-1');

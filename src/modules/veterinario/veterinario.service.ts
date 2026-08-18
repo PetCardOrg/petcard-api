@@ -99,7 +99,11 @@ export class VeterinarioService {
     const pageSize = query.pageSize ?? 10;
     const search = query.search?.trim();
 
-    const where: Prisma.NotaClinicaWhereInput = { veterinarioId };
+    // Nota excluída não traz o pet de volta ao dashboard (api#117).
+    const where: Prisma.NotaClinicaWhereInput = {
+      veterinarioId,
+      deletedAt: null,
+    };
 
     if (search) {
       where.OR = [

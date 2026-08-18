@@ -31,6 +31,7 @@ import { TutorModule } from './modules/tutor/tutor.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { VetNoteModule } from './modules/vet-note/vet-note.module';
 import { VeterinarioModule } from './modules/veterinario/veterinario.module';
+import { HistoricoModule } from './modules/historico/historico.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -70,6 +71,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ReminderModule,
     VetNoteModule,
     VeterinarioModule,
+    HistoricoModule,
   ],
   controllers: [AppController],
   providers: [AppService],
