@@ -21,7 +21,12 @@ import {
 
 type MedicationInput = Omit<CreateMedicationRecordDto, 'pet_id'>;
 
-function toResponseDto(record: MedicationRecord): MedicationRecordResponseDto {
+/** O CRMV vem do vínculo; o nome fica gravado na linha. */
+type ComVeterinario = MedicationRecord & {
+  veterinario?: { crmv: string } | null;
+};
+
+function toResponseDto(record: ComVeterinario): MedicationRecordResponseDto {
   return {
     id: record.id,
     pet_id: record.petId,
@@ -29,6 +34,7 @@ function toResponseDto(record: MedicationRecord): MedicationRecordResponseDto {
     dosage: record.dosage,
     frequency: record.frequency,
     veterinario_id: record.veterinarioId ?? undefined,
+    veterinario_crmv: record.veterinario?.crmv ?? undefined,
     veterinarian_name: record.veterinarianName ?? undefined,
     start_date: record.startDate.toISOString().split('T')[0],
     end_date: record.endDate
@@ -70,6 +76,7 @@ export class MedicationService {
     await this.petService.assertAccess(petId, userId, isVet);
     const record = await this.prisma.$transaction(async (tx) => {
       const criado = await tx.medicationRecord.create({
+        include: { veterinario: { select: { crmv: true } } },
         data: {
           petId,
           medicationName: dto.medication_name,
@@ -112,6 +119,7 @@ export class MedicationService {
     const records = await this.prisma.medicationRecord.findMany({
       where: { petId, deletedAt: null },
       orderBy: { startDate: 'desc' },
+      include: { veterinario: { select: { crmv: true } } },
     });
     return records.map(toResponseDto);
   }
@@ -127,6 +135,7 @@ export class MedicationService {
     assertPodeEditar(record, userId, isVet);
     const updated = await this.prisma.$transaction(async (tx) => {
       const alterado = await tx.medicationRecord.update({
+        include: { veterinario: { select: { crmv: true } } },
         where: { id },
         data: {
           medicationName: dto.medication_name,

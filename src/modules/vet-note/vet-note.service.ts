@@ -16,6 +16,7 @@ import { NotificationService } from '../notification/notification.service';
 import { AcaoClinicaService } from '../historico/acao-clinica.service';
 import {
   CreateNotaClinicaDto,
+  UpdateNotaClinicaDto,
   NotaClinicaResponseDto,
 } from '@petcardorg/shared';
 
@@ -157,6 +158,67 @@ export class VetNoteService {
    * Exclusão lógica (api#117): a nota some da listagem, mas o histórico
    * clínico preserva o que foi diagnosticado e quem diagnosticou.
    */
+  /**
+   * Edição da própria nota (web#34). Mesma regra da exclusão: só o autor.
+   * Alterar nota alheia mantendo a assinatura falsificaria a autoria — a
+   * carteira seguiria dizendo quem escreveu, com outro conteúdo.
+   */
+  async update(
+    id: string,
+    veterinarioId: string,
+    dto: UpdateNotaClinicaDto,
+  ): Promise<NotaClinicaResponseDto> {
+    const nota = await this.prisma.notaClinica.findFirst({
+      where: { id, deletedAt: null },
+    });
+
+    if (!nota) {
+      throw new NotFoundException(`Clinical note with id ${id} not found`);
+    }
+
+    if (nota.veterinarioId !== veterinarioId) {
+      throw new ForbiddenException('You can only edit your own clinical notes');
+    }
+
+    const atualizada = await this.prisma.$transaction(async (tx) => {
+      const alterada = await tx.notaClinica.update({
+        where: { id },
+        data: {
+          diagnostico: dto.diagnostico,
+          prescricao: dto.prescricao,
+          observacoes: dto.observacoes,
+        },
+        include: { veterinario: { select: { nome: true, crmv: true } } },
+      });
+      await this.acoes.registrar(
+        {
+          petId: nota.petId,
+          tipo: AcaoClinicaTipo.EDICAO,
+          entidade: EntidadeClinica.NOTA_CLINICA,
+          entidadeId: id,
+          autorId: veterinarioId,
+          autorTipo: Role.VET,
+          detalhes: {
+            antes: {
+              diagnostico: nota.diagnostico,
+              prescricao: nota.prescricao,
+              observacoes: nota.observacoes,
+            },
+            depois: {
+              diagnostico: alterada.diagnostico,
+              prescricao: alterada.prescricao,
+              observacoes: alterada.observacoes,
+            },
+          },
+        },
+        tx,
+      );
+      return alterada;
+    });
+
+    return toResponseDto(atualizada);
+  }
+
   async remove(id: string, veterinarioId: string): Promise<void> {
     const nota = await this.prisma.notaClinica.findFirst({
       where: { id, deletedAt: null },

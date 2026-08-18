@@ -250,4 +250,57 @@ describe('Histórico clínico (e2e)', () => {
       .expect(200);
     expect(publica.body.vaccines).toHaveLength(0);
   });
+  it('o veterinário edita a própria nota clínica e a trilha registra', async () => {
+    const nota = await request(app.getHttpServer())
+      .post(`/pets/${petId}/clinical-notes`)
+      .set('Authorization', `Bearer ${vetToken}`)
+      .send({ diagnostico: 'Otite externa' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/clinical-notes/${nota.body.id as string}`)
+      .set('Authorization', `Bearer ${vetToken}`)
+      .send({ diagnostico: 'Otite externa bilateral' })
+      .expect(200);
+
+    const acoes = await prisma.acaoClinica.findMany({
+      where: { entidadeId: nota.body.id as string, tipo: 'EDICAO' },
+    });
+    expect(acoes).toHaveLength(1);
+    const detalhes = acoes[0].detalhes as {
+      antes: { diagnostico: string };
+      depois: { diagnostico: string };
+    };
+    expect(detalhes.antes.diagnostico).toBe('Otite externa');
+    expect(detalhes.depois.diagnostico).toBe('Otite externa bilateral');
+  });
+
+  it('o tutor não edita nota clínica (403)', async () => {
+    const nota = await request(app.getHttpServer())
+      .post(`/pets/${petId}/clinical-notes`)
+      .set('Authorization', `Bearer ${vetToken}`)
+      .send({ diagnostico: 'Otite externa' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/clinical-notes/${nota.body.id as string}`)
+      .set('Authorization', `Bearer ${tutorToken}`)
+      .send({ diagnostico: 'nada a ver' })
+      .expect(403);
+  });
+
+  it('o registro do veterinário traz nome e CRMV', async () => {
+    const medId = await prescreverMedicacao();
+
+    const lista = await request(app.getHttpServer())
+      .get(`/pets/${petId}/medications`)
+      .set('Authorization', `Bearer ${vetToken}`)
+      .expect(200);
+
+    const item = (lista.body as Array<Record<string, unknown>>).find(
+      (m) => m.id === medId,
+    );
+    expect(item?.veterinarian_name).toBe('Dra. Camila');
+    expect(item?.veterinario_crmv).toBe('CRMV-CE-1234');
+  });
 });

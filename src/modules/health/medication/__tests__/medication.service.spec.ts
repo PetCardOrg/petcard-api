@@ -100,6 +100,8 @@ describe('MedicationService', () => {
       // Registro excluído não aparece na listagem (api#117).
       where: { petId: 'pet-1', deletedAt: null },
       orderBy: { startDate: 'desc' },
+      // O CRMV de quem prescreveu vem pelo vínculo, não pela linha.
+      include: { veterinario: { select: { crmv: true } } },
     });
     expect(result).toEqual([
       {
