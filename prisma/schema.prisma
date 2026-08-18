@@ -37,6 +37,19 @@ enum DevicePlatform {
   ANDROID
 }
 
+enum AcaoClinicaTipo {
+  CRIACAO
+  EDICAO
+  EXCLUSAO
+}
+
+enum EntidadeClinica {
+  NOTA_CLINICA
+  VACINA
+  VERMIFUGO
+  MEDICACAO
+}
+
 enum NotificationKind {
   DOSE_REMINDER
   APPOINTMENT_REMINDER
@@ -117,6 +130,7 @@ model Pet {
   dewormingRecords  DewormingRecord[]
   medicationRecords MedicationRecord[]
   carteiraDigital   CarteiraDigital?
+  acoesClinicas     AcaoClinica[]
   appointments      Appointment[]
   notasClinicas     NotaClinica[]
 
@@ -142,13 +156,19 @@ model VaccineRecord {
   appliedAt        DateTime  @map("applied_at")
   nextDoseAt       DateTime? @map("next_dose_at")
   lastNotifiedAt   DateTime? @map("last_notified_at")
+  /// Preenchido quando quem registra é um veterinário do PetCard.
+  veterinarioId    String?   @map("veterinario_id")
+  /// Texto livre: registros antigos e profissionais fora do PetCard.
   veterinarianName String?   @map("veterinarian_name")
   notes            String?
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
 
-  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+  pet         Pet          @relation(fields: [petId], references: [id], onDelete: Cascade)
+  veterinario Veterinario? @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
 
+  @@index([veterinarioId])
   @@map("vaccine_record")
 }
 
@@ -159,13 +179,19 @@ model DewormingRecord {
   appliedAt        DateTime  @map("applied_at")
   nextDoseAt       DateTime? @map("next_dose_at")
   lastNotifiedAt   DateTime? @map("last_notified_at")
+  /// Preenchido quando quem registra é um veterinário do PetCard.
+  veterinarioId    String?   @map("veterinario_id")
+  /// Texto livre: registros antigos e profissionais fora do PetCard.
   veterinarianName String?   @map("veterinarian_name")
   notes            String?
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
 
-  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+  pet         Pet          @relation(fields: [petId], references: [id], onDelete: Cascade)
+  veterinario Veterinario? @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
 
+  @@index([veterinarioId])
   @@map("deworming_record")
 }
 
@@ -178,12 +204,17 @@ model MedicationRecord {
   startDate      DateTime  @map("start_date")
   endDate        DateTime? @map("end_date")
   lastNotifiedAt DateTime? @map("last_notified_at")
+  /// Preenchido quando quem prescreve é um veterinário do PetCard.
+  veterinarioId  String?   @map("veterinario_id")
   notes          String?
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
 
-  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+  pet         Pet          @relation(fields: [petId], references: [id], onDelete: Cascade)
+  veterinario Veterinario? @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
 
+  @@index([veterinarioId])
   @@map("medication_record")
 }
 
@@ -251,7 +282,10 @@ model Veterinario {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  notasClinicas NotaClinica[]
+  notasClinicas     NotaClinica[]
+  vacinas           VaccineRecord[]
+  vermifugos        DewormingRecord[]
+  medicacoes        MedicationRecord[]
 
   @@map("veterinario")
 }
@@ -264,8 +298,11 @@ model NotaClinica {
   diagnostico   String
   prescricao    String?
   observacoes   String?
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  /// Exclusão lógica (api#117): o registro sai da visualização mas o
+  /// histórico clínico preserva o que o veterinário orientou.
+  deletedAt     DateTime? @map("deleted_at")
 
   veterinario Veterinario @relation(fields: [veterinarioId], references: [id], onDelete: Cascade)
   pet         Pet         @relation(fields: [petId], references: [id], onDelete: Cascade)
@@ -274,4 +311,35 @@ model NotaClinica {
   @@index([petId])
   @@index([googlePlaceId])
   @@map("nota_clinica")
+}
+
+
+/// Trilha de auditoria das ações sobre registros clínicos (api#117).
+///
+/// Nenhuma FK para autor ou entidade: a trilha é um log append-only e precisa
+/// sobreviver à exclusão de quem a originou. Nome e CRMV ficam gravados aqui,
+/// não por referência — uma evidência que some junto com a conta do
+/// veterinário não serve como evidência.
+model AcaoClinica {
+  id         String          @id @default(uuid())
+  petId      String          @map("pet_id")
+  tipo       AcaoClinicaTipo
+  entidade   EntidadeClinica
+  entidadeId String          @map("entidade_id")
+
+  autorTipo Role    @map("autor_tipo")
+  autorId   String  @map("autor_id")
+  autorNome String  @map("autor_nome")
+  autorCrmv String? @map("autor_crmv")
+
+  /// O que mudou, para EDICAO e EXCLUSAO. Snapshot, não diferencial.
+  detalhes Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId, createdAt])
+  @@index([entidade, entidadeId])
+  @@map("acao_clinica")
 }

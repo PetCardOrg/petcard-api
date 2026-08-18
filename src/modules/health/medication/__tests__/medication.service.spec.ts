@@ -1,5 +1,9 @@
 import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import {
+  acaoClinicaProvider,
+  comTransacao,
+} from '../../../../../test/utils/acao-clinica';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { PetService } from '../../../pet/pet.service';
 import { MedicationService } from '../medication.service';
@@ -10,7 +14,7 @@ describe('MedicationService', () => {
     medicationRecord: {
       create: jest.Mock;
       findMany: jest.Mock;
-      findUnique: jest.Mock;
+      findFirst: jest.Mock;
       update: jest.Mock;
       delete: jest.Mock;
     };
@@ -38,7 +42,7 @@ describe('MedicationService', () => {
       medicationRecord: {
         create: jest.fn(),
         findMany: jest.fn(),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
       },
@@ -48,8 +52,11 @@ describe('MedicationService', () => {
       assertOwnership: jest.fn().mockResolvedValue({ id: 'pet-1' }),
     };
 
+    comTransacao(prisma);
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        acaoClinicaProvider().provider,
         MedicationService,
         { provide: PrismaService, useValue: prisma },
         { provide: PetService, useValue: petService },
@@ -83,7 +90,8 @@ describe('MedicationService', () => {
     const result = await service.findAllForPet('pet-1', 'tutor-1', false);
 
     expect(prisma.medicationRecord.findMany).toHaveBeenCalledWith({
-      where: { petId: 'pet-1' },
+      // Registro excluído não aparece na listagem (api#117).
+      where: { petId: 'pet-1', deletedAt: null },
       orderBy: { startDate: 'desc' },
     });
     expect(result).toEqual([
@@ -103,21 +111,26 @@ describe('MedicationService', () => {
   });
 
   it('should throw when updating a missing record', async () => {
-    prisma.medicationRecord.findUnique.mockResolvedValue(null);
+    prisma.medicationRecord.findFirst.mockResolvedValue(null);
 
     await expect(
       service.update('missing', 'tutor-1', false, {}),
     ).rejects.toThrow(NotFoundException);
   });
 
-  it('should delete an owned record', async () => {
-    prisma.medicationRecord.findUnique.mockResolvedValue(record);
-    prisma.medicationRecord.delete.mockResolvedValue(record);
+  it('marca como excluída em vez de apagar (api#117)', async () => {
+    prisma.medicationRecord.findFirst.mockResolvedValue(record);
+    prisma.medicationRecord.update.mockResolvedValue(record);
 
     await service.remove('med-1', 'tutor-1');
 
-    expect(prisma.medicationRecord.delete).toHaveBeenCalledWith({
-      where: { id: 'med-1' },
-    });
+    // O caso central da issue: o tutor decide não dar o remédio e apaga,
+    // mas a prescrição do veterinário continua demonstrável.
+    expect(prisma.medicationRecord.delete).not.toHaveBeenCalled();
+    const [[chamada]] = prisma.medicationRecord.update.mock.calls as Array<
+      [{ where: { id: string }; data: { deletedAt: Date } }]
+    >;
+    expect(chamada.where).toEqual({ id: 'med-1' });
+    expect(chamada.data.deletedAt).toBeInstanceOf(Date);
   });
 });

@@ -1,16 +1,22 @@
 import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import {
+  acaoClinicaProvider,
+  comTransacao,
+} from '../../../../../test/utils/acao-clinica';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { PetService } from '../../../pet/pet.service';
 import { VaccineService } from '../vaccine.service';
 
 describe('VaccineService', () => {
   let service: VaccineService;
+  let acaoTrilha: ReturnType<typeof acaoClinicaProvider>;
+  let registrarAcao: jest.Mock;
   let prisma: {
     vaccineRecord: {
       create: jest.Mock;
       findMany: jest.Mock;
-      findUnique: jest.Mock;
+      findFirst: jest.Mock;
       update: jest.Mock;
       delete: jest.Mock;
     };
@@ -33,11 +39,13 @@ describe('VaccineService', () => {
   };
 
   beforeEach(async () => {
+    acaoTrilha = acaoClinicaProvider();
+    registrarAcao = acaoTrilha.registrar;
     prisma = {
       vaccineRecord: {
         create: jest.fn(),
         findMany: jest.fn(),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
       },
@@ -47,8 +55,11 @@ describe('VaccineService', () => {
       assertOwnership: jest.fn().mockResolvedValue({ id: 'pet-1' }),
     };
 
+    comTransacao(prisma);
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        acaoTrilha.provider,
         VaccineService,
         { provide: PrismaService, useValue: prisma },
         { provide: PetService, useValue: petService },
@@ -105,7 +116,7 @@ describe('VaccineService', () => {
 
   describe('update', () => {
     it('should throw NotFoundException when the record is missing', async () => {
-      prisma.vaccineRecord.findUnique.mockResolvedValue(null);
+      prisma.vaccineRecord.findFirst.mockResolvedValue(null);
 
       await expect(
         service.update('missing', 'tutor-1', false, {}),
@@ -113,7 +124,7 @@ describe('VaccineService', () => {
     });
 
     it('should update the record when access is granted', async () => {
-      prisma.vaccineRecord.findUnique.mockResolvedValue(record);
+      prisma.vaccineRecord.findFirst.mockResolvedValue(record);
       prisma.vaccineRecord.update.mockResolvedValue({
         ...record,
         vaccineName: 'Rabies Plus',
@@ -128,9 +139,9 @@ describe('VaccineService', () => {
   });
 
   describe('remove', () => {
-    it('should delete the record when owned', async () => {
-      prisma.vaccineRecord.findUnique.mockResolvedValue(record);
-      prisma.vaccineRecord.delete.mockResolvedValue(record);
+    it('marca como excluído em vez de apagar (api#117)', async () => {
+      prisma.vaccineRecord.findFirst.mockResolvedValue(record);
+      prisma.vaccineRecord.update.mockResolvedValue(record);
 
       await service.remove('vac-1', 'tutor-1');
 
@@ -138,9 +149,31 @@ describe('VaccineService', () => {
         'pet-1',
         'tutor-1',
       );
-      expect(prisma.vaccineRecord.delete).toHaveBeenCalledWith({
-        where: { id: 'vac-1' },
-      });
+      // O registro precisa sobreviver: é o que o histórico clínico mostra.
+      expect(prisma.vaccineRecord.delete).not.toHaveBeenCalled();
+      const [[chamada]] = prisma.vaccineRecord.update.mock.calls as Array<
+        [{ where: { id: string }; data: { deletedAt: Date } }]
+      >;
+      expect(chamada.where).toEqual({ id: 'vac-1' });
+      expect(chamada.data.deletedAt).toBeInstanceOf(Date);
+    });
+
+    it('registra a exclusão na trilha, com o autor', async () => {
+      prisma.vaccineRecord.findFirst.mockResolvedValue(record);
+      prisma.vaccineRecord.update.mockResolvedValue(record);
+
+      await service.remove('vac-1', 'tutor-1');
+
+      expect(registrarAcao).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tipo: 'EXCLUSAO',
+          entidade: 'VACINA',
+          entidadeId: 'vac-1',
+          autorId: 'tutor-1',
+          autorTipo: 'TUTOR',
+        }),
+        expect.anything(),
+      );
     });
   });
 });

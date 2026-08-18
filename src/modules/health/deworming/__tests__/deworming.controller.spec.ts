@@ -1,6 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import request from 'supertest';
 import {
+  acaoClinicaProvider,
+  comTransacao,
+} from '../../../../../test/utils/acao-clinica';
+import {
   createControllerTestApp,
   ControllerHarness,
   TUTOR,
@@ -20,7 +24,7 @@ describe('DewormingController (integração)', () => {
     dewormingRecord: {
       create: jest.Mock;
       findMany: jest.Mock;
-      findUnique: jest.Mock;
+      findFirst: jest.Mock;
       update: jest.Mock;
       delete: jest.Mock;
     };
@@ -45,15 +49,18 @@ describe('DewormingController (integração)', () => {
       dewormingRecord: {
         create: jest.fn(),
         findMany: jest.fn(),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
       },
     };
 
+    comTransacao(prisma);
+
     harness = await createControllerTestApp({
       controllers: [DewormingController],
       providers: [
+        acaoClinicaProvider().provider,
         DewormingService,
         PetService,
         TutorService,
@@ -127,7 +134,7 @@ describe('DewormingController (integração)', () => {
   });
 
   it('PATCH atualiza o registro (200)', async () => {
-    prisma.dewormingRecord.findUnique.mockResolvedValue(record);
+    prisma.dewormingRecord.findFirst.mockResolvedValue(record);
     prisma.dewormingRecord.update.mockResolvedValue({
       ...record,
       productName: 'Drontal Plus',
@@ -142,7 +149,7 @@ describe('DewormingController (integração)', () => {
   });
 
   it('DELETE remove o registro do dono (204)', async () => {
-    prisma.dewormingRecord.findUnique.mockResolvedValue(record);
+    prisma.dewormingRecord.findFirst.mockResolvedValue(record);
     prisma.dewormingRecord.delete.mockResolvedValue(record);
 
     await request(harness.app.getHttpServer())

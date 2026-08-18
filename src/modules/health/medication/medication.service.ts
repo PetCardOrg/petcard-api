@@ -1,5 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { MedicationRecord } from '@prisma/client';
+import {
+  AcaoClinicaTipo,
+  EntidadeClinica,
+  MedicationRecord,
+  Role,
+} from '@prisma/client';
 import {
   CreateMedicationRecordDto,
   MedicationRecordResponseDto,
@@ -7,6 +12,7 @@ import {
 } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PetService } from '../../pet/pet.service';
+import { AcaoClinicaService } from '../../historico/acao-clinica.service';
 
 type MedicationInput = Omit<CreateMedicationRecordDto, 'pet_id'>;
 
@@ -27,11 +33,24 @@ function toResponseDto(record: MedicationRecord): MedicationRecordResponseDto {
   };
 }
 
+/** Só os campos clínicos; o snapshot é evidência, não cópia de linha. */
+function toSnapshot(record: MedicationRecord) {
+  return {
+    medication_name: record.medicationName,
+    dosage: record.dosage,
+    frequency: record.frequency,
+    start_date: record.startDate.toISOString(),
+    end_date: record.endDate?.toISOString() ?? null,
+    notes: record.notes,
+  };
+}
+
 @Injectable()
 export class MedicationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly petService: PetService,
+    private readonly acoes: AcaoClinicaService,
   ) {}
 
   async create(
@@ -41,16 +60,32 @@ export class MedicationService {
     dto: MedicationInput,
   ): Promise<MedicationRecordResponseDto> {
     await this.petService.assertAccess(petId, userId, isVet);
-    const record = await this.prisma.medicationRecord.create({
-      data: {
-        petId,
-        medicationName: dto.medication_name,
-        dosage: dto.dosage,
-        frequency: dto.frequency,
-        startDate: new Date(dto.start_date),
-        endDate: dto.end_date ? new Date(dto.end_date) : null,
-        notes: dto.notes,
-      },
+    const record = await this.prisma.$transaction(async (tx) => {
+      const criado = await tx.medicationRecord.create({
+        data: {
+          petId,
+          medicationName: dto.medication_name,
+          dosage: dto.dosage,
+          frequency: dto.frequency,
+          startDate: new Date(dto.start_date),
+          endDate: dto.end_date ? new Date(dto.end_date) : null,
+          // Quem prescreveu, quando é um vet do PetCard.
+          veterinarioId: isVet ? userId : null,
+          notes: dto.notes,
+        },
+      });
+      await this.acoes.registrar(
+        {
+          petId,
+          tipo: AcaoClinicaTipo.CRIACAO,
+          entidade: EntidadeClinica.MEDICACAO,
+          entidadeId: criado.id,
+          autorId: userId,
+          autorTipo: isVet ? Role.VET : Role.TUTOR,
+        },
+        tx,
+      );
+      return criado;
     });
     return toResponseDto(record);
   }
@@ -62,7 +97,7 @@ export class MedicationService {
   ): Promise<MedicationRecordResponseDto[]> {
     await this.petService.assertAccess(petId, userId, isVet);
     const records = await this.prisma.medicationRecord.findMany({
-      where: { petId },
+      where: { petId, deletedAt: null },
       orderBy: { startDate: 'desc' },
     });
     return records.map(toResponseDto);
@@ -76,29 +111,66 @@ export class MedicationService {
   ): Promise<MedicationRecordResponseDto> {
     const record = await this.getRecord(id);
     await this.petService.assertAccess(record.petId, userId, isVet);
-    const updated = await this.prisma.medicationRecord.update({
-      where: { id },
-      data: {
-        medicationName: dto.medication_name,
-        dosage: dto.dosage,
-        frequency: dto.frequency,
-        startDate: dto.start_date ? new Date(dto.start_date) : undefined,
-        endDate: dto.end_date ? new Date(dto.end_date) : undefined,
-        notes: dto.notes,
-      },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const alterado = await tx.medicationRecord.update({
+        where: { id },
+        data: {
+          medicationName: dto.medication_name,
+          dosage: dto.dosage,
+          frequency: dto.frequency,
+          startDate: dto.start_date ? new Date(dto.start_date) : undefined,
+          endDate: dto.end_date ? new Date(dto.end_date) : undefined,
+          notes: dto.notes,
+        },
+      });
+      await this.acoes.registrar(
+        {
+          petId: record.petId,
+          tipo: AcaoClinicaTipo.EDICAO,
+          entidade: EntidadeClinica.MEDICACAO,
+          entidadeId: id,
+          autorId: userId,
+          autorTipo: isVet ? Role.VET : Role.TUTOR,
+          detalhes: { antes: toSnapshot(record), depois: toSnapshot(alterado) },
+        },
+        tx,
+      );
+      return alterado;
     });
     return toResponseDto(updated);
   }
 
+  /**
+   * Exclusão lógica (api#117). É o caso central da issue: o tutor decide não
+   * dar o remédio e apaga o registro — a prescrição do veterinário continua
+   * no histórico.
+   */
   async remove(id: string, userId: string): Promise<void> {
     const record = await this.getRecord(id);
     await this.petService.assertOwnership(record.petId, userId);
-    await this.prisma.medicationRecord.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.medicationRecord.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      await this.acoes.registrar(
+        {
+          petId: record.petId,
+          tipo: AcaoClinicaTipo.EXCLUSAO,
+          entidade: EntidadeClinica.MEDICACAO,
+          entidadeId: id,
+          autorId: userId,
+          autorTipo: Role.TUTOR,
+          detalhes: { antes: toSnapshot(record) },
+        },
+        tx,
+      );
+    });
   }
 
   private async getRecord(id: string): Promise<MedicationRecord> {
-    const record = await this.prisma.medicationRecord.findUnique({
-      where: { id },
+    const record = await this.prisma.medicationRecord.findFirst({
+      where: { id, deletedAt: null },
     });
     if (!record) {
       throw new NotFoundException(`Medication record with id ${id} not found`);

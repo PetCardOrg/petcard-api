@@ -1,5 +1,9 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import {
+  acaoClinicaProvider,
+  comTransacao,
+} from '../../../../test/utils/acao-clinica';
 import { NotificationKind } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { NotificationService } from '../../notification/notification.service';
@@ -11,7 +15,8 @@ describe('VetNoteService', () => {
     notaClinica: {
       create: jest.Mock;
       findMany: jest.Mock;
-      findUnique: jest.Mock;
+      findFirst: jest.Mock;
+      update: jest.Mock;
       delete: jest.Mock;
     };
     pet: { findUnique: jest.Mock };
@@ -49,8 +54,10 @@ describe('VetNoteService', () => {
       notaClinica: {
         create: jest.fn(),
         findMany: jest.fn(),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
         delete: jest.fn(),
+        update: jest.fn(),
       },
       pet: { findUnique: jest.fn() },
       veterinario: { findUnique: jest.fn() },
@@ -59,8 +66,11 @@ describe('VetNoteService', () => {
       schedulePush: jest.fn().mockResolvedValue([]),
     };
 
+    comTransacao(prisma);
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        acaoClinicaProvider().provider,
         VetNoteService,
         { provide: PrismaService, useValue: prisma },
         { provide: NotificationService, useValue: notificationService },
@@ -245,7 +255,7 @@ describe('VetNoteService', () => {
     };
 
     it('should return a clinical note when tutor owns the pet', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue(notaWithPet);
+      prisma.notaClinica.findFirst.mockResolvedValue(notaWithPet);
 
       const result = await service.findOne('nota-1', 'tutor-1', false);
 
@@ -253,7 +263,7 @@ describe('VetNoteService', () => {
     });
 
     it('should return a clinical note when user is vet', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue(notaWithPet);
+      prisma.notaClinica.findFirst.mockResolvedValue(notaWithPet);
 
       const result = await service.findOne('nota-1', 'vet-1', true);
 
@@ -261,7 +271,7 @@ describe('VetNoteService', () => {
     });
 
     it('should throw ForbiddenException when tutor does not own the pet', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue(notaWithPet);
+      prisma.notaClinica.findFirst.mockResolvedValue(notaWithPet);
 
       await expect(
         service.findOne('nota-1', 'tutor-other', false),
@@ -269,7 +279,7 @@ describe('VetNoteService', () => {
     });
 
     it('should throw NotFoundException when note does not exist', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue(null);
+      prisma.notaClinica.findFirst.mockResolvedValue(null);
 
       await expect(
         service.findOne('missing', 'tutor-1', false),
@@ -278,22 +288,25 @@ describe('VetNoteService', () => {
   });
 
   describe('remove', () => {
-    it('should delete a note when the author is the veterinario', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue({
+    it('marca como excluída em vez de apagar (api#117)', async () => {
+      prisma.notaClinica.findFirst.mockResolvedValue({
         ...notaFixture,
         veterinarioId: 'vet-1',
       });
-      prisma.notaClinica.delete.mockResolvedValue(notaFixture);
+      prisma.notaClinica.update.mockResolvedValue(notaFixture);
 
       await service.remove('nota-1', 'vet-1');
 
-      expect(prisma.notaClinica.delete).toHaveBeenCalledWith({
-        where: { id: 'nota-1' },
-      });
+      expect(prisma.notaClinica.delete).not.toHaveBeenCalled();
+      const [[chamada]] = prisma.notaClinica.update.mock.calls as Array<
+        [{ where: { id: string }; data: { deletedAt: Date } }]
+      >;
+      expect(chamada.where).toEqual({ id: 'nota-1' });
+      expect(chamada.data.deletedAt).toBeInstanceOf(Date);
     });
 
     it('should throw ForbiddenException when another vet tries to delete', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue({
+      prisma.notaClinica.findFirst.mockResolvedValue({
         ...notaFixture,
         veterinarioId: 'vet-1',
       });
@@ -304,7 +317,7 @@ describe('VetNoteService', () => {
     });
 
     it('should throw NotFoundException when note does not exist', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue(null);
+      prisma.notaClinica.findFirst.mockResolvedValue(null);
 
       await expect(service.remove('missing', 'vet-1')).rejects.toThrow(
         NotFoundException,

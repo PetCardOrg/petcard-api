@@ -71,7 +71,8 @@ export class DoseReminderService {
     windowDays: number,
   ): Promise<number> {
     const records = await this.prisma.vaccineRecord.findMany({
-      where: { nextDoseAt: { gte: now, lte: windowEnd } },
+      // Registro excluído não gera lembrete (api#117).
+      where: { nextDoseAt: { gte: now, lte: windowEnd }, deletedAt: null },
       include: { pet: { select: { name: true, tutorId: true } } },
     });
 
@@ -102,7 +103,7 @@ export class DoseReminderService {
     windowDays: number,
   ): Promise<number> {
     const records = await this.prisma.dewormingRecord.findMany({
-      where: { nextDoseAt: { gte: now, lte: windowEnd } },
+      where: { nextDoseAt: { gte: now, lte: windowEnd }, deletedAt: null },
       include: { pet: { select: { name: true, tutorId: true } } },
     });
 

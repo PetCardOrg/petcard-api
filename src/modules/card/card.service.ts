@@ -81,8 +81,14 @@ export class CardService {
         pet: {
           include: {
             tutor: true,
-            vaccineRecords: { orderBy: { appliedAt: 'desc' } },
-            dewormingRecords: { orderBy: { appliedAt: 'desc' } },
+            vaccineRecords: {
+              where: { deletedAt: null },
+              orderBy: { appliedAt: 'desc' },
+            },
+            dewormingRecords: {
+              where: { deletedAt: null },
+              orderBy: { appliedAt: 'desc' },
+            },
           },
         },
       },
@@ -157,11 +163,11 @@ export class CardService {
         select: { crmv: true },
       }),
       this.prisma.medicationRecord.findMany({
-        where: { petId: publica.pet_id },
+        where: { petId: publica.pet_id, deletedAt: null },
         orderBy: { startDate: 'desc' },
       }),
       this.prisma.notaClinica.findMany({
-        where: { petId: publica.pet_id },
+        where: { petId: publica.pet_id, deletedAt: null },
         orderBy: { createdAt: 'desc' },
         include: { veterinario: { select: { nome: true, crmv: true } } },
       }),
@@ -209,19 +215,16 @@ export class CardService {
         tutor: true,
         carteiraDigital: true,
         vaccineRecords: {
-          select: {
-            nextDoseAt: true,
-          },
+          where: { deletedAt: null },
+          select: { nextDoseAt: true },
         },
         dewormingRecords: {
-          select: {
-            nextDoseAt: true,
-          },
+          where: { deletedAt: null },
+          select: { nextDoseAt: true },
         },
         medicationRecords: {
-          select: {
-            endDate: true,
-          },
+          where: { deletedAt: null },
+          select: { endDate: true },
         },
       },
     });

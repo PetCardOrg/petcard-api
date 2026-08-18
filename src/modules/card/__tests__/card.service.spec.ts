@@ -519,20 +519,18 @@ describe('CardService', () => {
         include: {
           tutor: true,
           carteiraDigital: true,
+          // Registro excluído não conta nos totais da carteira (api#117).
           vaccineRecords: {
-            select: {
-              nextDoseAt: true,
-            },
+            where: { deletedAt: null },
+            select: { nextDoseAt: true },
           },
           dewormingRecords: {
-            select: {
-              nextDoseAt: true,
-            },
+            where: { deletedAt: null },
+            select: { nextDoseAt: true },
           },
           medicationRecords: {
-            select: {
-              endDate: true,
-            },
+            where: { deletedAt: null },
+            select: { endDate: true },
           },
         },
       });

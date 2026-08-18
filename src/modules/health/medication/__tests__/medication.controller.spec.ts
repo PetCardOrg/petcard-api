@@ -1,6 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import request from 'supertest';
 import {
+  acaoClinicaProvider,
+  comTransacao,
+} from '../../../../../test/utils/acao-clinica';
+import {
   createControllerTestApp,
   ControllerHarness,
   TUTOR,
@@ -21,7 +25,7 @@ describe('MedicationController (integração)', () => {
     medicationRecord: {
       create: jest.Mock;
       findMany: jest.Mock;
-      findUnique: jest.Mock;
+      findFirst: jest.Mock;
       update: jest.Mock;
       delete: jest.Mock;
     };
@@ -47,15 +51,18 @@ describe('MedicationController (integração)', () => {
       medicationRecord: {
         create: jest.fn(),
         findMany: jest.fn(),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
       },
     };
 
+    comTransacao(prisma);
+
     harness = await createControllerTestApp({
       controllers: [MedicationController],
       providers: [
+        acaoClinicaProvider().provider,
         MedicationService,
         PetService,
         TutorService,
@@ -136,7 +143,7 @@ describe('MedicationController (integração)', () => {
   });
 
   it('PATCH atualiza o registro (200)', async () => {
-    prisma.medicationRecord.findUnique.mockResolvedValue(record);
+    prisma.medicationRecord.findFirst.mockResolvedValue(record);
     prisma.medicationRecord.update.mockResolvedValue({
       ...record,
       dosage: '250mg',
@@ -151,7 +158,7 @@ describe('MedicationController (integração)', () => {
   });
 
   it('DELETE remove o registro do dono (204)', async () => {
-    prisma.medicationRecord.findUnique.mockResolvedValue(record);
+    prisma.medicationRecord.findFirst.mockResolvedValue(record);
     prisma.medicationRecord.delete.mockResolvedValue(record);
 
     await request(harness.app.getHttpServer())

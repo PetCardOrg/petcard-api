@@ -83,7 +83,8 @@ describe('VeterinarioService - findAttendedPets', () => {
     expect(result.total).toBe(1);
     expect(prisma.notaClinica.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { veterinarioId: 'vet-1' },
+        // Nota excluída não traz o pet de volta ao dashboard (api#117).
+        where: { veterinarioId: 'vet-1', deletedAt: null },
       }),
     );
   });

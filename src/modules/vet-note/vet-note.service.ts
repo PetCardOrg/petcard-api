@@ -4,9 +4,16 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { NotaClinica, NotificationKind } from '@prisma/client';
+import {
+  AcaoClinicaTipo,
+  EntidadeClinica,
+  NotaClinica,
+  NotificationKind,
+  Role,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
+import { AcaoClinicaService } from '../historico/acao-clinica.service';
 import {
   CreateNotaClinicaDto,
   NotaClinicaResponseDto,
@@ -39,6 +46,7 @@ export class VetNoteService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
+    private readonly acoes: AcaoClinicaService,
   ) {}
 
   async create(
@@ -49,16 +57,30 @@ export class VetNoteService {
     const pet = await this.findPetOrFail(petId);
     await this.assertVeterinarioExists(veterinarioId);
 
-    const nota = await this.prisma.notaClinica.create({
-      data: {
-        petId,
-        veterinarioId,
-        diagnostico: dto.diagnostico,
-        prescricao: dto.prescricao,
-        observacoes: dto.observacoes,
-        googlePlaceId: dto.google_place_id,
-      },
-      include: { veterinario: { select: { nome: true, crmv: true } } },
+    const nota = await this.prisma.$transaction(async (tx) => {
+      const criada = await tx.notaClinica.create({
+        data: {
+          petId,
+          veterinarioId,
+          diagnostico: dto.diagnostico,
+          prescricao: dto.prescricao,
+          observacoes: dto.observacoes,
+          googlePlaceId: dto.google_place_id,
+        },
+        include: { veterinario: { select: { nome: true, crmv: true } } },
+      });
+      await this.acoes.registrar(
+        {
+          petId,
+          tipo: AcaoClinicaTipo.CRIACAO,
+          entidade: EntidadeClinica.NOTA_CLINICA,
+          entidadeId: criada.id,
+          autorId: veterinarioId,
+          autorTipo: Role.VET,
+        },
+        tx,
+      );
+      return criada;
     });
 
     const response = toResponseDto(nota);
@@ -99,7 +121,7 @@ export class VetNoteService {
     }
 
     const notas = await this.prisma.notaClinica.findMany({
-      where: { petId },
+      where: { petId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
       include: { veterinario: { select: { nome: true, crmv: true } } },
     });
@@ -112,8 +134,8 @@ export class VetNoteService {
     userId: string,
     isVet: boolean,
   ): Promise<NotaClinicaResponseDto> {
-    const nota = await this.prisma.notaClinica.findUnique({
-      where: { id },
+    const nota = await this.prisma.notaClinica.findFirst({
+      where: { id, deletedAt: null },
       include: {
         veterinario: { select: { nome: true, crmv: true } },
         pet: { select: { tutorId: true } },
@@ -131,8 +153,14 @@ export class VetNoteService {
     return toResponseDto(nota);
   }
 
+  /**
+   * Exclusão lógica (api#117): a nota some da listagem, mas o histórico
+   * clínico preserva o que foi diagnosticado e quem diagnosticou.
+   */
   async remove(id: string, veterinarioId: string): Promise<void> {
-    const nota = await this.prisma.notaClinica.findUnique({ where: { id } });
+    const nota = await this.prisma.notaClinica.findFirst({
+      where: { id, deletedAt: null },
+    });
 
     if (!nota) {
       throw new NotFoundException(`Clinical note with id ${id} not found`);
@@ -144,7 +172,30 @@ export class VetNoteService {
       );
     }
 
-    await this.prisma.notaClinica.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.notaClinica.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      await this.acoes.registrar(
+        {
+          petId: nota.petId,
+          tipo: AcaoClinicaTipo.EXCLUSAO,
+          entidade: EntidadeClinica.NOTA_CLINICA,
+          entidadeId: id,
+          autorId: veterinarioId,
+          autorTipo: Role.VET,
+          detalhes: {
+            antes: {
+              diagnostico: nota.diagnostico,
+              prescricao: nota.prescricao,
+              observacoes: nota.observacoes,
+            },
+          },
+        },
+        tx,
+      );
+    });
   }
 
   private async findPetOrFail(
