@@ -16,6 +16,9 @@ describe('VeterinarioService - findAttendedPets', () => {
   let service: VeterinarioService;
   let prisma: {
     notaClinica: { findMany: jest.Mock };
+    vaccineRecord: { findMany: jest.Mock };
+    dewormingRecord: { findMany: jest.Mock };
+    medicationRecord: { findMany: jest.Mock };
     pet: { findMany: jest.Mock };
     veterinario: {
       create: jest.Mock;
@@ -49,6 +52,10 @@ describe('VeterinarioService - findAttendedPets', () => {
   beforeEach(async () => {
     prisma = {
       notaClinica: { findMany: jest.fn() },
+      // O dashboard agora reúne os quatro tipos de registro (web#34).
+      vaccineRecord: { findMany: jest.fn().mockResolvedValue([]) },
+      dewormingRecord: { findMany: jest.fn().mockResolvedValue([]) },
+      medicationRecord: { findMany: jest.fn().mockResolvedValue([]) },
       pet: { findMany: jest.fn() },
       veterinario: {
         create: jest.fn(),
@@ -107,8 +114,12 @@ describe('VeterinarioService - findAttendedPets', () => {
     const result = await service.findAttendedPets('vet-1', { search: 'Rex' });
 
     expect(result.items).toHaveLength(1);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    expect(prisma.notaClinica.findMany.mock.calls[0][0].where.OR).toBeDefined();
+
+    const [[chamada]] = prisma.notaClinica.findMany.mock.calls as Array<
+      [{ where: { pet?: { OR?: unknown[] } } }]
+    >;
+    // A busca passou a filtrar pelo pet, não por campos da nota.
+    expect(chamada.where.pet?.OR).toBeDefined();
   });
 
   it('should search by tutor name', async () => {
@@ -149,5 +160,53 @@ describe('VeterinarioService - findAttendedPets', () => {
 
     expect(result.items).toHaveLength(0);
     expect(result.total).toBe(0);
+  });
+  it('traz o pet em que o veterinário só aplicou vacina, sem nota', async () => {
+    prisma.notaClinica.findMany.mockResolvedValue([]);
+    prisma.vaccineRecord.findMany.mockResolvedValue([
+      { petId: 'pet-1', createdAt: new Date('2026-08-18T10:00:00Z') },
+    ]);
+    prisma.pet.findMany.mockResolvedValue([
+      {
+        id: 'pet-1',
+        name: 'Rex',
+        species: 'DOG',
+        breed: null,
+        photoUrl: null,
+        tutor: { name: 'Ana Silva' },
+      },
+    ]);
+
+    const result = await service.findAttendedPets('vet-1', {});
+
+    // Antes o dashboard olhava só a nota clínica: quem registrava apenas uma
+    // vacina perdia o pet da própria lista (web#34).
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].name).toBe('Rex');
+  });
+
+  it('usa o atendimento mais recente entre os tipos de registro', async () => {
+    prisma.notaClinica.findMany.mockResolvedValue([
+      { petId: 'pet-1', createdAt: new Date('2026-08-10T10:00:00Z') },
+    ]);
+    prisma.medicationRecord.findMany.mockResolvedValue([
+      { petId: 'pet-1', createdAt: new Date('2026-08-18T10:00:00Z') },
+    ]);
+    prisma.pet.findMany.mockResolvedValue([
+      {
+        id: 'pet-1',
+        name: 'Rex',
+        species: 'DOG',
+        breed: null,
+        photoUrl: null,
+        tutor: { name: 'Ana Silva' },
+      },
+    ]);
+
+    const result = await service.findAttendedPets('vet-1', {});
+
+    expect(result.items[0].last_attended_at).toEqual(
+      new Date('2026-08-18T10:00:00Z'),
+    );
   });
 });
