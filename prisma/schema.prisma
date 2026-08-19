@@ -133,6 +133,7 @@ model Pet {
   acoesClinicas     AcaoClinica[]
   appointments      Appointment[]
   notasClinicas     NotaClinica[]
+  veterinarios      PetAtendido[]
 
   @@map("pet")
 }
@@ -288,8 +289,31 @@ model Veterinario {
   vacinas       VaccineRecord[]
   vermifugos    DewormingRecord[]
   medicacoes    MedicationRecord[]
+  petsAtendidos PetAtendido[]
 
   @@map("veterinario")
+}
+
+/// Vínculo explícito entre veterinário e pet.
+///
+/// O dashboard do veterinário era derivado dos registros clínicos vivos, então
+/// apagar o próprio registro fazia o pet sumir da lista — e, sem scanner na
+/// web, não havia como trazer um pet novo. O pet entra aqui quando o
+/// veterinário abre a carteira pelo token do QR e só sai quando ele remove.
+model PetAtendido {
+  id             String   @id @default(uuid())
+  veterinarioId  String   @map("veterinario_id")
+  petId          String   @map("pet_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  /// Último atendimento: acesso pelo QR ou ação clínica sobre o pet.
+  ultimoAcessoEm DateTime @default(now()) @map("ultimo_acesso_em")
+
+  veterinario Veterinario @relation(fields: [veterinarioId], references: [id], onDelete: Cascade)
+  pet         Pet         @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@unique([veterinarioId, petId])
+  @@index([veterinarioId, ultimoAcessoEm])
+  @@map("pet_atendido")
 }
 
 model NotaClinica {

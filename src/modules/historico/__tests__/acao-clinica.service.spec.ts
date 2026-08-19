@@ -9,6 +9,7 @@ describe('AcaoClinicaService', () => {
     acaoClinica: { create: jest.Mock };
     veterinario: { findUnique: jest.Mock };
     tutor: { findUnique: jest.Mock };
+    petAtendido: { upsert: jest.Mock };
   };
 
   const base = {
@@ -23,6 +24,7 @@ describe('AcaoClinicaService', () => {
       acaoClinica: { create: jest.fn() },
       veterinario: { findUnique: jest.fn() },
       tutor: { findUnique: jest.fn() },
+      petAtendido: { upsert: jest.fn() },
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -95,6 +97,7 @@ describe('AcaoClinicaService', () => {
       acaoClinica: { create: jest.fn() },
       veterinario: { findUnique: jest.fn().mockResolvedValue(null) },
       tutor: { findUnique: jest.fn() },
+      petAtendido: { upsert: jest.fn() },
     };
 
     await service.registrar(
@@ -105,5 +108,37 @@ describe('AcaoClinicaService', () => {
     // A trilha precisa cair junto com a operação que a originou.
     expect(tx.acaoClinica.create).toHaveBeenCalled();
     expect(prisma.acaoClinica.create).not.toHaveBeenCalled();
+    expect(tx.petAtendido.upsert).toHaveBeenCalled();
+  });
+
+  it('mantém o pet na lista do veterinário que agiu sobre ele', async () => {
+    prisma.veterinario.findUnique.mockResolvedValue({
+      nome: 'Dra. Camila',
+      crmv: 'CRMV-SP 12345',
+    });
+
+    await service.registrar({ ...base, autorId: 'vet-1', autorTipo: Role.VET });
+
+    // Sem isto, o veterinário poderia registrar uma vacina num pet ausente
+    // do próprio dashboard.
+    const [[chamada]] = prisma.petAtendido.upsert.mock.calls as Array<
+      [{ where: { veterinarioId_petId: Record<string, string> } }]
+    >;
+    expect(chamada.where.veterinarioId_petId).toEqual({
+      veterinarioId: 'vet-1',
+      petId: 'pet-1',
+    });
+  });
+
+  it('não vincula pet ao tutor — a lista é do veterinário', async () => {
+    prisma.tutor.findUnique.mockResolvedValue({ name: 'Ana Silva' });
+
+    await service.registrar({
+      ...base,
+      autorId: 'tutor-1',
+      autorTipo: Role.TUTOR,
+    });
+
+    expect(prisma.petAtendido.upsert).not.toHaveBeenCalled();
   });
 });

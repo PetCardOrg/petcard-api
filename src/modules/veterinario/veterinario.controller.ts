@@ -12,15 +12,21 @@ import {
 } from '@nestjs/common';
 import {
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { Auth } from '../auth/decorators/auth.decorator';
+import { AuthCrmvVerificado } from './crmv/auth-crmv.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
-import { UpdateVeterinarioDto } from '@petcardorg/shared';
+import {
+  AdicionarPetAtendidoDto,
+  PetAtendidoResponseDto,
+  UpdateVeterinarioDto,
+} from '@petcardorg/shared';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import {
   CrmvVerificationService,
@@ -78,6 +84,42 @@ export class VeterinarioController {
     @Query() query: DashboardQueryDto,
   ): Promise<PaginatedResponse<DashboardPetItem>> {
     return this.veterinarioService.findAttendedPets(user.sub, query);
+  }
+
+  @Post('me/pets')
+  @AuthCrmvVerificado(Role.VET)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Adicionar à minha lista o pet cuja carteira foi lida no QR',
+    description:
+      'Ter o token do QR é a autorização de fato para o atendimento. Reabrir ' +
+      'a carteira de um pet que já está na lista só atualiza o último ' +
+      'atendimento. Exige CRMV verificado, como o acesso à carteira clínica.',
+  })
+  @ApiOkResponse({ type: PetAtendidoResponseDto })
+  @ApiNotFoundResponse({ description: 'Carteira não encontrada' })
+  async adicionarPet(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: AdicionarPetAtendidoDto,
+  ): Promise<PetAtendidoResponseDto> {
+    return this.veterinarioService.adicionarPetPorToken(user.sub, dto.token);
+  }
+
+  @Delete('me/pets/:petId')
+  @Auth(Role.VET)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Tirar o pet da minha lista',
+    description:
+      'Remove só o vínculo. O pet, os registros clínicos e a trilha de ações ' +
+      'permanecem — inclusive para outros veterinários.',
+  })
+  @ApiNotFoundResponse({ description: 'Pet não está na lista' })
+  async removerPet(
+    @CurrentUser() user: JwtPayload,
+    @Param('petId') petId: string,
+  ): Promise<void> {
+    return this.veterinarioService.removerPetAtendido(user.sub, petId);
   }
 
   @Get()

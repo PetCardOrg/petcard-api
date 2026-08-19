@@ -252,6 +252,11 @@ const medications: MedicationSeed[] = [
   },
 ];
 
+interface RegistroDoVet {
+  veterinarioId: string | null;
+  petId: string;
+}
+
 async function main() {
   console.log('🌱 Iniciando seed do banco de dados...');
 
@@ -399,6 +404,41 @@ async function main() {
       });
     }
     console.log(`✅ ${medications.length} registros de medicação criados`);
+
+    /**
+     * Vincula ao veterinário os pets em que ele registrou algo.
+     *
+     * O dashboard do vet lê do vínculo, não dos registros. O seed grava
+     * direto pelo Prisma, sem passar pelos serviços que criam o vínculo, então
+     * sem isto a Dra. Camila abriria a demo com o dashboard vazio.
+     */
+    const vinculos = new Map<
+      string,
+      { veterinarioId: string; petId: string }
+    >();
+    for (const modelo of [
+      tx.vaccineRecord,
+      tx.dewormingRecord,
+      tx.medicationRecord,
+      tx.notaClinica,
+    ]) {
+      const registros = await (
+        modelo as { findMany: (args: unknown) => Promise<RegistroDoVet[]> }
+      ).findMany({ select: { veterinarioId: true, petId: true } });
+      for (const r of registros) {
+        if (!r.veterinarioId) continue;
+        vinculos.set(`${r.veterinarioId}:${r.petId}`, {
+          veterinarioId: r.veterinarioId,
+          petId: r.petId,
+        });
+      }
+    }
+
+    await tx.petAtendido.deleteMany();
+    for (const vinculo of vinculos.values()) {
+      await tx.petAtendido.create({ data: vinculo });
+    }
+    console.log(`✅ ${vinculos.size} vínculos veterinário↔pet criados`);
   });
 
   console.log('🌱 Seed concluído com sucesso!');

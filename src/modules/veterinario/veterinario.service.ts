@@ -5,7 +5,10 @@ import {
 } from '@nestjs/common';
 import { Prisma, Veterinario } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { UpdateVeterinarioDto } from '@petcardorg/shared';
+import {
+  PetAtendidoResponseDto,
+  UpdateVeterinarioDto,
+} from '@petcardorg/shared';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -91,6 +94,13 @@ export class VeterinarioService {
     await this.prisma.veterinario.delete({ where: { id } });
   }
 
+  /**
+   * Lista os pets vinculados a este veterinário.
+   *
+   * A lista era derivada dos registros clínicos vivos, então o veterinário
+   * que apagasse o próprio registro via o pet sumir do dashboard. Agora o
+   * vínculo é um fato guardado: entra pelo QR, sai só por remoção explícita.
+   */
   async findAttendedPets(
     veterinarioId: string,
     query: DashboardQueryDto,
@@ -99,91 +109,106 @@ export class VeterinarioService {
     const pageSize = query.pageSize ?? 10;
     const search = query.search?.trim();
 
-    /**
-     * O dashboard reúne todo pet que este veterinário atendeu, não só aquele
-     * em que escreveu nota (web#34). Desde que ele passou a registrar vacina,
-     * vermifugação e medicação pela tela, olhar apenas a nota clínica fazia o
-     * pet sumir da lista de quem tinha acabado de ser atendido.
-     *
-     * Registro excluído não traz o pet de volta: o filtro é sobre o que está
-     * vivo, mantendo a decisão da api#117.
-     */
-    const filtroPet: Prisma.PetWhereInput | undefined = search
-      ? {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { tutor: { name: { contains: search, mode: 'insensitive' } } },
-          ],
-        }
-      : undefined;
-
-    const base = {
+    const where: Prisma.PetAtendidoWhereInput = {
       veterinarioId,
-      deletedAt: null,
-      ...(filtroPet ? { pet: filtroPet } : {}),
-    };
-    const selecao = {
-      distinct: ['petId'] as ['petId'],
-      orderBy: { createdAt: 'desc' as const },
-      select: { petId: true, createdAt: true },
+      ...(search
+        ? {
+            pet: {
+              OR: [
+                { name: { contains: search, mode: 'insensitive' } },
+                { tutor: { name: { contains: search, mode: 'insensitive' } } },
+              ],
+            },
+          }
+        : {}),
     };
 
-    const [notas, vacinas, vermifugos, medicacoes] = await Promise.all([
-      this.prisma.notaClinica.findMany({ where: base, ...selecao }),
-      this.prisma.vaccineRecord.findMany({ where: base, ...selecao }),
-      this.prisma.dewormingRecord.findMany({ where: base, ...selecao }),
-      this.prisma.medicationRecord.findMany({ where: base, ...selecao }),
+    const [total, vinculos] = await Promise.all([
+      this.prisma.petAtendido.count({ where }),
+      this.prisma.petAtendido.findMany({
+        where,
+        orderBy: { ultimoAcessoEm: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: { pet: { include: { tutor: { select: { name: true } } } } },
+      }),
     ]);
 
-    // Um pet pode ter registros de tipos diferentes; vale o atendimento mais
-    // recente entre eles.
-    const maisRecentePorPet = new Map<string, Date>();
-    for (const r of [...notas, ...vacinas, ...vermifugos, ...medicacoes]) {
-      const atual = maisRecentePorPet.get(r.petId);
-      if (!atual || r.createdAt > atual) {
-        maisRecentePorPet.set(r.petId, r.createdAt);
-      }
-    }
-
-    const distinctPetIds = [...maisRecentePorPet.entries()]
-      .map(([petId, createdAt]) => ({ petId, createdAt }))
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-
-    const total = distinctPetIds.length;
-    const totalPages = Math.ceil(total / pageSize) || 1;
-    const skip = (page - 1) * pageSize;
-
-    const paginatedPetIds = distinctPetIds.slice(skip, skip + pageSize);
-
-    if (paginatedPetIds.length === 0) {
-      return { items: [], total, page, pageSize, totalPages };
-    }
-
-    const lastAttendedMap = new Map(
-      paginatedPetIds.map((n) => [n.petId, n.createdAt]),
-    );
-
-    const pets = await this.prisma.pet.findMany({
-      where: { id: { in: paginatedPetIds.map((n) => n.petId) } },
-      include: { tutor: { select: { name: true } } },
-    });
-
-    const items: DashboardPetItem[] = [];
-    for (const n of paginatedPetIds) {
-      const pet = pets.find((p) => p.id === n.petId);
-      if (!pet) continue;
-      items.push({
+    const items: DashboardPetItem[] = vinculos.map(
+      ({ pet, ultimoAcessoEm }) => ({
         id: pet.id,
         name: pet.name,
         species: pet.species,
         breed: pet.breed ?? undefined,
         photo_url: pet.photoUrl ?? undefined,
         tutor_name: pet.tutor.name,
-        last_attended_at: lastAttendedMap.get(pet.id)!,
-      });
+        last_attended_at: ultimoAcessoEm,
+      }),
+    );
+
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize) || 1,
+    };
+  }
+
+  /**
+   * Vincula ao veterinário o pet cuja carteira foi aberta pelo QR.
+   *
+   * Ter o token é a autorização de fato: quem o leu esteve com o pet na
+   * frente. Reabrir a carteira de um pet que já está na lista não duplica
+   * nada — só atualiza o último atendimento, que ordena o dashboard.
+   */
+  async adicionarPetPorToken(
+    veterinarioId: string,
+    token: string,
+  ): Promise<PetAtendidoResponseDto> {
+    const carteira = await this.prisma.carteiraDigital.findUnique({
+      where: { token },
+      include: { pet: { select: { id: true, name: true } } },
+    });
+    if (!carteira) {
+      throw new NotFoundException('Carteira não encontrada');
     }
 
-    return { items, total, page, pageSize, totalPages };
+    const existente = await this.prisma.petAtendido.findUnique({
+      where: { veterinarioId_petId: { veterinarioId, petId: carteira.petId } },
+    });
+
+    const vinculo = await this.prisma.petAtendido.upsert({
+      where: { veterinarioId_petId: { veterinarioId, petId: carteira.petId } },
+      create: { veterinarioId, petId: carteira.petId },
+      update: { ultimoAcessoEm: new Date() },
+    });
+
+    return {
+      pet_id: carteira.pet.id,
+      pet_nome: carteira.pet.name,
+      adicionado_em: vinculo.createdAt,
+      novo: existente === null,
+    };
+  }
+
+  /**
+   * Tira o pet da lista do veterinário.
+   *
+   * Some o vínculo, não o pet nem o que foi registrado nele: o histórico
+   * clínico e a trilha de ações continuam intactos (api#117).
+   */
+  async removerPetAtendido(
+    veterinarioId: string,
+    petId: string,
+  ): Promise<void> {
+    const vinculo = await this.prisma.petAtendido.findUnique({
+      where: { veterinarioId_petId: { veterinarioId, petId } },
+    });
+    if (!vinculo) {
+      throw new NotFoundException('Pet não está na lista deste veterinário');
+    }
+    await this.prisma.petAtendido.delete({ where: { id: vinculo.id } });
   }
 
   private async assertUniqueFields(
