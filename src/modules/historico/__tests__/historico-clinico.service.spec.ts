@@ -127,7 +127,9 @@ describe('HistoricoClinicoService', () => {
     });
   });
 
-  it('ordena a linha do tempo do mais recente para o mais antigo', async () => {
+  it('ordena pela ordem de registro, não pela data clínica', async () => {
+    // Vacina aplicada em janeiro, mas lançada no sistema depois da medicação:
+    // o topo da pilha é o último registro, independente do tipo.
     prisma.vaccineRecord.findMany.mockResolvedValue([
       {
         id: 'vac-1',
@@ -135,7 +137,7 @@ describe('HistoricoClinicoService', () => {
         vaccineName: 'Antirrábica',
         appliedAt: new Date('2026-01-05'),
         notes: null,
-        createdAt: new Date('2026-01-05'),
+        createdAt: new Date('2026-03-20'),
         deletedAt: null,
         veterinarianName: 'Dr. Externo',
         veterinario: null,
@@ -146,9 +148,50 @@ describe('HistoricoClinicoService', () => {
     const resultado = await service.doPet('pet-1', 'tutor-1', false);
 
     expect(resultado.itens.map((i) => i.entidade)).toEqual([
-      EntidadeClinica.MEDICACAO,
       EntidadeClinica.VACINA,
+      EntidadeClinica.MEDICACAO,
     ]);
+  });
+
+  it('entrega data clínica como dia de calendário, sem deslocar o fuso', async () => {
+    prisma.vaccineRecord.findMany.mockResolvedValue([
+      {
+        id: 'vac-1',
+        petId: 'pet-1',
+        vaccineName: 'Antirrábica',
+        // Meia-noite UTC: entregue como instante, o cliente em UTC-3 renderiza
+        // 18/03 — a vacina de hoje aparecendo como de ontem.
+        appliedAt: new Date('2026-03-19T00:00:00.000Z'),
+        notes: null,
+        createdAt: new Date('2026-03-19T13:40:00.000Z'),
+        deletedAt: null,
+        veterinarianName: null,
+        veterinario: vet,
+      },
+    ]);
+
+    const resultado = await service.doPet('pet-1', 'tutor-1', false);
+
+    expect(resultado.itens[0].ocorrido_em).toBe('2026-03-19');
+  });
+
+  it('mantém a nota clínica como instante — o fato é o momento do registro', async () => {
+    prisma.notaClinica.findMany.mockResolvedValue([
+      {
+        id: 'nota-1',
+        petId: 'pet-1',
+        diagnostico: 'Otite externa',
+        prescricao: null,
+        observacoes: null,
+        createdAt: new Date('2026-04-01T18:30:00.000Z'),
+        deletedAt: null,
+        veterinario: vet,
+      },
+    ]);
+
+    const resultado = await service.doPet('pet-1', 'tutor-1', false);
+
+    expect(resultado.itens[0].ocorrido_em).toBe('2026-04-01T18:30:00.000Z');
   });
 
   it('usa o nome livre quando não há veterinário do PetCard', async () => {
