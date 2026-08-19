@@ -52,6 +52,31 @@ export class AcaoClinicaService {
         detalhes: input.detalhes,
       },
     });
+
+    if (input.autorTipo === Role.VET) {
+      await this.manterNaListaDoVet(input.autorId, input.petId, tx);
+    }
+  }
+
+  /**
+   * Garante que o pet está na lista do veterinário que acabou de agir sobre
+   * ele, e marca o atendimento como o mais recente.
+   *
+   * Todo caminho de escrita clínica passa por aqui, então é o único ponto
+   * que precisa saber disso. Sem ele, um veterinário poderia registrar uma
+   * vacina num pet ausente do próprio dashboard — o defeito que o vínculo
+   * explícito veio corrigir.
+   */
+  private async manterNaListaDoVet(
+    veterinarioId: string,
+    petId: string,
+    tx: PrismaLike,
+  ): Promise<void> {
+    await tx.petAtendido.upsert({
+      where: { veterinarioId_petId: { veterinarioId, petId } },
+      create: { veterinarioId, petId },
+      update: { ultimoAcessoEm: new Date() },
+    });
   }
 
   /**
