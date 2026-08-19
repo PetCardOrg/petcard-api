@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
 } from '@nestjs/common';
 import {
@@ -22,6 +23,7 @@ import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import {
   CreateNotaClinicaDto,
+  UpdateNotaClinicaDto,
   NotaClinicaResponseDto,
 } from '@petcardorg/shared';
 import { VetNoteService } from './vet-note.service';
@@ -70,6 +72,19 @@ export class VetNoteController {
   ): Promise<NotaClinicaResponseDto> {
     const isVet = user.role === Role.VET;
     return this.vetNoteService.findOne(id, user.sub, isVet);
+  }
+
+  @Patch('clinical-notes/:id')
+  @AuthCrmvVerificado(Role.VET)
+  @ApiOperation({ summary: 'Editar nota clínica (somente o vet autor)' })
+  @ApiOkResponse({ type: NotaClinicaResponseDto })
+  @ApiNotFoundResponse({ description: 'Nota clínica não encontrada' })
+  async update(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateNotaClinicaDto,
+  ): Promise<NotaClinicaResponseDto> {
+    return this.vetNoteService.update(id, user.sub, dto);
   }
 
   @Delete('clinical-notes/:id')

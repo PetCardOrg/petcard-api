@@ -196,20 +196,22 @@ model DewormingRecord {
 }
 
 model MedicationRecord {
-  id             String    @id @default(uuid())
-  petId          String    @map("pet_id")
-  medicationName String    @map("medication_name")
-  dosage         String
-  frequency      String
-  startDate      DateTime  @map("start_date")
-  endDate        DateTime? @map("end_date")
-  lastNotifiedAt DateTime? @map("last_notified_at")
+  id               String    @id @default(uuid())
+  petId            String    @map("pet_id")
+  medicationName   String    @map("medication_name")
+  dosage           String
+  frequency        String
+  startDate        DateTime  @map("start_date")
+  endDate          DateTime? @map("end_date")
+  lastNotifiedAt   DateTime? @map("last_notified_at")
   /// Preenchido quando quem prescreve é um veterinário do PetCard.
-  veterinarioId  String?   @map("veterinario_id")
-  notes          String?
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
-  deletedAt      DateTime? @map("deleted_at")
+  veterinarioId    String?   @map("veterinario_id")
+  /// Texto livre: prescrições antigas e profissionais fora do PetCard.
+  veterinarianName String?   @map("veterinarian_name")
+  notes            String?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
 
   pet         Pet          @relation(fields: [petId], references: [id], onDelete: Cascade)
   veterinario Veterinario? @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
@@ -268,33 +270,33 @@ model Notification {
 }
 
 model Veterinario {
-  id        String   @id @default(uuid())
-  nome      String
-  email     String   @unique
-  password  String
-  crmv      String   @unique
-  telefone  String?
+  id       String  @id @default(uuid())
+  nome     String
+  email    String  @unique
+  password String
+  crmv     String  @unique
+  telefone String?
 
   /// Verificação do CRMV numa base externa (api#113). Nulo = não verificado.
   crmvVerifiedAt DateTime? @map("crmv_verified_at")
   /// Situação devolvida pela consulta (ex.: "Ativo"), para auditoria.
   crmvSituacao   String?   @map("crmv_situacao")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  notasClinicas     NotaClinica[]
-  vacinas           VaccineRecord[]
-  vermifugos        DewormingRecord[]
-  medicacoes        MedicationRecord[]
+  notasClinicas NotaClinica[]
+  vacinas       VaccineRecord[]
+  vermifugos    DewormingRecord[]
+  medicacoes    MedicationRecord[]
 
   @@map("veterinario")
 }
 
 model NotaClinica {
-  id            String   @id @default(uuid())
-  veterinarioId String   @map("veterinario_id")
-  petId         String   @map("pet_id")
-  googlePlaceId String?  @map("google_place_id")
+  id            String    @id @default(uuid())
+  veterinarioId String    @map("veterinario_id")
+  petId         String    @map("pet_id")
+  googlePlaceId String?   @map("google_place_id")
   diagnostico   String
   prescricao    String?
   observacoes   String?
@@ -312,7 +314,6 @@ model NotaClinica {
   @@index([googlePlaceId])
   @@map("nota_clinica")
 }
-
 
 /// Trilha de auditoria das ações sobre registros clínicos (api#117).
 ///

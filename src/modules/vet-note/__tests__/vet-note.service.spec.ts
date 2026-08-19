@@ -10,6 +10,8 @@ import { NotificationService } from '../../notification/notification.service';
 import { VetNoteService } from '../vet-note.service';
 
 describe('VetNoteService', () => {
+  let acaoTrilha: ReturnType<typeof acaoClinicaProvider>;
+  let registrarAcao: jest.Mock;
   let service: VetNoteService;
   let prisma: {
     notaClinica: {
@@ -50,6 +52,9 @@ describe('VetNoteService', () => {
   };
 
   beforeEach(async () => {
+    acaoTrilha = acaoClinicaProvider();
+    registrarAcao = acaoTrilha.registrar;
+
     prisma = {
       notaClinica: {
         create: jest.fn(),
@@ -70,7 +75,7 @@ describe('VetNoteService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        acaoClinicaProvider().provider,
+        acaoTrilha.provider,
         VetNoteService,
         { provide: PrismaService, useValue: prisma },
         { provide: NotificationService, useValue: notificationService },
@@ -322,6 +327,63 @@ describe('VetNoteService', () => {
       await expect(service.remove('missing', 'vet-1')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+  describe('update', () => {
+    it('edita a própria nota e registra o antes e o depois', async () => {
+      prisma.notaClinica.findFirst.mockResolvedValue({
+        ...notaFixture,
+        veterinarioId: 'vet-1',
+        diagnostico: 'Otite',
+      });
+      prisma.notaClinica.update.mockResolvedValue({
+        ...notaFixture,
+        diagnostico: 'Otite bilateral',
+      });
+
+      const result = await service.update('nota-1', 'vet-1', {
+        diagnostico: 'Otite bilateral',
+      });
+
+      expect(result.diagnostico).toBe('Otite bilateral');
+      expect(registrarAcao).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tipo: 'EDICAO',
+          entidade: 'NOTA_CLINICA',
+          entidadeId: 'nota-1',
+          autorId: 'vet-1',
+          detalhes: {
+            antes: expect.objectContaining({
+              diagnostico: 'Otite',
+            }) as unknown,
+            depois: expect.objectContaining({
+              diagnostico: 'Otite bilateral',
+            }) as unknown,
+          },
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('recusa a edição de nota de outro veterinário', async () => {
+      prisma.notaClinica.findFirst.mockResolvedValue({
+        ...notaFixture,
+        veterinarioId: 'vet-1',
+      });
+
+      // Editar mantendo a assinatura alheia falsificaria a autoria.
+      await expect(
+        service.update('nota-1', 'vet-2', { diagnostico: 'outra coisa' }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.notaClinica.update).not.toHaveBeenCalled();
+    });
+
+    it('recusa nota inexistente', async () => {
+      prisma.notaClinica.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.update('missing', 'vet-1', { diagnostico: 'x' }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });

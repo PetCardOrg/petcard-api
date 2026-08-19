@@ -99,33 +99,55 @@ export class VeterinarioService {
     const pageSize = query.pageSize ?? 10;
     const search = query.search?.trim();
 
-    // Nota excluída não traz o pet de volta ao dashboard (api#117).
-    const where: Prisma.NotaClinicaWhereInput = {
+    /**
+     * O dashboard reúne todo pet que este veterinário atendeu, não só aquele
+     * em que escreveu nota (web#34). Desde que ele passou a registrar vacina,
+     * vermifugação e medicação pela tela, olhar apenas a nota clínica fazia o
+     * pet sumir da lista de quem tinha acabado de ser atendido.
+     *
+     * Registro excluído não traz o pet de volta: o filtro é sobre o que está
+     * vivo, mantendo a decisão da api#117.
+     */
+    const filtroPet: Prisma.PetWhereInput | undefined = search
+      ? {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { tutor: { name: { contains: search, mode: 'insensitive' } } },
+          ],
+        }
+      : undefined;
+
+    const base = {
       veterinarioId,
       deletedAt: null,
+      ...(filtroPet ? { pet: filtroPet } : {}),
+    };
+    const selecao = {
+      distinct: ['petId'] as ['petId'],
+      orderBy: { createdAt: 'desc' as const },
+      select: { petId: true, createdAt: true },
     };
 
-    if (search) {
-      where.OR = [
-        {
-          pet: { name: { contains: search, mode: 'insensitive' } },
-        },
-        {
-          pet: {
-            tutor: {
-              name: { contains: search, mode: 'insensitive' },
-            },
-          },
-        },
-      ];
+    const [notas, vacinas, vermifugos, medicacoes] = await Promise.all([
+      this.prisma.notaClinica.findMany({ where: base, ...selecao }),
+      this.prisma.vaccineRecord.findMany({ where: base, ...selecao }),
+      this.prisma.dewormingRecord.findMany({ where: base, ...selecao }),
+      this.prisma.medicationRecord.findMany({ where: base, ...selecao }),
+    ]);
+
+    // Um pet pode ter registros de tipos diferentes; vale o atendimento mais
+    // recente entre eles.
+    const maisRecentePorPet = new Map<string, Date>();
+    for (const r of [...notas, ...vacinas, ...vermifugos, ...medicacoes]) {
+      const atual = maisRecentePorPet.get(r.petId);
+      if (!atual || r.createdAt > atual) {
+        maisRecentePorPet.set(r.petId, r.createdAt);
+      }
     }
 
-    const distinctPetIds = await this.prisma.notaClinica.findMany({
-      where,
-      distinct: ['petId'],
-      orderBy: { createdAt: 'desc' },
-      select: { petId: true, createdAt: true },
-    });
+    const distinctPetIds = [...maisRecentePorPet.entries()]
+      .map(([petId, createdAt]) => ({ petId, createdAt }))
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
     const total = distinctPetIds.length;
     const totalPages = Math.ceil(total / pageSize) || 1;

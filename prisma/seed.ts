@@ -208,6 +208,7 @@ type MedicationSeed = {
   frequency: string;
   startDate: Date;
   endDate?: Date;
+  veterinarianName?: string;
   notes?: string;
 };
 
@@ -219,6 +220,7 @@ const medications: MedicationSeed[] = [
     frequency: '12/12h',
     startDate: new Date('2025-12-01'),
     endDate: new Date('2025-12-10'),
+    veterinarianName: 'Dra. Camila Ferreira',
     notes: 'Tratamento de infecção de pele',
   },
   {
@@ -228,6 +230,7 @@ const medications: MedicationSeed[] = [
     frequency: '1x ao dia',
     startDate: new Date('2026-01-15'),
     endDate: new Date('2026-01-20'),
+    veterinarianName: 'Dr. Paulo Ribeiro',
     notes: 'Anti-inflamatório pós cirurgia',
   },
   {
@@ -317,6 +320,22 @@ async function main() {
       petByName.set(p.name, p.id);
     }
 
+    /**
+     * Liga o registro ao veterinário do PetCard quando o nome corresponde a
+     * uma conta existente.
+     *
+     * Sem isso, os registros do seed ficam com `veterinarioId` nulo e a regra
+     * de autoria (web#34) os trata como declarados pelo tutor: a Dra. Camila
+     * via o próprio nome no registro e mesmo assim não podia editá-lo.
+     *
+     * "Dr. Paulo Ribeiro" não tem conta de propósito — é o caso do
+     * profissional de fora, que continua valendo como texto livre.
+     */
+    const vetIdByNome = new Map<string, string>();
+    for (const vet of await tx.veterinario.findMany()) {
+      vetIdByNome.set(vet.nome, vet.id);
+    }
+
     // Idempotência: limpar e recriar registros de saúde (evita duplicar)
     await tx.vaccineRecord.deleteMany();
     await tx.dewormingRecord.deleteMany();
@@ -332,6 +351,9 @@ async function main() {
           appliedAt: v.appliedAt,
           nextDoseAt: v.nextDoseAt,
           veterinarianName: v.veterinarianName,
+          veterinarioId: v.veterinarianName
+            ? (vetIdByNome.get(v.veterinarianName) ?? null)
+            : null,
           notes: v.notes,
         },
       });
@@ -348,6 +370,9 @@ async function main() {
           appliedAt: d.appliedAt,
           nextDoseAt: d.nextDoseAt,
           veterinarianName: d.veterinarianName,
+          veterinarioId: d.veterinarianName
+            ? (vetIdByNome.get(d.veterinarianName) ?? null)
+            : null,
           notes: d.notes,
         },
       });
@@ -365,6 +390,10 @@ async function main() {
           frequency: m.frequency,
           startDate: m.startDate,
           endDate: m.endDate,
+          veterinarianName: m.veterinarianName,
+          veterinarioId: m.veterinarianName
+            ? (vetIdByNome.get(m.veterinarianName) ?? null)
+            : null,
           notes: m.notes,
         },
       });

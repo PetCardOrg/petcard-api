@@ -66,12 +66,15 @@ export class HistoricoClinicoService {
 
     const porEntidade = agruparAcoes(acoes);
 
+    // Ordem de registro, não data clínica: o último lançamento é o topo da
+    // pilha, seja ele nota, vacina, vermífugo ou medicação. Vacina aplicada
+    // meses atrás e registrada agora entra no topo — foi o que aconteceu.
     const itens: HistoricoClinicoItemResponseDto[] = [
       ...notas.map((n) => this.itemDaNota(n, porEntidade)),
       ...vacinas.map((v) => this.itemDaVacina(v, porEntidade)),
       ...vermifugos.map((d) => this.itemDoVermifugo(d, porEntidade)),
       ...medicacoes.map((m) => this.itemDaMedicacao(m, porEntidade)),
-    ].sort((a, b) => b.ocorrido_em.getTime() - a.ocorrido_em.getTime());
+    ].sort((a, b) => b.registrado_em.getTime() - a.registrado_em.getTime());
 
     return { pet_id: pet.id, pet_nome: pet.name, itens };
   }
@@ -85,7 +88,9 @@ export class HistoricoClinicoService {
       entidade_id: nota.id,
       titulo: nota.diagnostico,
       descricao: nota.prescricao ?? nota.observacoes ?? undefined,
-      ocorrido_em: nota.createdAt,
+      // A consulta não tem data própria: o fato clínico é o instante em que
+      // o veterinário escreveu, e instante o cliente sabe localizar.
+      ocorrido_em: nota.createdAt.toISOString(),
       registrado_em: nota.createdAt,
       ...this.exclusao(nota.deletedAt),
       ...this.vet(nota.veterinario),
@@ -102,7 +107,7 @@ export class HistoricoClinicoService {
       entidade_id: vacina.id,
       titulo: vacina.vaccineName,
       descricao: vacina.notes ?? undefined,
-      ocorrido_em: vacina.appliedAt,
+      ocorrido_em: diaDeCalendario(vacina.appliedAt),
       registrado_em: vacina.createdAt,
       ...this.exclusao(vacina.deletedAt),
       ...this.vet(vacina.veterinario, vacina.veterinarianName),
@@ -119,7 +124,7 @@ export class HistoricoClinicoService {
       entidade_id: verm.id,
       titulo: verm.productName,
       descricao: verm.notes ?? undefined,
-      ocorrido_em: verm.appliedAt,
+      ocorrido_em: diaDeCalendario(verm.appliedAt),
       registrado_em: verm.createdAt,
       ...this.exclusao(verm.deletedAt),
       ...this.vet(verm.veterinario, verm.veterinarianName),
@@ -136,7 +141,7 @@ export class HistoricoClinicoService {
       entidade_id: med.id,
       titulo: med.medicationName,
       descricao: `${med.dosage} · ${med.frequency}`,
-      ocorrido_em: med.startDate,
+      ocorrido_em: diaDeCalendario(med.startDate),
       registrado_em: med.createdAt,
       ...this.exclusao(med.deletedAt),
       ...this.vet(med.veterinario),
@@ -165,6 +170,16 @@ export class HistoricoClinicoService {
     }
     return { veterinario_nome: nomeLivre ?? undefined };
   }
+}
+
+/**
+ * `appliedAt`/`startDate` são dia de calendário guardados em coluna de
+ * instante, à meia-noite UTC. Entregues como instante, o cliente em fuso
+ * negativo renderiza o dia anterior — a vacina de hoje aparece como de ontem.
+ * Mesma serialização das listagens de vacina, vermífugo e medicação.
+ */
+function diaDeCalendario(data: Date): string {
+  return data.toISOString().split('T')[0];
 }
 
 function chave(entidade: EntidadeClinica, id: string): string {

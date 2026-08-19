@@ -46,6 +46,9 @@ describe('VeterinarioController (integração)', () => {
         delete: jest.fn(),
       },
       notaClinica: { findMany: jest.fn() },
+      vaccineRecord: { findMany: jest.fn().mockResolvedValue([]) },
+      dewormingRecord: { findMany: jest.fn().mockResolvedValue([]) },
+      medicationRecord: { findMany: jest.fn().mockResolvedValue([]) },
       pet: { findMany: jest.fn() },
     };
     crmv = {

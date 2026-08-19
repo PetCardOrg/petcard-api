@@ -22,6 +22,7 @@ describe('MedicationController (integração)', () => {
   let harness: ControllerHarness;
   let prisma: {
     pet: { findUnique: jest.Mock };
+    veterinario: { findUnique: jest.Mock };
     medicationRecord: {
       create: jest.Mock;
       findMany: jest.Mock;
@@ -48,6 +49,10 @@ describe('MedicationController (integração)', () => {
   beforeAll(async () => {
     prisma = {
       pet: { findUnique: jest.fn() },
+      // O create assina a prescrição com o nome do vet logado (web#34).
+      veterinario: {
+        findUnique: jest.fn().mockResolvedValue({ nome: 'Dra. Camila' }),
+      },
       medicationRecord: {
         create: jest.fn(),
         findMany: jest.fn(),
@@ -166,11 +171,26 @@ describe('MedicationController (integração)', () => {
       .expect(204);
   });
 
-  it('DELETE é proibido para VET (403)', async () => {
+  it('DELETE é proibido ao VET sobre registro do tutor (403)', async () => {
+    // O que o tutor declarou não é do veterinário para apagar (web#34).
     harness.setUser(VET);
+    prisma.medicationRecord.findFirst.mockResolvedValue(record);
 
     await request(harness.app.getHttpServer())
       .delete('/medications/med-1')
       .expect(403);
+
+    expect(prisma.medicationRecord.update).not.toHaveBeenCalled();
+  });
+
+  it('DELETE permite ao VET remover a própria prescrição (204)', async () => {
+    harness.setUser(VET);
+    const prescricao = { ...record, veterinarioId: 'vet-1' };
+    prisma.medicationRecord.findFirst.mockResolvedValue(prescricao);
+    prisma.medicationRecord.update.mockResolvedValue(prescricao);
+
+    await request(harness.app.getHttpServer())
+      .delete('/medications/med-1')
+      .expect(204);
   });
 });
