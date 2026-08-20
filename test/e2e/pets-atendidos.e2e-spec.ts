@@ -7,12 +7,14 @@ import { createAndLoginVet, registerTutor, resetDb } from '../utils/e2e-db';
 import { PrismaService } from '../../src/prisma/prisma.service';
 
 /**
- * Lista de pets do veterinário (vínculo explícito).
+ * Jornada do veterinário sobre a lista de pets: entra pelo QR, sobrevive à
+ * exclusão de registro, sai só por remoção explícita.
  *
- * Antes o dashboard era derivado dos registros clínicos vivos: apagar o
- * próprio registro fazia o pet sumir da lista, e sem scanner na web não havia
- * como trazer um pet novo. Estes testes exercitam o caminho que substituiu
- * isso — entra pelo token do QR, sai só por remoção explícita.
+ * Fica no E2E só o caminho vital. Erro secundário (404 de token inválido, 403
+ * de CRMV) e caminho alternativo vivem no teste de integração do controller,
+ * onde são baratos e não deixam a suíte lenta nem frágil. O isolamento entre
+ * veterinários fica aqui de propósito: é dado clínico de terceiro, e vazamento
+ * precisa ser barrado contra o banco de verdade.
  */
 describe('Pets atendidos pelo veterinário (e2e)', () => {
   let ctx: E2EApp;
@@ -89,14 +91,6 @@ describe('Pets atendidos pelo veterinário (e2e)', () => {
     expect(dashboard.items[0].id).toBe(petId);
   });
 
-  it('reabrir a carteira não duplica o pet na lista', async () => {
-    await adicionarPeloQr().expect(200);
-    const segunda = await adicionarPeloQr().expect(200);
-
-    expect(segunda.body.novo).toBe(false);
-    expect((await listarDashboard()).total).toBe(1);
-  });
-
   it('o pet continua na lista depois de apagar o registro que o vet fez', async () => {
     // Era exatamente o defeito: a lista vinha dos registros vivos.
     await adicionarPeloQr().expect(200);
@@ -110,12 +104,6 @@ describe('Pets atendidos pelo veterinário (e2e)', () => {
     const dashboard = await listarDashboard();
     expect(dashboard.total).toBe(1);
     expect(dashboard.items[0].id).toBe(petId);
-  });
-
-  it('registrar no pet o traz para a lista mesmo sem passar pelo QR', async () => {
-    await aplicarVacina();
-
-    expect((await listarDashboard()).total).toBe(1);
   });
 
   it('o pet sai da lista só quando o veterinário remove', async () => {
@@ -133,19 +121,6 @@ describe('Pets atendidos pelo veterinário (e2e)', () => {
     expect(pet).not.toBeNull();
   });
 
-  it('remover pet que não está na lista devolve 404', async () => {
-    await request(app.getHttpServer())
-      .delete(`/veterinarios/me/pets/${petId}`)
-      .set('Authorization', `Bearer ${vetToken}`)
-      .expect(404);
-  });
-
-  it('token inexistente não vincula nada (404)', async () => {
-    await adicionarPeloQr('token-que-nao-existe').expect(404);
-
-    expect((await listarDashboard()).total).toBe(0);
-  });
-
   it('a lista de um veterinário não vaza para outro', async () => {
     await adicionarPeloQr().expect(200);
 
@@ -160,19 +135,5 @@ describe('Pets atendidos pelo veterinário (e2e)', () => {
       .expect(200);
 
     expect(res.body.total).toBe(0);
-  });
-
-  it('veterinário sem CRMV verificado não adiciona pet pelo QR (403)', async () => {
-    const { token: semCrmv } = await createAndLoginVet(app, prisma, {
-      email: 'sem-crmv@petcard.com',
-      crmv: 'CRMV-CE-5555',
-      crmvVerificado: false,
-    });
-
-    await request(app.getHttpServer())
-      .post('/veterinarios/me/pets')
-      .set('Authorization', `Bearer ${semCrmv}`)
-      .send({ token: TOKEN_QR })
-      .expect(403);
   });
 });

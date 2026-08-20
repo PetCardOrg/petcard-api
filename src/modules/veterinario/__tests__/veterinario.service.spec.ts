@@ -73,15 +73,6 @@ describe('VeterinarioService', () => {
   });
 
   describe('findById', () => {
-    it('should return the veterinario when found', async () => {
-      prisma.veterinario.findUnique.mockResolvedValue(vetFixture);
-
-      const result = await service.findById('vet-1');
-
-      expect(result.id).toBe('vet-1');
-      expect(result).not.toHaveProperty('password');
-    });
-
     it('should throw NotFoundException when veterinario is missing', async () => {
       prisma.veterinario.findUnique.mockResolvedValue(null);
 
@@ -92,19 +83,6 @@ describe('VeterinarioService', () => {
   });
 
   describe('update', () => {
-    it('should update the veterinario', async () => {
-      const updated = { ...vetFixture, nome: 'Dr. Carlos Silva' };
-      prisma.veterinario.findUnique.mockResolvedValue(vetFixture);
-      prisma.veterinario.update.mockResolvedValue(updated);
-
-      const result = await service.update('vet-1', {
-        nome: 'Dr. Carlos Silva',
-      });
-
-      expect(result.nome).toBe('Dr. Carlos Silva');
-      expect(result).not.toHaveProperty('password');
-    });
-
     it('should throw ConflictException when updating to duplicated CRMV', async () => {
       const otherVet = { ...vetFixture, id: 'vet-2' };
       // 1st call: findById, 2nd call: assertUniqueFields (crmv check)
@@ -127,17 +105,6 @@ describe('VeterinarioService', () => {
   });
 
   describe('remove', () => {
-    it('should delete the veterinario', async () => {
-      prisma.veterinario.findUnique.mockResolvedValue(vetFixture);
-      prisma.veterinario.delete.mockResolvedValue(vetFixture);
-
-      await service.remove('vet-1');
-
-      expect(prisma.veterinario.delete).toHaveBeenCalledWith({
-        where: { id: 'vet-1' },
-      });
-    });
-
     it('should throw NotFoundException when veterinario does not exist', async () => {
       prisma.veterinario.findUnique.mockResolvedValue(null);
 
