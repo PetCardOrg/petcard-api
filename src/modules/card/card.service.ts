@@ -1,7 +1,9 @@
 import {
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
@@ -36,12 +38,35 @@ function isMedicationActive(endDate?: Date | null): boolean {
 }
 
 @Injectable()
-export class CardService {
+export class CardService implements OnModuleInit {
+  private readonly logger = new Logger(CardService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly tutorService: TutorService,
   ) {}
+
+  /**
+   * Confere a base do link público antes que ela vire QR Code gravado.
+   *
+   * O erro é silencioso de dois jeitos: o web usa HashRouter, então base sem
+   * `#` gera link que cai no "não encontrado"; e o dotenv trata `#` sem aspas
+   * como início de comentário, truncando o valor justamente onde importa. O
+   * QR carrega o endereço dentro da imagem, então um valor errado sobrevive à
+   * correção da variável — só some ao regerar o código.
+   */
+  onModuleInit(): void {
+    const baseUrl = this.publicBaseUrl();
+
+    if (!baseUrl.includes('#')) {
+      this.logger.warn(
+        `PUBLIC_CARD_BASE_URL sem "#" ("${baseUrl}"): o web usa HashRouter e o ` +
+          'link público não vai resolver. Se o valor tem "#" no .env, envolva ' +
+          'em aspas — sem elas o dotenv corta tudo a partir do "#".',
+      );
+    }
+  }
 
   async generateQrCode(token: string): Promise<Buffer> {
     return this.generateBuffer(this.buildPublicUrl(token));
@@ -276,12 +301,15 @@ export class CardService {
     };
   }
 
-  private buildPublicUrl(token: string): string {
-    const baseUrl = this.configService.get<string>(
+  private publicBaseUrl(): string {
+    return this.configService.get<string>(
       'card.publicBaseUrl',
       'https://card.petcard.app/#',
     );
-    return `${baseUrl.replace(/\/+$/, '')}/${token}`;
+  }
+
+  private buildPublicUrl(token: string): string {
+    return `${this.publicBaseUrl().replace(/\/+$/, '')}/${token}`;
   }
 
   private async generateBuffer(data: string): Promise<Buffer> {

@@ -2,6 +2,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as QRCode from 'qrcode';
@@ -602,6 +603,34 @@ describe('CardService', () => {
       expect(result.issued_at).toBe(baseDate);
       expect(result.qr_code_url).toBeUndefined();
       expect(result.public_url).toBe('https://card.petcard.app/tok-abc');
+    });
+
+    it('avisa no boot quando a base do link público não tem hash', () => {
+      const aviso = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      // O padrão do repo: base sem "#" costuma ser o dotenv comendo o valor a
+      // partir dele, e o link resultante cai no "não encontrado" do HashRouter.
+      configService.get.mockReturnValue('https://card.petcard.app');
+
+      service.onModuleInit();
+
+      expect(aviso).toHaveBeenCalledWith(
+        expect.stringContaining('PUBLIC_CARD_BASE_URL'),
+      );
+      aviso.mockRestore();
+    });
+
+    it('não avisa quando a base traz o hash', () => {
+      const aviso = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      configService.get.mockReturnValue('https://card.petcard.app/#');
+
+      service.onModuleInit();
+
+      expect(aviso).not.toHaveBeenCalled();
+      aviso.mockRestore();
     });
 
     it('should throw NotFoundException when the pet does not exist', async () => {
