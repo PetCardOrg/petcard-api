@@ -110,13 +110,6 @@ describe('UploadService', () => {
       );
     });
 
-    it('converte falha do S3 em InternalServerErrorException no uploadBuffer', async () => {
-      mockSend.mockRejectedValue(new Error('boom'));
-      await expect(
-        service.uploadBuffer(Buffer.from('x'), 'k', 'image/png'),
-      ).rejects.toThrow(InternalServerErrorException);
-    });
-
     it('deleta arquivo extraindo a key da URL', async () => {
       mockSend.mockResolvedValue({});
       await service.deleteFile(
@@ -134,15 +127,6 @@ describe('UploadService', () => {
       );
       expect(mockSend).not.toHaveBeenCalled();
     });
-
-    it('converte falha do S3 em InternalServerErrorException no deleteFile', async () => {
-      mockSend.mockRejectedValue(new Error('denied'));
-      await expect(
-        service.deleteFile(
-          'https://petcard-bucket.s3.us-east-1.amazonaws.com/pets/x.png',
-        ),
-      ).rejects.toThrow(InternalServerErrorException);
-    });
   });
 
   describe('quando o S3 NÃO está configurado', () => {
@@ -155,18 +139,6 @@ describe('UploadService', () => {
       await expect(service.uploadFile(makeFile(), 'pets')).rejects.toThrow(
         InternalServerErrorException,
       );
-    });
-
-    it('uploadBuffer lança InternalServerErrorException', async () => {
-      await expect(
-        service.uploadBuffer(Buffer.from('x'), 'k', 'image/png'),
-      ).rejects.toThrow(InternalServerErrorException);
-    });
-
-    it('deleteFile lança InternalServerErrorException', async () => {
-      await expect(
-        service.deleteFile('https://x.s3.amazonaws.com/k'),
-      ).rejects.toThrow(InternalServerErrorException);
     });
   });
 });

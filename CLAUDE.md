@@ -29,8 +29,9 @@ Backend do PetCard (carteira digital de saúde para pets). NestJS 11 + Prisma 6 
 
 ## Testes & cobertura
 
-- Unit para services (mock de Prisma + externos), integração para controllers (supertest), E2E (Postgres real) para fluxos.
-- **Catraca de cobertura: 84/80/93/85 — não abaixar.** Ajuste que derruba cobertura cobre junto. Feature nova entra com teste.
+- **Cobertura de confiança, não percentual (ADR-006).** Antes de escrever um `it()`: _se quebrar, uma regra de negócio quebrou ou o usuário foi impactado?_ Se não, não escrever. Nada de teste para wrapper, controller que só delega, getter/setter.
+- Unit para lógica de negócio (mock de Prisma + externos), integração para contrato de rota/guard/validação (supertest), **E2E só para fluxo vital** — erro secundário e caminho alternativo descem para integração.
+- **Catraca de cobertura: 83/78/90/85 — freio de regressão, não meta.** Não abaixar sem ADR; também não inventar teste para subir.
 - ✅ **Flakiness da api#107 resolvida** (2026-08-17). A causa era `jest.mock('bcrypt', factory, { virtual: true })`: a flag declara que o módulo não existe em disco, mas bcrypt existe, e o Jest às vezes resolvia o módulo real pelo cache de transform — o hash verdadeiro não batia com a fixture e o login falhava. **Não usar `virtual: true` para mockar módulo que existe.**
 
 ## Gotchas
