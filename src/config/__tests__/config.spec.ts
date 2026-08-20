@@ -146,7 +146,7 @@ describe('config factories', () => {
   describe('cardConfig', () => {
     it('should apply the public card defaults', () => {
       expect(cardConfig()).toEqual({
-        publicBaseUrl: 'https://card.petcard.app/#',
+        publicBaseUrl: 'https://card.petcard.app/#/card',
         publicThrottleTtlSeconds: 60,
         publicThrottleLimit: 10,
       });
