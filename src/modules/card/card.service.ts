@@ -50,10 +50,13 @@ export class CardService implements OnModuleInit {
   /**
    * Confere a base do link público antes que ela vire QR Code gravado.
    *
-   * O erro é silencioso de dois jeitos: o web usa HashRouter, então base sem
-   * `#` gera link que cai no "não encontrado"; e o dotenv trata `#` sem aspas
-   * como início de comentário, truncando o valor justamente onde importa. O
-   * QR carrega o endereço dentro da imagem, então um valor errado sobrevive à
+   * O erro é silencioso: o dotenv trata `#` sem aspas como início de
+   * comentário e trunca o valor justamente onde importa. O web usa HashRouter,
+   * então o link sem `#` depende do host devolver o `index.html` para um
+   * caminho qualquer — em hospedagem estática isso é 404 antes de o JS rodar,
+   * e o resgate do `normalizePublicCardLocation` nem chega a acontecer.
+   *
+   * O QR carrega o endereço dentro da imagem, então valor errado sobrevive à
    * correção da variável — só some ao regerar o código.
    */
   onModuleInit(): void {
@@ -304,7 +307,7 @@ export class CardService implements OnModuleInit {
   private publicBaseUrl(): string {
     return this.configService.get<string>(
       'card.publicBaseUrl',
-      'https://card.petcard.app/#',
+      'https://card.petcard.app/#/card',
     );
   }
 
