@@ -61,17 +61,6 @@ describe('VeterinarioService', () => {
     service = module.get<VeterinarioService>(VeterinarioService);
   });
 
-  describe('findAll', () => {
-    it('should return a list of veterinarios without passwords', async () => {
-      prisma.veterinario.findMany.mockResolvedValue([vetFixture]);
-
-      const result = await service.findAll();
-
-      expect(result).toHaveLength(1);
-      expect(result[0]).not.toHaveProperty('password');
-    });
-  });
-
   describe('findById', () => {
     it('should throw NotFoundException when veterinario is missing', async () => {
       prisma.veterinario.findUnique.mockResolvedValue(null);

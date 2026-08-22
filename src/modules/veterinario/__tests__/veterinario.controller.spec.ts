@@ -111,19 +111,6 @@ describe('VeterinarioController (integração)', () => {
     });
   });
 
-  describe('GET /veterinarios', () => {
-    it('lista os veterinários (200)', async () => {
-      prisma.veterinario.findMany.mockResolvedValue([vet]);
-
-      const res = await request(harness.app.getHttpServer())
-        .get('/veterinarios')
-        .expect(200);
-
-      expect(res.body).toHaveLength(1);
-      expect(res.body[0].password).toBeUndefined();
-    });
-  });
-
   describe('GET /veterinarios/dashboard/pets', () => {
     it('retorna os pets atendidos paginados (200)', async () => {
       prisma.petAtendido.count.mockResolvedValue(1);
@@ -218,26 +205,6 @@ describe('VeterinarioController (integração)', () => {
     });
   });
 
-  describe('GET /veterinarios/:id', () => {
-    it('retorna o veterinário (200)', async () => {
-      prisma.veterinario.findUnique.mockResolvedValue(vet);
-
-      const res = await request(harness.app.getHttpServer())
-        .get('/veterinarios/vet-1')
-        .expect(200);
-
-      expect(res.body.id).toBe('vet-1');
-    });
-
-    it('retorna 404 para id inexistente', async () => {
-      prisma.veterinario.findUnique.mockResolvedValue(null);
-
-      await request(harness.app.getHttpServer())
-        .get('/veterinarios/missing')
-        .expect(404);
-    });
-  });
-
   describe('cadastro do próprio veterinário', () => {
     it('PATCH /veterinarios/me altera quem está no token (200)', async () => {
       prisma.veterinario.findUnique.mockResolvedValue(vet);
@@ -252,6 +219,7 @@ describe('VeterinarioController (integração)', () => {
         .expect(200);
 
       expect(res.body.nome).toBe('Dra. Nova');
+      expect(res.body).not.toHaveProperty('password');
       // O alvo vem do token, nunca da rota: é o que impede um veterinário
       // de editar o cadastro de outro.
       expect(prisma.veterinario.update).toHaveBeenCalledWith(
@@ -272,9 +240,9 @@ describe('VeterinarioController (integração)', () => {
       });
     });
 
-    it('não expõe rota para alterar o cadastro de outro veterinário (404)', async () => {
-      // Havia PATCH/DELETE /veterinarios/:id sem checagem de posse: qualquer
-      // veterinário autenticado alterava a conta de outro passando o id.
+    it('não expõe rota alguma para o cadastro de outro veterinário', async () => {
+      // Havia PATCH/DELETE /veterinarios/:id sem checagem de posse e GET
+      // /veterinarios devolvendo e-mail, telefone e CRMV de todo mundo.
       await request(harness.app.getHttpServer())
         .patch('/veterinarios/vet-2')
         .send({ nome: 'Invadida' })
@@ -284,8 +252,17 @@ describe('VeterinarioController (integração)', () => {
         .delete('/veterinarios/vet-2')
         .expect(404);
 
+      await request(harness.app.getHttpServer())
+        .get('/veterinarios/vet-2')
+        .expect(404);
+
+      await request(harness.app.getHttpServer())
+        .get('/veterinarios')
+        .expect(404);
+
       expect(prisma.veterinario.update).not.toHaveBeenCalled();
       expect(prisma.veterinario.delete).not.toHaveBeenCalled();
+      expect(prisma.veterinario.findMany).not.toHaveBeenCalled();
     });
   });
 });

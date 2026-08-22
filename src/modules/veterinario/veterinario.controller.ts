@@ -146,18 +146,8 @@ export class VeterinarioController {
     return this.veterinarioService.removerPetAtendido(user.sub, petId);
   }
 
-  @Get()
-  @Auth(Role.VET)
-  @ApiOperation({ summary: 'Listar veterinários' })
-  async findAll(): Promise<VeterinarioResponse[]> {
-    return this.veterinarioService.findAll();
-  }
-
-  @Get(':id')
-  @Auth(Role.VET)
-  @ApiOperation({ summary: 'Buscar veterinário por id' })
-  @ApiNotFoundResponse({ description: 'Veterinário não encontrado' })
-  async findOne(@Param('id') id: string): Promise<VeterinarioResponse> {
-    return this.veterinarioService.findById(id);
-  }
+  // Não há rota para ler o cadastro de outro veterinário. A listagem geral
+  // entregava e-mail, telefone e CRMV de todo mundo a qualquer vet logado —
+  // dado pessoal que nenhuma tela usa. O próprio cadastro vem do login, em
+  // `GET /auth/veterinario/profile`.
 }

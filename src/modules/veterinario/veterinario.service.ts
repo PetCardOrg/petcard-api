@@ -47,13 +47,7 @@ function toResponse(vet: Veterinario): VeterinarioResponse {
 export class VeterinarioService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(): Promise<VeterinarioResponse[]> {
-    const vets = await this.prisma.veterinario.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
-    return vets.map(toResponse);
-  }
-
+  /** Apoio interno de `update` e `remove` — não há rota que leia outro vet. */
   async findById(id: string): Promise<VeterinarioResponse> {
     const vet = await this.prisma.veterinario.findUnique({ where: { id } });
     if (!vet) {
