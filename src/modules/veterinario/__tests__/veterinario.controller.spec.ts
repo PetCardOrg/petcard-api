@@ -238,8 +238,8 @@ describe('VeterinarioController (integração)', () => {
     });
   });
 
-  describe('PATCH /veterinarios/:id', () => {
-    it('atualiza o veterinário (200)', async () => {
+  describe('cadastro do próprio veterinário', () => {
+    it('PATCH /veterinarios/me altera quem está no token (200)', async () => {
       prisma.veterinario.findUnique.mockResolvedValue(vet);
       prisma.veterinario.update.mockResolvedValue({
         ...vet,
@@ -247,22 +247,45 @@ describe('VeterinarioController (integração)', () => {
       });
 
       const res = await request(harness.app.getHttpServer())
-        .patch('/veterinarios/vet-1')
+        .patch('/veterinarios/me')
         .send({ nome: 'Dra. Nova' })
         .expect(200);
 
       expect(res.body.nome).toBe('Dra. Nova');
+      // O alvo vem do token, nunca da rota: é o que impede um veterinário
+      // de editar o cadastro de outro.
+      expect(prisma.veterinario.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: VET.sub } }),
+      );
     });
-  });
 
-  describe('DELETE /veterinarios/:id', () => {
-    it('remove o veterinário (204)', async () => {
+    it('DELETE /veterinarios/me apaga a própria conta (204)', async () => {
       prisma.veterinario.findUnique.mockResolvedValue(vet);
       prisma.veterinario.delete.mockResolvedValue(vet);
 
       await request(harness.app.getHttpServer())
-        .delete('/veterinarios/vet-1')
+        .delete('/veterinarios/me')
         .expect(204);
+
+      expect(prisma.veterinario.delete).toHaveBeenCalledWith({
+        where: { id: VET.sub },
+      });
+    });
+
+    it('não expõe rota para alterar o cadastro de outro veterinário (404)', async () => {
+      // Havia PATCH/DELETE /veterinarios/:id sem checagem de posse: qualquer
+      // veterinário autenticado alterava a conta de outro passando o id.
+      await request(harness.app.getHttpServer())
+        .patch('/veterinarios/vet-2')
+        .send({ nome: 'Invadida' })
+        .expect(404);
+
+      await request(harness.app.getHttpServer())
+        .delete('/veterinarios/vet-2')
+        .expect(404);
+
+      expect(prisma.veterinario.update).not.toHaveBeenCalled();
+      expect(prisma.veterinario.delete).not.toHaveBeenCalled();
     });
   });
 });

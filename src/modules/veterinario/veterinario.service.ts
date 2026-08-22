@@ -62,11 +62,18 @@ export class VeterinarioService {
     return toResponse(vet);
   }
 
+  /**
+   * Atualiza o cadastro do veterinário.
+   *
+   * Trocar o CRMV derruba a verificação junto: manter o carimbo antigo
+   * deixaria o registro novo — que ninguém conferiu — acessando dado clínico
+   * com a credencial que o registro anterior conquistou (api#113).
+   */
   async update(
     id: string,
     dto: UpdateVeterinarioDto,
   ): Promise<VeterinarioResponse> {
-    await this.findById(id);
+    const atual = await this.findById(id);
 
     if (dto.email || dto.crmv) {
       await this.assertUniqueFields(dto.email, dto.crmv, id);
@@ -75,7 +82,11 @@ export class VeterinarioService {
     const data: Record<string, unknown> = {};
     if (dto.nome !== undefined) data.nome = dto.nome;
     if (dto.email !== undefined) data.email = dto.email;
-    if (dto.crmv !== undefined) data.crmv = dto.crmv;
+    if (dto.crmv !== undefined && dto.crmv !== atual.crmv) {
+      data.crmv = dto.crmv;
+      data.crmvVerifiedAt = null;
+      data.crmvSituacao = null;
+    }
     if (dto.telefone !== undefined) data.telefone = dto.telefone;
     if (dto.password !== undefined) {
       data.password = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
