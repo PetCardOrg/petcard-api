@@ -74,6 +74,30 @@ export class VeterinarioController {
     return this.crmvVerification.verify(user.sub, force === 'true');
   }
 
+  @Patch('me')
+  @Auth(Role.VET)
+  @ApiOperation({
+    summary: 'Atualizar meu cadastro',
+    description:
+      'Só o próprio veterinário altera o próprio cadastro — o id vem do ' +
+      'token, não da rota. Trocar o CRMV zera a verificação: o registro novo ' +
+      'precisa ser verificado antes de liberar dado clínico de novo.',
+  })
+  async updateMe(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateVeterinarioDto,
+  ): Promise<VeterinarioResponse> {
+    return this.veterinarioService.update(user.sub, dto);
+  }
+
+  @Delete('me')
+  @Auth(Role.VET)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Excluir minha conta de veterinário' })
+  async removeMe(@CurrentUser() user: JwtPayload): Promise<void> {
+    return this.veterinarioService.remove(user.sub);
+  }
+
   @Get('dashboard/pets')
   @Auth(Role.VET)
   @ApiOperation({
@@ -122,38 +146,8 @@ export class VeterinarioController {
     return this.veterinarioService.removerPetAtendido(user.sub, petId);
   }
 
-  @Get()
-  @Auth(Role.VET)
-  @ApiOperation({ summary: 'Listar veterinários' })
-  async findAll(): Promise<VeterinarioResponse[]> {
-    return this.veterinarioService.findAll();
-  }
-
-  @Get(':id')
-  @Auth(Role.VET)
-  @ApiOperation({ summary: 'Buscar veterinário por id' })
-  @ApiNotFoundResponse({ description: 'Veterinário não encontrado' })
-  async findOne(@Param('id') id: string): Promise<VeterinarioResponse> {
-    return this.veterinarioService.findById(id);
-  }
-
-  @Patch(':id')
-  @Auth(Role.VET)
-  @ApiOperation({ summary: 'Atualizar veterinário' })
-  @ApiNotFoundResponse({ description: 'Veterinário não encontrado' })
-  async update(
-    @Param('id') id: string,
-    @Body() dto: UpdateVeterinarioDto,
-  ): Promise<VeterinarioResponse> {
-    return this.veterinarioService.update(id, dto);
-  }
-
-  @Delete(':id')
-  @Auth(Role.VET)
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Remover veterinário' })
-  @ApiNotFoundResponse({ description: 'Veterinário não encontrado' })
-  async remove(@Param('id') id: string): Promise<void> {
-    return this.veterinarioService.remove(id);
-  }
+  // Não há rota para ler o cadastro de outro veterinário. A listagem geral
+  // entregava e-mail, telefone e CRMV de todo mundo a qualquer vet logado —
+  // dado pessoal que nenhuma tela usa. O próprio cadastro vem do login, em
+  // `GET /auth/veterinario/profile`.
 }
