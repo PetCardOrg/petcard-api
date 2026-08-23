@@ -86,3 +86,23 @@ export async function createAndLoginVet(
 
   return { token: res.body.access_token as string, user: res.body.user };
 }
+
+/**
+ * Põe o pet na lista de atendidos do veterinário.
+ *
+ * Em produção o vínculo nasce da leitura do QR Code da carteira
+ * (`POST /veterinarios/me/pets`) — é ele que autoriza o vet a abrir o
+ * prontuário. Aqui é criado direto, no mesmo espírito de `createAndLoginVet`:
+ * o cenário sob teste é o que vem depois do atendimento começar.
+ */
+export async function vincularPetAoVet(
+  prisma: PrismaService,
+  veterinarioId: string,
+  petId: string,
+): Promise<void> {
+  await prisma.petAtendido.upsert({
+    where: { veterinarioId_petId: { veterinarioId, petId } },
+    create: { veterinarioId, petId },
+    update: { ultimoAcessoEm: new Date() },
+  });
+}

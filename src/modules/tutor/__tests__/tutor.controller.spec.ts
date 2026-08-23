@@ -12,12 +12,18 @@ import { TutorService } from '../tutor.service';
 
 describe('TutorController (integração)', () => {
   let harness: ControllerHarness;
-  let prisma: { tutor: { findUnique: jest.Mock; update: jest.Mock } };
+  let prisma: {
+    tutor: { findUnique: jest.Mock; update: jest.Mock };
+    petAtendido: { findFirst: jest.Mock };
+  };
 
   const tutor = {
     id: 'tutor-1',
     name: 'Alice',
     email: 'tutor@petcard.com',
+    // O hash vem do banco em toda leitura; o que importa é ele não sair na
+    // resposta.
+    password: '$2b$12$hashdoTutor',
     phone: null,
     profileImageUrl: null,
     role: 'TUTOR',
@@ -26,7 +32,10 @@ describe('TutorController (integração)', () => {
   };
 
   beforeAll(async () => {
-    prisma = { tutor: { findUnique: jest.fn(), update: jest.fn() } };
+    prisma = {
+      tutor: { findUnique: jest.fn(), update: jest.fn() },
+      petAtendido: { findFirst: jest.fn() },
+    };
 
     harness = await createControllerTestApp({
       controllers: [TutorController],
@@ -42,6 +51,7 @@ describe('TutorController (integração)', () => {
     jest.clearAllMocks();
     harness.setUser(TUTOR);
     prisma.tutor.findUnique.mockResolvedValue(tutor);
+    prisma.petAtendido.findFirst.mockResolvedValue({ id: 'vinculo-1' });
   });
 
   describe('GET /tutors/me', () => {
@@ -52,6 +62,7 @@ describe('TutorController (integração)', () => {
 
       expect(res.body.id).toBe('tutor-1');
       expect(res.body.email).toBe('tutor@petcard.com');
+      expect(res.body).not.toHaveProperty('password');
       expect(prisma.tutor.findUnique).toHaveBeenCalledWith({
         where: { id: 'tutor-1' },
       });
@@ -74,6 +85,7 @@ describe('TutorController (integração)', () => {
         .expect(200);
 
       expect(res.body.name).toBe('Alice B');
+      expect(res.body).not.toHaveProperty('password');
       expect(prisma.tutor.update).toHaveBeenCalledWith({
         where: { id: 'tutor-1' },
         data: { name: 'Alice B' },
@@ -97,7 +109,7 @@ describe('TutorController (integração)', () => {
         .expect(403);
     });
 
-    it('retorna o tutor para VET (200)', async () => {
+    it('retorna o tutor para o VET que atende um pet dele (200)', async () => {
       harness.setUser(VET);
 
       const res = await request(harness.app.getHttpServer())
@@ -105,6 +117,17 @@ describe('TutorController (integração)', () => {
         .expect(200);
 
       expect(res.body.id).toBe('tutor-1');
+      expect(res.body).not.toHaveProperty('password');
+    });
+
+    it('barra o VET sem pet do tutor na lista (403)', async () => {
+      // O papel VET não dá acesso ao cadastro de qualquer tutor da base.
+      harness.setUser(VET);
+      prisma.petAtendido.findFirst.mockResolvedValue(null);
+
+      await request(harness.app.getHttpServer())
+        .get('/tutors/tutor-1')
+        .expect(403);
     });
 
     it('retorna 404 para tutor inexistente (VET)', async () => {

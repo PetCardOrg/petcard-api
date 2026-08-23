@@ -23,6 +23,7 @@ describe('VetNoteService', () => {
     };
     pet: { findUnique: jest.Mock };
     veterinario: { findUnique: jest.Mock };
+    petAtendido: { findUnique: jest.Mock };
   };
   let notificationService: { schedulePush: jest.Mock };
 
@@ -62,10 +63,13 @@ describe('VetNoteService', () => {
         findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
-        update: jest.fn(),
       },
       pet: { findUnique: jest.fn() },
       veterinario: { findUnique: jest.fn() },
+      // Vínculo vet-pet presente por padrão; os casos de bloqueio zeram.
+      petAtendido: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'vinculo-1' }),
+      },
     };
     notificationService = {
       schedulePush: jest.fn().mockResolvedValue([]),

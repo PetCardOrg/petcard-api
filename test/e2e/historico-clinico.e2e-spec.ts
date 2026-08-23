@@ -3,7 +3,12 @@ import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types';
 import request from 'supertest';
 import { createE2EApp, E2EApp } from '../utils/e2e-app';
-import { createAndLoginVet, registerTutor, resetDb } from '../utils/e2e-db';
+import {
+  createAndLoginVet,
+  registerTutor,
+  resetDb,
+  vincularPetAoVet,
+} from '../utils/e2e-db';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import type {
   HistoricoClinicoItemResponseDto,
@@ -40,7 +45,8 @@ describe('Histórico clínico (e2e)', () => {
     const tutor = await registerTutor(app);
     tutorToken = tutor.token;
     tutorId = tutor.user.id;
-    ({ token: vetToken } = await createAndLoginVet(app, prisma));
+    const vet = await createAndLoginVet(app, prisma);
+    vetToken = vet.token;
 
     const pet = await request(app.getHttpServer())
       .post('/pets')
@@ -48,6 +54,9 @@ describe('Histórico clínico (e2e)', () => {
       .send({ name: 'Rex', species: 'DOG', sex: 'MALE' })
       .expect(201);
     petId = pet.body.id as string;
+
+    // O atendimento começa pela leitura do QR Code da carteira.
+    await vincularPetAoVet(prisma, vet.user.id, petId);
   });
 
   async function prescreverMedicacao(): Promise<string> {

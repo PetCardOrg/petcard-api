@@ -57,6 +57,7 @@ export class VetNoteService {
   ): Promise<NotaClinicaResponseDto> {
     const pet = await this.findPetOrFail(petId);
     await this.assertVeterinarioExists(veterinarioId);
+    await this.assertVinculoVet(petId, veterinarioId);
 
     const nota = await this.prisma.$transaction(async (tx) => {
       const criada = await tx.notaClinica.create({
@@ -117,7 +118,9 @@ export class VetNoteService {
   ): Promise<NotaClinicaResponseDto[]> {
     const pet = await this.findPetOrFail(petId);
 
-    if (!isVet && pet.tutorId !== userId) {
+    if (isVet) {
+      await this.assertVinculoVet(petId, userId);
+    } else if (pet.tutorId !== userId) {
       throw new ForbiddenException('You can only view notes for your own pets');
     }
 
@@ -147,7 +150,9 @@ export class VetNoteService {
       throw new NotFoundException(`Clinical note with id ${id} not found`);
     }
 
-    if (!isVet && nota.pet.tutorId !== userId) {
+    if (isVet) {
+      await this.assertVinculoVet(nota.petId, userId);
+    } else if (nota.pet.tutorId !== userId) {
       throw new ForbiddenException('You can only view notes for your own pets');
     }
 
@@ -271,6 +276,28 @@ export class VetNoteService {
       throw new NotFoundException(`Pet with id ${petId} not found`);
     }
     return pet;
+  }
+
+  /**
+   * Exige que o pet esteja na lista de atendidos do veterinário.
+   *
+   * Repete a regra de `PetService.assertAccess` porque as notas clínicas não
+   * passam por lá — e sem a checagem o papel VET, sozinho, lia e escrevia no
+   * prontuário de qualquer pet cujo id fosse conhecido. O vínculo entra pela
+   * leitura do QR Code da carteira.
+   */
+  private async assertVinculoVet(
+    petId: string,
+    veterinarioId: string,
+  ): Promise<void> {
+    const vinculo = await this.prisma.petAtendido.findUnique({
+      where: { veterinarioId_petId: { veterinarioId, petId } },
+    });
+    if (!vinculo) {
+      throw new ForbiddenException(
+        'Pet fora da sua lista de atendidos. Leia o QR Code da carteira para iniciar o atendimento.',
+      );
+    }
   }
 
   private async assertVeterinarioExists(veterinarioId: string): Promise<void> {

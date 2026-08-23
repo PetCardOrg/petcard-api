@@ -3,7 +3,12 @@ import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types';
 import request from 'supertest';
 import { createE2EApp, E2EApp } from '../utils/e2e-app';
-import { createAndLoginVet, registerTutor, resetDb } from '../utils/e2e-db';
+import {
+  createAndLoginVet,
+  registerTutor,
+  resetDb,
+  vincularPetAoVet,
+} from '../utils/e2e-db';
 import { PrismaService } from '../../src/prisma/prisma.service';
 
 describe('Nota clínica — escrita reversa (e2e)', () => {
@@ -12,6 +17,7 @@ describe('Nota clínica — escrita reversa (e2e)', () => {
   let prisma: PrismaService;
   let tutorToken: string;
   let vetToken: string;
+  let vetId: string;
   let petId: string;
 
   beforeAll(async () => {
@@ -26,7 +32,9 @@ describe('Nota clínica — escrita reversa (e2e)', () => {
   beforeEach(async () => {
     await resetDb(prisma);
     ({ token: tutorToken } = await registerTutor(app));
-    ({ token: vetToken } = await createAndLoginVet(app, prisma));
+    const vet = await createAndLoginVet(app, prisma);
+    vetToken = vet.token;
+    vetId = vet.user.id;
 
     const pet = await request(app.getHttpServer())
       .post('/pets')
@@ -34,6 +42,10 @@ describe('Nota clínica — escrita reversa (e2e)', () => {
       .send({ name: 'Rex', species: 'DOG', sex: 'MALE' })
       .expect(201);
     petId = pet.body.id as string;
+
+    // O atendimento começa pela leitura do QR Code da carteira; sem esse
+    // vínculo o prontuário não abre para o vet.
+    await vincularPetAoVet(prisma, vetId, petId);
   });
 
   it('VET cria a nota, persiste e enfileira o push; tutor consegue lê-la', async () => {
@@ -63,6 +75,20 @@ describe('Nota clínica — escrita reversa (e2e)', () => {
       .set('Authorization', `Bearer ${tutorToken}`)
       .expect(200);
     expect(list.body).toHaveLength(1);
+  });
+
+  it('proíbe VET que não atende o pet de criar nota (403)', async () => {
+    // Só o papel VET não basta: sem a leitura do QR Code o pet não está na
+    // lista dele, e o prontuário permanece fechado.
+    await prisma.petAtendido.deleteMany({ where: { petId } });
+
+    await request(app.getHttpServer())
+      .post(`/pets/${petId}/clinical-notes`)
+      .set('Authorization', `Bearer ${vetToken}`)
+      .send({ diagnostico: 'Otite externa' })
+      .expect(403);
+
+    expect(await prisma.notaClinica.count()).toBe(0);
   });
 
   it('proíbe o TUTOR de criar nota clínica (403)', async () => {
