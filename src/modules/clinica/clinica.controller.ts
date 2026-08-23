@@ -13,6 +13,7 @@ import {
 } from '@petcardorg/shared';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { Role } from '../auth/enums/role.enum';
+import { GeocodeQueryDto } from './dto/geocode-query.dto';
 import { GeocodingService } from './geocoding.service';
 import { PlacesService } from './places.service';
 
@@ -48,9 +49,7 @@ export class ClinicaController {
   @ApiOkResponse({ type: GeocodeResponseDto })
   @ApiQuery({ name: 'address', description: 'Endereço a geocodificar' })
   @ApiNotFoundResponse({ description: 'Endereço não encontrado' })
-  async geocode(
-    @Query('address') address: string,
-  ): Promise<GeocodeResponseDto> {
-    return this.geocodingService.geocode(address);
+  async geocode(@Query() query: GeocodeQueryDto): Promise<GeocodeResponseDto> {
+    return this.geocodingService.geocode(query.address);
   }
 }

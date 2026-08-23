@@ -36,6 +36,10 @@ const makeConfig = (
 ): ConfigService =>
   ({ get: (key: string) => values[key] }) as unknown as ConfigService;
 
+/** Assinatura de um PNG de verdade — o serviço confere os bytes, não o header. */
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_BUFFER = Buffer.concat([PNG_MAGIC, Buffer.from('conteudo')]);
+
 const makeFile = (
   overrides: Partial<Express.Multer.File> = {},
 ): Express.Multer.File =>
@@ -43,7 +47,7 @@ const makeFile = (
     originalname: 'foto do rex!.png',
     mimetype: 'image/png',
     size: 1024,
-    buffer: Buffer.from('binary'),
+    buffer: PNG_BUFFER,
     ...overrides,
   }) as Express.Multer.File;
 
@@ -82,6 +86,56 @@ describe('UploadService', () => {
     it('rejeita mime type não permitido', async () => {
       await expect(
         service.uploadFile(makeFile({ mimetype: 'application/pdf' }), 'pets'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejeita conteúdo que não bate com o mime declarado', async () => {
+      // O mimetype é escrito pelo cliente. Aceitar só ele deixava subir HTML
+      // ou script dizendo ser PNG.
+      await expect(
+        service.uploadFile(
+          makeFile({ buffer: Buffer.from('<html>nao sou imagem</html>') }),
+          'pets',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('aceita JPEG e WebP pela assinatura real', async () => {
+      await expect(
+        service.uploadFile(
+          makeFile({
+            mimetype: 'image/jpeg',
+            buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]),
+          }),
+          'pets',
+        ),
+      ).resolves.toContain('https://');
+
+      const webp = Buffer.concat([
+        Buffer.from('RIFF'),
+        Buffer.from([0, 0, 0, 0]),
+        Buffer.from('WEBP'),
+      ]);
+      await expect(
+        service.uploadFile(
+          makeFile({ mimetype: 'image/webp', buffer: webp }),
+          'pets',
+        ),
+      ).resolves.toContain('https://');
+    });
+
+    it('rejeita JPEG cujos bytes são de outro formato', async () => {
+      await expect(
+        service.uploadFile(
+          makeFile({ mimetype: 'image/jpeg', buffer: PNG_BUFFER }),
+          'pets',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejeita arquivo vazio', async () => {
+      await expect(
+        service.uploadFile(makeFile({ buffer: Buffer.alloc(0) }), 'pets'),
       ).rejects.toThrow(BadRequestException);
     });
 

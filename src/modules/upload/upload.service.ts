@@ -13,7 +13,29 @@ import {
 import { ConfigService } from '@nestjs/config';
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Assinatura real de cada formato aceito.
+ *
+ * `file.mimetype` é o `Content-Type` que o cliente escreveu na parte do
+ * multipart — dado, não fato. Conferir só ele deixava subir qualquer conteúdo
+ * (HTML, SVG com script, executável) desde que a requisição dissesse
+ * `image/png`, e o objeto ia para o S3 servido com esse tipo.
+ */
+const PNG_SIGNATURE = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]);
+
+const MAGIC_NUMBERS: Record<string, (buffer: Buffer) => boolean> = {
+  'image/jpeg': (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8,
+  'image/png': (b) => b.length >= 8 && b.subarray(0, 8).equals(PNG_SIGNATURE),
+  // Cabeçalho de WebP tem exatamente 12 bytes: "RIFF", o tamanho, e "WEBP".
+  'image/webp': (b) =>
+    b.length >= 12 &&
+    b.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    b.subarray(8, 12).toString('ascii') === 'WEBP',
+};
 
 @Injectable()
 export class UploadService {
@@ -101,6 +123,13 @@ export class UploadService {
     return `https://${this.bucket}.s3.${this.region}.amazonaws.com/${key}`;
   }
 
+  /**
+   * Remove um objeto do bucket a partir da URL pública dele.
+   *
+   * A URL precisa ser deste bucket: a chave saía do `pathname` de qualquer
+   * endereço recebido, então uma URL forjada apontava o delete para qualquer
+   * objeto do bucket, inclusive fora da pasta de uploads.
+   */
   async deleteFile(fileUrl: string): Promise<void> {
     if (!this.s3Client || !this.bucket) {
       throw new InternalServerErrorException(
@@ -135,15 +164,28 @@ export class UploadService {
     if (file.size > MAX_FILE_SIZE_BYTES) {
       throw new BadRequestException('File exceeds the 5MB size limit');
     }
+    if (!file.buffer?.length) {
+      throw new BadRequestException('Empty file');
+    }
+    if (!MAGIC_NUMBERS[file.mimetype](file.buffer)) {
+      throw new BadRequestException(
+        'File content does not match the declared image type',
+      );
+    }
   }
 
   private extractKeyFromUrl(fileUrl: string): string | null {
     try {
       const url = new URL(fileUrl);
-      // Remove leading slash
-      return url.pathname.startsWith('/')
-        ? url.pathname.substring(1)
-        : url.pathname;
+      if (url.host !== `${this.bucket}.s3.${this.region}.amazonaws.com`) {
+        return null;
+      }
+      const key = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+      // Sem travessia e dentro de uma pasta conhecida.
+      if (!key || key.includes('..') || !/^[\w.-]+\//.test(key)) {
+        return null;
+      }
+      return key;
     } catch {
       return null;
     }
