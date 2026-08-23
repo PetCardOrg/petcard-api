@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
-import { Logger } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { EncryptionService } from '../../../common/crypto/encryption.service';
@@ -40,6 +40,7 @@ const makeConfig = (configured = true): ConfigService =>
           'googleCalendar.clientId': configured ? 'client-id' : '',
           'googleCalendar.clientSecret': configured ? 'secret' : '',
           'googleCalendar.redirectUri': 'http://localhost/callback',
+          'auth.jwtSecret': 'segredo-de-teste',
         }) as Record<string, string>
       )[key],
   }) as unknown as ConfigService;
@@ -120,7 +121,7 @@ describe('GoogleCalendarService', () => {
   });
 
   describe('getAuthUrl', () => {
-    it('gera a URL de consentimento offline com o tutorId no state', () => {
+    it('gera a URL de consentimento offline com o state assinado', () => {
       const url = service.getAuthUrl('tutor-1');
 
       expect(url).toBe('https://accounts.google.com/o/oauth2/auth?xyz');
@@ -128,7 +129,9 @@ describe('GoogleCalendarService', () => {
         access_type: 'offline',
         scope: SCOPES,
         prompt: 'consent',
-        state: 'tutor-1',
+        state: expect.stringMatching(
+          /^tutor-1\.[\w-]+\.\d+\.[\w-]+$/,
+        ) as string,
       });
     });
 
@@ -141,6 +144,50 @@ describe('GoogleCalendarService', () => {
 
       expect(unconfigured.getAuthUrl('tutor-1')).toBeNull();
       expect(mockOAuth2Instance.generateAuthUrl).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resolveState', () => {
+    /** Extrai o state que o getAuthUrl acabou de emitir. */
+    const emitirState = (tutorId: string): string => {
+      service.getAuthUrl(tutorId);
+      const call = mockOAuth2Instance.generateAuthUrl.mock.calls.at(-1) as [
+        { state: string },
+      ];
+      return call[0].state;
+    };
+
+    it('devolve o tutor de origem do state que ele mesmo assinou', () => {
+      expect(service.resolveState(emitirState('tutor-1'))).toBe('tutor-1');
+    });
+
+    it('recusa state forjado com outro tutor', () => {
+      // O ataque que a assinatura fecha: chamar o callback com o id da vítima
+      // e um code do atacante, pendurando a agenda dele na conta dela.
+      const state = emitirState('tutor-1');
+      const [, nonce, exp, sig] = state.split('.');
+      const forjado = ['tutor-vitima', nonce, exp, sig].join('.');
+
+      expect(() => service.resolveState(forjado)).toThrow(BadRequestException);
+    });
+
+    it('recusa state sem assinatura', () => {
+      expect(() => service.resolveState('tutor-1')).toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('recusa state expirado', () => {
+      const state = emitirState('tutor-1');
+      const [tutorId, nonce] = state.split('.');
+      const vencido = `${tutorId}.${nonce}.${Date.now() - 1000}`;
+      // Assinatura correta para um prazo já vencido não vale.
+      const service2 = service as unknown as {
+        stateSignature: (p: string) => string;
+      };
+      const assinado = `${vencido}.${service2.stateSignature(vencido)}`;
+
+      expect(() => service.resolveState(assinado)).toThrow(BadRequestException);
     });
   });
 
