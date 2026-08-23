@@ -105,7 +105,9 @@ export class PetService {
     if (!pet) {
       throw new NotFoundException(`Pet with id ${id} not found`);
     }
-    if (!isVet && pet.tutorId !== userId) {
+    if (isVet) {
+      await this.assertVinculoVet(id, userId);
+    } else if (pet.tutorId !== userId) {
       throw new ForbiddenException('You do not own this pet');
     }
     return toResponseDto(pet);
@@ -157,6 +159,15 @@ export class PetService {
     return pet;
   }
 
+  /**
+   * Acesso ao pet por tutor dono ou por veterinário que o atende.
+   *
+   * O papel VET sozinho não abre a ficha de ninguém: sem o vínculo, bastava
+   * conhecer o id de um pet para ler e escrever no prontuário de qualquer
+   * animal da base. O vínculo nasce da leitura do QR Code
+   * (`POST /veterinarios/me/pets`), que é a autorização de fato do atendimento
+   * — quem leu o código esteve com o pet na frente.
+   */
   async assertAccess(
     petId: string,
     userId: string,
@@ -167,8 +178,24 @@ export class PetService {
       if (!pet) {
         throw new NotFoundException(`Pet with id ${petId} not found`);
       }
+      await this.assertVinculoVet(petId, userId);
       return pet;
     }
     return this.assertOwnership(petId, userId);
+  }
+
+  /** Exige que o pet esteja na lista de atendidos do veterinário. */
+  private async assertVinculoVet(
+    petId: string,
+    veterinarioId: string,
+  ): Promise<void> {
+    const vinculo = await this.prisma.petAtendido.findUnique({
+      where: { veterinarioId_petId: { veterinarioId, petId } },
+    });
+    if (!vinculo) {
+      throw new ForbiddenException(
+        'Pet fora da sua lista de atendidos. Leia o QR Code da carteira para iniciar o atendimento.',
+      );
+    }
   }
 }

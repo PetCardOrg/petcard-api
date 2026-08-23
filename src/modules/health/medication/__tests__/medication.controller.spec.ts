@@ -30,6 +30,7 @@ describe('MedicationController (integração)', () => {
       update: jest.Mock;
       delete: jest.Mock;
     };
+    petAtendido: { findUnique: jest.Mock };
   };
 
   const pet = { id: 'pet-1', tutorId: 'tutor-1' };
@@ -60,6 +61,7 @@ describe('MedicationController (integração)', () => {
         update: jest.fn(),
         delete: jest.fn(),
       },
+      petAtendido: { findUnique: jest.fn() },
     };
 
     comTransacao(prisma);
@@ -95,6 +97,8 @@ describe('MedicationController (integração)', () => {
     jest.clearAllMocks();
     harness.setUser(TUTOR);
     prisma.pet.findUnique.mockResolvedValue(pet);
+    // Vínculo vet-pet presente por padrão; os casos de bloqueio zeram.
+    prisma.petAtendido.findUnique.mockResolvedValue({ id: 'vinculo-1' });
   });
 
   const validBody = {
@@ -117,7 +121,7 @@ describe('MedicationController (integração)', () => {
     expect(res.body.medication_name).toBe('Amoxicilina');
   });
 
-  it('POST permite VET registrar em qualquer pet (201)', async () => {
+  it('POST permite ao VET que atende o pet registrar (201)', async () => {
     harness.setUser(VET);
     prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'outro' });
     prisma.medicationRecord.create.mockResolvedValue(record);
@@ -126,6 +130,21 @@ describe('MedicationController (integração)', () => {
       .post('/pets/pet-1/medications')
       .send(validBody)
       .expect(201);
+  });
+
+  it('POST barra o VET que não atende o pet (403)', async () => {
+    // O papel VET, sozinho, não abre o prontuário: sem a leitura do QR Code
+    // o pet não está na lista dele.
+    harness.setUser(VET);
+    prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'outro' });
+    prisma.petAtendido.findUnique.mockResolvedValue(null);
+
+    await request(harness.app.getHttpServer())
+      .post('/pets/pet-1/medications')
+      .send(validBody)
+      .expect(403);
+
+    expect(prisma.medicationRecord.create).not.toHaveBeenCalled();
   });
 
   it('POST rejeita payload inválido (400)', async () => {

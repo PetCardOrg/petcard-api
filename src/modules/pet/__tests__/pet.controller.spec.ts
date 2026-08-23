@@ -24,6 +24,7 @@ describe('PetController (integração)', () => {
       update: jest.Mock;
       delete: jest.Mock;
     };
+    petAtendido: { findUnique: jest.Mock };
   };
   let qrPublisher: { publishGenerate: jest.Mock };
 
@@ -58,6 +59,7 @@ describe('PetController (integração)', () => {
         update: jest.fn(),
         delete: jest.fn(),
       },
+      petAtendido: { findUnique: jest.fn() },
     };
     qrPublisher = { publishGenerate: jest.fn().mockResolvedValue(undefined) };
 
@@ -175,11 +177,20 @@ describe('PetController (integração)', () => {
       await request(harness.app.getHttpServer()).get('/pets/pet-1').expect(403);
     });
 
-    it('permite acesso de VET mesmo sem ser dono (200)', async () => {
+    it('permite acesso do VET que atende o pet (200)', async () => {
       harness.setUser(VET);
       prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'outro' });
+      prisma.petAtendido.findUnique.mockResolvedValue({ id: 'vinculo-1' });
 
       await request(harness.app.getHttpServer()).get('/pets/pet-1').expect(200);
+    });
+
+    it('barra o VET que não atende o pet (403)', async () => {
+      harness.setUser(VET);
+      prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'outro' });
+      prisma.petAtendido.findUnique.mockResolvedValue(null);
+
+      await request(harness.app.getHttpServer()).get('/pets/pet-1').expect(403);
     });
 
     it('retorna 404 quando o pet não existe', async () => {

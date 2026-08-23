@@ -17,6 +17,7 @@ describe('PetService', () => {
       update: jest.Mock;
       delete: jest.Mock;
     };
+    petAtendido: { findUnique: jest.Mock };
   };
   let tutorService: { findById: jest.Mock };
   let qrCodePublisher: { publishGenerate: jest.Mock };
@@ -59,6 +60,7 @@ describe('PetService', () => {
         update: jest.fn(),
         delete: jest.fn(),
       },
+      petAtendido: { findUnique: jest.fn().mockResolvedValue(null) },
     };
     tutorService = { findById: jest.fn().mockResolvedValue(tutor) };
     qrCodePublisher = {
@@ -205,15 +207,33 @@ describe('PetService', () => {
       );
     });
 
-    it('should allow any vet to read the pet', async () => {
+    it('libera o vet que tem o pet na lista de atendidos', async () => {
       prisma.pet.findUnique.mockResolvedValue({
         ...petWithCard,
         tutorId: 'other',
       });
+      prisma.petAtendido.findUnique.mockResolvedValue({ id: 'vinculo-1' });
 
       const result = await service.findOne('pet-1', 'vet-1', true);
 
       expect(result.id).toBe('pet-1');
+      expect(prisma.petAtendido.findUnique).toHaveBeenCalledWith({
+        where: {
+          veterinarioId_petId: { veterinarioId: 'vet-1', petId: 'pet-1' },
+        },
+      });
+    });
+
+    it('barra o vet sem vínculo com o pet', async () => {
+      prisma.pet.findUnique.mockResolvedValue({
+        ...petWithCard,
+        tutorId: 'other',
+      });
+      prisma.petAtendido.findUnique.mockResolvedValue(null);
+
+      await expect(service.findOne('pet-1', 'vet-1', true)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('should throw NotFoundException when the pet is missing', async () => {
@@ -265,6 +285,54 @@ describe('PetService', () => {
       expect(prisma.pet.delete).toHaveBeenCalledWith({
         where: { id: 'pet-1' },
       });
+    });
+  });
+
+  describe('assertAccess', () => {
+    // Ponto único por onde passam vacina, vermífugo, medicação e histórico.
+    it('devolve o pet para o tutor dono', async () => {
+      prisma.pet.findUnique.mockResolvedValue(pet);
+
+      await expect(
+        service.assertAccess('pet-1', 'tutor-1', false),
+      ).resolves.toMatchObject({ id: 'pet-1' });
+      expect(prisma.petAtendido.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('barra o tutor que não é dono', async () => {
+      prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'outro' });
+
+      await expect(
+        service.assertAccess('pet-1', 'tutor-1', false),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('devolve o pet para o vet que o atende', async () => {
+      prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'outro' });
+      prisma.petAtendido.findUnique.mockResolvedValue({ id: 'vinculo-1' });
+
+      await expect(
+        service.assertAccess('pet-1', 'vet-1', true),
+      ).resolves.toMatchObject({ id: 'pet-1' });
+    });
+
+    it('barra o vet sem vínculo, ainda que o pet exista', async () => {
+      // O buraco que isto fecha: com o id do pet em mãos, qualquer vet
+      // verificado lia e escrevia no prontuário de qualquer animal da base.
+      prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'outro' });
+      prisma.petAtendido.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.assertAccess('pet-1', 'vet-1', true),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('devolve 404 para pet inexistente, mesmo para vet', async () => {
+      prisma.pet.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.assertAccess('missing', 'vet-1', true),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });

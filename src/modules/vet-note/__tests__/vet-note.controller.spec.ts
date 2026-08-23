@@ -29,6 +29,7 @@ describe('VetNoteController (integração)', () => {
       update: jest.Mock;
       delete: jest.Mock;
     };
+    petAtendido: { findUnique: jest.Mock };
   };
   let notifications: { schedulePush: jest.Mock };
 
@@ -57,8 +58,8 @@ describe('VetNoteController (integração)', () => {
         findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
-        update: jest.fn(),
       },
+      petAtendido: { findUnique: jest.fn() },
     };
     notifications = { schedulePush: jest.fn().mockResolvedValue(undefined) };
 
@@ -91,6 +92,8 @@ describe('VetNoteController (integração)', () => {
     harness.setUser(VET);
     prisma.pet.findUnique.mockResolvedValue(pet);
     prisma.veterinario.findUnique.mockResolvedValue({ id: 'vet-1' });
+    // Vínculo vet-pet presente por padrão; os casos de bloqueio zeram.
+    prisma.petAtendido.findUnique.mockResolvedValue({ id: 'vinculo-1' });
   });
 
   describe('POST /pets/:petId/clinical-notes', () => {
@@ -115,6 +118,19 @@ describe('VetNoteController (integração)', () => {
         .post('/pets/pet-1/clinical-notes')
         .send({ diagnostico: 'Otite' })
         .expect(201);
+    });
+
+    it('barra o VET que não atende o pet (403)', async () => {
+      // Escrever no prontuário exige o vínculo, não só o papel VET: sem a
+      // leitura do QR Code o pet não está na lista dele.
+      prisma.petAtendido.findUnique.mockResolvedValue(null);
+
+      await request(harness.app.getHttpServer())
+        .post('/pets/pet-1/clinical-notes')
+        .send({ diagnostico: 'Otite' })
+        .expect(403);
+
+      expect(prisma.notaClinica.create).not.toHaveBeenCalled();
     });
 
     it('proíbe TUTOR de criar nota (403)', async () => {
@@ -155,6 +171,16 @@ describe('VetNoteController (integração)', () => {
       await request(harness.app.getHttpServer())
         .get('/pets/pet-1/clinical-notes')
         .expect(403);
+    });
+
+    it('proíbe VET que não atende o pet (403)', async () => {
+      prisma.petAtendido.findUnique.mockResolvedValue(null);
+
+      await request(harness.app.getHttpServer())
+        .get('/pets/pet-1/clinical-notes')
+        .expect(403);
+
+      expect(prisma.notaClinica.findMany).not.toHaveBeenCalled();
     });
   });
 

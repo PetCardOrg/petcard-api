@@ -30,6 +30,7 @@ describe('DewormingController (integração)', () => {
       update: jest.Mock;
       delete: jest.Mock;
     };
+    petAtendido: { findUnique: jest.Mock };
   };
 
   const pet = { id: 'pet-1', tutorId: 'tutor-1' };
@@ -61,6 +62,7 @@ describe('DewormingController (integração)', () => {
         update: jest.fn(),
         delete: jest.fn(),
       },
+      petAtendido: { findUnique: jest.fn() },
     };
 
     comTransacao(prisma);
@@ -96,6 +98,8 @@ describe('DewormingController (integração)', () => {
     jest.clearAllMocks();
     harness.setUser(TUTOR);
     prisma.pet.findUnique.mockResolvedValue(pet);
+    // Vínculo vet-pet presente por padrão; os casos de bloqueio zeram.
+    prisma.petAtendido.findUnique.mockResolvedValue({ id: 'vinculo-1' });
   });
 
   it('POST cria registro para o dono (201)', async () => {
@@ -114,7 +118,7 @@ describe('DewormingController (integração)', () => {
     expect(res.body.product_name).toBe('Drontal');
   });
 
-  it('POST permite VET registrar em qualquer pet (201)', async () => {
+  it('POST permite ao VET que atende o pet registrar (201)', async () => {
     harness.setUser(VET);
     prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'outro' });
     prisma.dewormingRecord.create.mockResolvedValue(record);
@@ -127,6 +131,25 @@ describe('DewormingController (integração)', () => {
         applied_at: '2026-02-01',
       })
       .expect(201);
+  });
+
+  it('POST barra o VET que não atende o pet (403)', async () => {
+    // O papel VET, sozinho, não abre o prontuário: sem a leitura do QR Code
+    // o pet não está na lista dele.
+    harness.setUser(VET);
+    prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'outro' });
+    prisma.petAtendido.findUnique.mockResolvedValue(null);
+
+    await request(harness.app.getHttpServer())
+      .post('/pets/pet-1/dewormings')
+      .send({
+        pet_id: '11111111-1111-4111-8111-111111111111',
+        product_name: 'Drontal',
+        applied_at: '2026-02-01',
+      })
+      .expect(403);
+
+    expect(prisma.dewormingRecord.create).not.toHaveBeenCalled();
   });
 
   it('POST rejeita payload inválido (400)', async () => {
