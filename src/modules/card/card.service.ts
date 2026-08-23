@@ -99,6 +99,10 @@ export class CardService implements OnModuleInit {
    * clínicos sensíveis — notas clínicas (diagnóstico/prescrição/observações do
    * vet) e medicações em uso — NÃO são incluídos aqui; ficam restritos aos
    * endpoints autenticados do tutor/veterinário.
+   *
+   * O telefone do tutor é a exceção deliberada ao estreitamento da api#114:
+   * sem ele o QR na coleira identifica o pet perdido mas não deixa ninguém
+   * avisar o dono. Sai só quando o tutor preencheu o campo.
    */
   async findPublicByToken(
     token: string,
@@ -141,6 +145,7 @@ export class CardService implements OnModuleInit {
       photo_url: pet.photoUrl ?? undefined,
       qr_code_url: card.qrCodeUrl ?? undefined,
       tutor_name: pet.tutor.name,
+      tutor_phone: pet.tutor.phone ?? undefined,
       vaccines: pet.vaccineRecords.map((r) => ({
         id: r.id,
         pet_id: r.petId,

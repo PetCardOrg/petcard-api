@@ -162,7 +162,7 @@ describe('CardService', () => {
           birthDate: new Date('2022-03-10'),
           weight: 12.5,
           photoUrl: 'https://s3/pet.png',
-          tutor: { name: 'Alice' },
+          tutor: { name: 'Alice', phone: '+55 85 99999-0000' },
           vaccineRecords: [
             {
               id: 'v1',
@@ -200,6 +200,7 @@ describe('CardService', () => {
         birth_date: '2022-03-10',
         weight: 12.5,
         tutor_name: 'Alice',
+        tutor_phone: '+55 85 99999-0000',
         qr_code_url: 'https://s3/qr.png',
       });
       expect(result.vaccines).toHaveLength(1);
@@ -212,6 +213,21 @@ describe('CardService', () => {
       expect(
         (result as Record<string, unknown>).clinical_notes,
       ).toBeUndefined();
+    });
+
+    it('omite o telefone quando o tutor não cadastrou', async () => {
+      // O campo é opcional no cadastro: sem ele a carteira não pode inventar
+      // um contato nem mostrar "null" para quem achou o pet.
+      prisma.carteiraDigital.findUnique.mockResolvedValue(
+        makeCard({
+          pet: { ...makeCard().pet, tutor: { name: 'Alice', phone: null } },
+        }),
+      );
+
+      const result = await service.findPublicByToken('tok-abc');
+
+      expect(result.tutor_name).toBe('Alice');
+      expect(result.tutor_phone).toBeUndefined();
     });
 
     it('should map vaccine/deworming optional fields and withhold sensitive clinical data (api#114)', async () => {
