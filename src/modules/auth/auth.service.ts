@@ -9,13 +9,27 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { CreateVeterinarioDto } from '@petcardorg/shared';
+import { BCRYPT_ROUNDS } from '../../common/crypto/password.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CrmvVerificationService } from '../veterinario/crmv/crmv-verification.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { Role } from './enums/role.enum';
 
-const BCRYPT_ROUNDS = 10;
+/**
+ * Hash descartável, com o mesmo custo dos reais, comparado quando o e-mail não
+ * existe.
+ *
+ * Sem ele o login respondia na hora para e-mail inexistente e só depois do
+ * bcrypt para e-mail cadastrado — diferença medível, que transforma a rota num
+ * oráculo de quais e-mails têm conta no PetCard. Calculado uma vez, na
+ * primeira tentativa frustrada, para não custar 12 rounds no boot.
+ */
+let dummyHash: Promise<string> | undefined;
+function getDummyHash(): Promise<string> {
+  dummyHash ??= bcrypt.hash('petcard-dummy-password', BCRYPT_ROUNDS);
+  return dummyHash;
+}
 
 @Injectable()
 export class AuthService {
@@ -65,13 +79,12 @@ export class AuthService {
       where: { email: dto.email },
     });
 
-    if (!tutor) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
+    const passwordValid = await bcrypt.compare(
+      dto.password,
+      tutor?.password ?? (await getDummyHash()),
+    );
 
-    const passwordValid = await bcrypt.compare(dto.password, tutor.password);
-
-    if (!passwordValid) {
+    if (!tutor || !passwordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -160,13 +173,12 @@ export class AuthService {
       where: { email: dto.email },
     });
 
-    if (!vet) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
+    const passwordValid = await bcrypt.compare(
+      dto.password,
+      vet?.password ?? (await getDummyHash()),
+    );
 
-    const passwordValid = await bcrypt.compare(dto.password, vet.password);
-
-    if (!passwordValid) {
+    if (!vet || !passwordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
 

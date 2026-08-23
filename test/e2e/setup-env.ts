@@ -12,6 +12,10 @@ process.env.JWT_EXPIRES_IN ??= '1h';
 // Chave AES-256-GCM válida (32 bytes em hex). Só usada em fluxos de OAuth.
 process.env.ENCRYPTION_KEY ??= '0'.repeat(64);
 process.env.RABBITMQ_URL ??= 'amqp://localhost:5672';
+// A suíte registra dezenas de contas do mesmo IP; com o limite de produção ela
+// se auto-bloqueia no meio. O rate limit em si tem spec própria
+// (auth-throttle.e2e-spec.ts), que sobe um app com o teto apertado.
+process.env.AUTH_THROTTLE_LIMIT ??= '1000';
 process.env.FCM_ENABLED ??= 'false';
 // Geocoding/Places exigem a chave no construtor; os fluxos de clínica não são
 // exercitados no e2e, então um valor dummy só satisfaz o boot.

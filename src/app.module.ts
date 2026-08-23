@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { appConfig } from './config/app.config';
@@ -14,6 +15,7 @@ import { rabbitmqConfig } from './config/rabbitmq.config';
 import { reminderConfig } from './config/reminder.config';
 import { googleCalendarConfig } from './config/google-calendar.config';
 import { encryptionConfig } from './config/encryption.config';
+import { throttlerConfig } from './config/throttler.config';
 import { CryptoModule } from './common/crypto/crypto.module';
 import { AppointmentModule } from './modules/appointment/appointment.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -50,7 +52,27 @@ import { PrismaModule } from './prisma/prisma.module';
         reminderConfig,
         googleCalendarConfig,
         encryptionConfig,
+        throttlerConfig,
       ],
+    }),
+    // Registro único e global dos limites. Ficava dentro do CardModule, o que
+    // dava a impressão de que só a carteira pública podia ser limitada.
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        throttlers: [
+          {
+            name: 'auth',
+            ttl: config.get<number>('throttler.authTtlSeconds', 60) * 1000,
+            limit: config.get<number>('throttler.authLimit', 10),
+          },
+          {
+            name: 'public-card',
+            ttl: config.get<number>('card.publicThrottleTtlSeconds', 60) * 1000,
+            limit: config.get<number>('card.publicThrottleLimit', 10),
+          },
+        ],
+      }),
     }),
     ScheduleModule.forRoot(),
     CryptoModule,

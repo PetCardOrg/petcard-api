@@ -1,9 +1,11 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiConflictResponse,
   ApiOperation,
   ApiTags,
+  ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { CreateVeterinarioDto } from '@petcardorg/shared';
@@ -17,6 +19,10 @@ import { Role } from './enums/role.enum';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import type { JwtPayload } from './strategies/jwt.strategy';
 
+/**
+ * Rotas sem sessão levam rate limit por IP: são a superfície de força bruta de
+ * credenciais e de enumeração de contas cadastradas.
+ */
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
@@ -24,6 +30,13 @@ export class AuthController {
 
   @Post('register')
   @Public()
+  @UseGuards(ThrottlerGuard)
+  // O guard avalia TODOS os throttlers nomeados da configuração, não só o
+  // citado no @Throttle. Sem dispensar o da carteira pública, o limite dela
+  // (bem mais apertado) é que valeria aqui.
+  @Throttle({ auth: {} })
+  @SkipThrottle({ 'public-card': true })
+  @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({ summary: 'Registrar novo tutor' })
   @ApiConflictResponse({ description: 'Email já cadastrado' })
   register(@Body() dto: RegisterDto) {
@@ -32,6 +45,13 @@ export class AuthController {
 
   @Post('login')
   @Public()
+  @UseGuards(ThrottlerGuard)
+  // O guard avalia TODOS os throttlers nomeados da configuração, não só o
+  // citado no @Throttle. Sem dispensar o da carteira pública, o limite dela
+  // (bem mais apertado) é que valeria aqui.
+  @Throttle({ auth: {} })
+  @SkipThrottle({ 'public-card': true })
+  @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({ summary: 'Login do tutor (JWT com role TUTOR)' })
   @ApiUnauthorizedResponse({ description: 'Credenciais inválidas' })
   login(@Body() dto: LoginDto) {
@@ -49,6 +69,13 @@ export class AuthController {
 
   @Post('veterinario/register')
   @Public()
+  @UseGuards(ThrottlerGuard)
+  // O guard avalia TODOS os throttlers nomeados da configuração, não só o
+  // citado no @Throttle. Sem dispensar o da carteira pública, o limite dela
+  // (bem mais apertado) é que valeria aqui.
+  @Throttle({ auth: {} })
+  @SkipThrottle({ 'public-card': true })
+  @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({
     summary: 'Cadastrar veterinário (JWT com role VET)',
     description:
@@ -63,6 +90,13 @@ export class AuthController {
 
   @Post('veterinario/login')
   @Public()
+  @UseGuards(ThrottlerGuard)
+  // O guard avalia TODOS os throttlers nomeados da configuração, não só o
+  // citado no @Throttle. Sem dispensar o da carteira pública, o limite dela
+  // (bem mais apertado) é que valeria aqui.
+  @Throttle({ auth: {} })
+  @SkipThrottle({ 'public-card': true })
+  @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({ summary: 'Login do veterinário (JWT com role VET)' })
   @ApiUnauthorizedResponse({ description: 'Credenciais inválidas' })
   loginVeterinario(@Body() dto: LoginDto) {

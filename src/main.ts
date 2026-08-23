@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import {
   CALENDAR_SYNC_DLQ_ROUTING_KEY,
@@ -13,9 +15,39 @@ import {
   QR_CODE_DLX,
 } from './modules/queue/queue.constants';
 
+/** Tamanho máximo de um corpo JSON aceito. Uploads vão por multipart. */
+const JSON_BODY_LIMIT = '1mb';
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
+
+  // Cabeçalhos de segurança (HSTS, X-Content-Type-Options, frame-ancestors e
+  // afins). A API responde JSON e as duas páginas HTML do fluxo OAuth, que não
+  // carregam script externo — daí a CSP fechada.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'none'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          connectSrc: ["'self'"],
+          imgSrc: ["'self'", 'data:'],
+          formAction: ["'none'"],
+          frameAncestors: ["'none'"],
+          baseUri: ["'none'"],
+        },
+      },
+      crossOriginResourcePolicy: { policy: 'same-site' },
+      referrerPolicy: { policy: 'no-referrer' },
+    }),
+  );
+
+  // Teto do corpo das requisições: sem ele o Express aceita payload de
+  // qualquer tamanho e um POST grande vira consumo de memória do processo.
+  app.use(json({ limit: JSON_BODY_LIMIT }));
+  app.use(urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
 
   app.enableCors({
     origin: config.get<string[]>('app.corsOrigins'),

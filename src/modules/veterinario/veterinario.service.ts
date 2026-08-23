@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, Veterinario } from '@prisma/client';
+import { BCRYPT_ROUNDS } from '../../common/crypto/password.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   PetAtendidoResponseDto,
@@ -15,7 +16,6 @@ import { DashboardQueryDto } from './dto/dashboard-query.dto';
 const bcrypt = require('bcrypt') as {
   hash(data: string, rounds: number): Promise<string>;
 };
-const BCRYPT_ROUNDS = 10;
 
 export type VeterinarioResponse = Omit<Veterinario, 'password'>;
 
