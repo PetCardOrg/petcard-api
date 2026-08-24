@@ -19,7 +19,7 @@ import { Auth } from '../auth/decorators/auth.decorator';
 import { Role } from '../auth/enums/role.enum';
 import { MAX_FILE_SIZE_BYTES, UploadService } from './upload.service';
 
-const ALLOWED_FOLDERS = ['pets', 'tutors'] as const;
+const ALLOWED_FOLDERS = ['pets', 'tutors', 'vets'] as const;
 type AllowedFolder = (typeof ALLOWED_FOLDERS)[number];
 
 @ApiTags('upload')
