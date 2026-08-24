@@ -13,7 +13,7 @@ import { TutorService } from '../tutor.service';
 describe('TutorController (integração)', () => {
   let harness: ControllerHarness;
   let prisma: {
-    tutor: { findUnique: jest.Mock; update: jest.Mock };
+    tutor: { findUnique: jest.Mock; update: jest.Mock; delete: jest.Mock };
     petAtendido: { findFirst: jest.Mock };
   };
 
@@ -33,7 +33,7 @@ describe('TutorController (integração)', () => {
 
   beforeAll(async () => {
     prisma = {
-      tutor: { findUnique: jest.fn(), update: jest.fn() },
+      tutor: { findUnique: jest.fn(), update: jest.fn(), delete: jest.fn() },
       petAtendido: { findFirst: jest.fn() },
     };
 
@@ -137,6 +137,49 @@ describe('TutorController (integração)', () => {
       await request(harness.app.getHttpServer())
         .get('/tutors/missing')
         .expect(404);
+    });
+  });
+
+  describe('DELETE /tutors/me', () => {
+    it('apaga a conta do tutor autenticado (204)', async () => {
+      prisma.tutor.delete.mockResolvedValue(tutor);
+
+      await request(harness.app.getHttpServer())
+        .delete('/tutors/me')
+        .expect(204);
+
+      // Sempre a conta de quem está autenticado, nunca um id do corpo.
+      expect(prisma.tutor.delete).toHaveBeenCalledWith({
+        where: { id: 'tutor-1' },
+      });
+    });
+
+    it('proíbe VET de apagar conta de tutor (403)', async () => {
+      harness.setUser(VET);
+
+      await request(harness.app.getHttpServer())
+        .delete('/tutors/me')
+        .expect(403);
+
+      expect(prisma.tutor.delete).not.toHaveBeenCalled();
+    });
+
+    it('exige autenticação (401)', async () => {
+      harness.setUser(null);
+
+      await request(harness.app.getHttpServer())
+        .delete('/tutors/me')
+        .expect(401);
+    });
+
+    it('devolve 404 se a conta já não existe', async () => {
+      prisma.tutor.findUnique.mockResolvedValue(null);
+
+      await request(harness.app.getHttpServer())
+        .delete('/tutors/me')
+        .expect(404);
+
+      expect(prisma.tutor.delete).not.toHaveBeenCalled();
     });
   });
 });

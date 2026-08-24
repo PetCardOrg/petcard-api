@@ -82,6 +82,7 @@ export class VeterinarioService {
       data.crmvSituacao = null;
     }
     if (dto.telefone !== undefined) data.telefone = dto.telefone;
+    if (dto.foto_url !== undefined) data.photoUrl = dto.foto_url;
     if (dto.password !== undefined) {
       data.password = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
     }

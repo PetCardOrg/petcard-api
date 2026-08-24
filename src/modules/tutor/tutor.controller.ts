@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+} from '@nestjs/common';
 import {
   ApiForbiddenResponse,
   ApiNotFoundResponse,
@@ -34,6 +43,20 @@ export class TutorController {
     return this.tutorService.updateById(user.sub, dto);
   }
 
+  @Delete('me')
+  @Auth(Role.TUTOR)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Excluir definitivamente a conta do tutor autenticado',
+    description:
+      'Apaga a conta e tudo que depende dela: pets, prontuário, carteira ' +
+      'digital, agendamentos e notificações. Não há desfazer.',
+  })
+  async removeMe(@CurrentUser() user: JwtPayload): Promise<void> {
+    return this.tutorService.removeById(user.sub);
+  }
+
+  // Declarada depois de 'me', senão a rota por id capturaria a palavra.
   @Get(':id')
   @Auth(Role.VET)
   @ApiOperation({
