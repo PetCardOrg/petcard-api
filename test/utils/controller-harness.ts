@@ -7,6 +7,7 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { ThrottlerModule } from '@nestjs/throttler';
 import type { App } from 'supertest/types';
 import { JwtAuthGuard } from '../../src/modules/auth/guards/jwt-auth.guard';
 import { JwtPayload } from '../../src/modules/auth/strategies/jwt.strategy';
@@ -46,6 +47,17 @@ export async function createControllerTestApp(opts: {
   let currentUser: TestUser | null = TUTOR;
 
   const moduleRef: TestingModule = await Test.createTestingModule({
+    // Os limites reais entram em produção pelo AppModule. Aqui os nomes
+    // precisam existir para o ThrottlerGuard resolver, com teto alto para o
+    // rate limit não reprovar suíte nenhuma.
+    imports: [
+      ThrottlerModule.forRoot({
+        throttlers: [
+          { name: 'auth', ttl: 60_000, limit: 10_000 },
+          { name: 'public-card', ttl: 60_000, limit: 10_000 },
+        ],
+      }),
+    ],
     controllers: opts.controllers,
     providers: opts.providers,
   })

@@ -1,5 +1,5 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
-import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import {
   ApiForbiddenResponse,
   ApiNotFoundResponse,
@@ -61,6 +61,9 @@ export class CardController {
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ 'public-card': {} })
+  // Pelo mesmo motivo do @SkipThrottle no auth.controller: o guard olharia
+  // também o throttler de autenticação.
+  @SkipThrottle({ auth: true })
   @ApiOperation({
     summary: 'Carteira pública por token do QR Code (sem autenticação)',
   })

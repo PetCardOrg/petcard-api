@@ -1,5 +1,7 @@
 import { appConfig } from '../app.config';
 import { firebaseConfig } from '../firebase.config';
+import { authConfig } from '../auth.config';
+import { throttlerConfig } from '../throttler.config';
 
 /**
  * Só o que morde de verdade na configuração.
@@ -17,6 +19,9 @@ const CHAVES = [
   'FIREBASE_PROJECT_ID',
   'FIREBASE_CLIENT_EMAIL',
   'FIREBASE_PRIVATE_KEY',
+  'AUTH_THROTTLE_LIMIT',
+  'AUTH_THROTTLE_TTL_SECONDS',
+  'JWT_SECRET',
 ] as const;
 
 describe('configuração de ambiente', () => {
@@ -94,6 +99,59 @@ describe('configuração de ambiente', () => {
       // A chave vem do JSON do service account com `\n` literal; sem desescapar,
       // o Firebase Admin recusa a credencial.
       expect(firebaseConfig().privateKey).toBe('-----BEGIN\nKEY-----');
+    });
+  });
+
+  describe('rate limit das rotas de autenticação', () => {
+    it('usa os padrões quando o ambiente não diz nada', () => {
+      expect(throttlerConfig()).toEqual({ authTtlSeconds: 60, authLimit: 10 });
+    });
+
+    it('respeita os valores declarados', () => {
+      process.env.AUTH_THROTTLE_LIMIT = '3';
+      process.env.AUTH_THROTTLE_TTL_SECONDS = '120';
+
+      expect(throttlerConfig()).toEqual({
+        authTtlSeconds: 120,
+        authLimit: 3,
+      });
+    });
+
+    it('ignora valor inválido em vez de desligar o limite', () => {
+      // NaN como limite faz o throttler liberar tudo: o erro de digitação
+      // derrubaria em silêncio a proteção de força bruta.
+      process.env.AUTH_THROTTLE_LIMIT = 'dez';
+      process.env.AUTH_THROTTLE_TTL_SECONDS = '0';
+
+      expect(throttlerConfig()).toEqual({ authTtlSeconds: 60, authLimit: 10 });
+    });
+  });
+
+  describe('segredo do JWT', () => {
+    it('recusa subir em produção sem segredo', () => {
+      process.env.NODE_ENV = 'production';
+
+      expect(() => authConfig()).toThrow(/JWT_SECRET is required/);
+    });
+
+    it('recusa segredo curto demais em produção', () => {
+      // Segredo curto é adivinhável, e quem o adivinha emite token de
+      // qualquer usuário.
+      process.env.NODE_ENV = 'production';
+      process.env.JWT_SECRET = 'curto';
+
+      expect(() => authConfig()).toThrow(/at least 32 characters/);
+    });
+
+    it('aceita segredo longo em produção', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.JWT_SECRET = 'a'.repeat(32);
+
+      expect(authConfig().jwtSecret).toHaveLength(32);
+    });
+
+    it('não trava o desenvolvimento local sem segredo', () => {
+      expect(authConfig().jwtSecret).toBeUndefined();
     });
   });
 });
