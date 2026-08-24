@@ -113,6 +113,23 @@ describe('VeterinarioService', () => {
       });
     });
 
+    it('devolve a foto salva em foto_url, não photoUrl', async () => {
+      // photoUrl é o nome do campo no Prisma Client (a coluna é que se chama
+      // photo_url via @map) — a tela de perfil do vet lê a resposta em
+      // snake_case (mesma causa do bug já corrigido em tutor.service.ts).
+      const url = 'https://bucket.s3.us-east-1.amazonaws.com/vets/foto.png';
+      prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);
+      prisma.veterinario.update.mockResolvedValue({
+        ...vetFixture,
+        photoUrl: url,
+      });
+
+      const resposta = await service.update('vet-1', { foto_url: url });
+
+      expect(resposta.foto_url).toBe(url);
+      expect(resposta).not.toHaveProperty('photoUrl');
+    });
+
     it('não toca na foto quando o campo não vem no pedido', async () => {
       // Editar só o nome não pode apagar a foto já cadastrada.
       prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);

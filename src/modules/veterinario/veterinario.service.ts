@@ -17,7 +17,9 @@ const bcrypt = require('bcrypt') as {
   hash(data: string, rounds: number): Promise<string>;
 };
 
-export type VeterinarioResponse = Omit<Veterinario, 'password'>;
+export type VeterinarioResponse = Omit<Veterinario, 'password' | 'photoUrl'> & {
+  foto_url: string | null;
+};
 
 export interface DashboardPetItem {
   id: string;
@@ -37,10 +39,17 @@ export interface PaginatedResponse<T> {
   totalPages: number;
 }
 
+/**
+ * `photoUrl` também precisa virar `foto_url` aqui: é o nome da coluna
+ * (`@map`), não do campo no Prisma Client, e a tela de perfil do vet (web)
+ * lê a resposta em snake_case. Sem a troca, o PATCH devolvia `photoUrl` e a
+ * foto salva nunca era reconhecida na resposta (mesma causa do bug já
+ * corrigido em tutor.service.ts).
+ */
 function toResponse(vet: Veterinario): VeterinarioResponse {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { password, ...rest } = vet;
-  return rest;
+  const { password, photoUrl, ...rest } = vet;
+  return { ...rest, foto_url: photoUrl };
 }
 
 @Injectable()
