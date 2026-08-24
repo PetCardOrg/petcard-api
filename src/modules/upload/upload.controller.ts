@@ -17,7 +17,7 @@ import {
 } from '@nestjs/swagger';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { Role } from '../auth/enums/role.enum';
-import { UploadService } from './upload.service';
+import { MAX_FILE_SIZE_BYTES, UploadService } from './upload.service';
 
 const ALLOWED_FOLDERS = ['pets', 'tutors'] as const;
 type AllowedFolder = (typeof ALLOWED_FOLDERS)[number];
@@ -29,7 +29,12 @@ export class UploadController {
 
   @Post('image')
   @Auth(Role.TUTOR, Role.VET)
-  @UseInterceptors(FileInterceptor('file'))
+  // O teto vai no multer, não só na validação: sem ele o arquivo inteiro era
+  // lido para a memória antes de alguém conferir o tamanho, e um POST de
+  // gigabytes derrubava o processo antes de chegar na checagem.
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: MAX_FILE_SIZE_BYTES } }),
+  )
   @ApiOperation({ summary: 'Upload de imagem para o S3 (máx. 5MB)' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
