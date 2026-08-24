@@ -8,7 +8,9 @@ import { UpdateTutorDto } from '@petcardorg/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /** Tutor sem o hash da senha — o que pode sair da API. */
-export type TutorPublico = Omit<Tutor, 'password'>;
+export type TutorPublico = Omit<Tutor, 'password' | 'profileImageUrl'> & {
+  profile_image_url: string | null;
+};
 
 /**
  * O hash da senha nunca acompanha o tutor para fora do serviço.
@@ -17,11 +19,16 @@ export type TutorPublico = Omit<Tutor, 'password'>;
  * direto: o hash bcrypt do tutor saía em `GET /tutors/me`, `PATCH /tutors/me`
  * e `GET /tutors/:id` — este último legível por qualquer veterinário logado,
  * o que dava a ele material para quebra offline de senha.
+ *
+ * `profileImageUrl` também precisa virar `profile_image_url` aqui: é o nome
+ * da coluna (`@map`), não do campo no Prisma Client, e `TutorResponseDto` no
+ * shared contrata a resposta em snake_case. Sem a troca, o tutor.service do
+ * mobile lia `undefined` e a foto de perfil salva nunca aparecia de volta.
  */
 function semSenha(tutor: Tutor): TutorPublico {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { password, ...rest } = tutor;
-  return rest;
+  const { password, profileImageUrl, ...rest } = tutor;
+  return { ...rest, profile_image_url: profileImageUrl };
 }
 
 @Injectable()

@@ -92,6 +92,29 @@ describe('TutorController (integração)', () => {
       });
     });
 
+    it('devolve a foto salva em profile_image_url, não profileImageUrl', async () => {
+      // profileImageUrl é o nome do campo no Prisma Client (a coluna é que se
+      // chama profile_image_url via @map) — a resposta view precisa da chave
+      // em snake_case, que é o que o app mobile lê.
+      const url = 'https://bucket.s3.amazonaws.com/tutors/foto.jpg';
+      prisma.tutor.update.mockResolvedValue({
+        ...tutor,
+        profileImageUrl: url,
+      });
+
+      const res = await request(harness.app.getHttpServer())
+        .patch('/tutors/me')
+        .send({ profile_image_url: url })
+        .expect(200);
+
+      expect(res.body.profile_image_url).toBe(url);
+      expect(res.body).not.toHaveProperty('profileImageUrl');
+      expect(prisma.tutor.update).toHaveBeenCalledWith({
+        where: { id: 'tutor-1' },
+        data: { profileImageUrl: url },
+      });
+    });
+
     it('rejeita email inválido (400)', async () => {
       await request(harness.app.getHttpServer())
         .patch('/tutors/me')
