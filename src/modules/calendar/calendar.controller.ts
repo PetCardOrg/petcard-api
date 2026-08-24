@@ -68,7 +68,10 @@ export class CalendarController {
     summary: 'Callback OAuth do Google (redirecionamento do consentimento)',
   })
   @ApiQuery({ name: 'code', description: 'Código de autorização do Google' })
-  @ApiQuery({ name: 'state', description: 'Id do tutor originador do fluxo' })
+  @ApiQuery({
+    name: 'state',
+    description: 'State assinado emitido em GET /calendar/connect',
+  })
   @ApiQuery({
     name: 'error',
     required: false,
@@ -76,7 +79,7 @@ export class CalendarController {
   })
   async callback(
     @Query('code') code: string,
-    @Query('state') tutorId: string,
+    @Query('state') state: string,
     @Query('error') error: string,
     @Res() res: Response,
   ) {
@@ -96,9 +99,9 @@ export class CalendarController {
       return;
     }
 
-    if (!code || !tutorId) {
+    if (!code || !state) {
       this.logger.warn(
-        `Callback do Google Calendar sem parâmetros (code=${!!code}, state=${!!tutorId})`,
+        `Callback do Google Calendar sem parâmetros (code=${!!code}, state=${!!state})`,
       );
       res
         .status(HttpStatus.BAD_REQUEST)
@@ -107,6 +110,23 @@ export class CalendarController {
             false,
             'Link inválido',
             'Este endereço não veio de uma autorização válida do Google. Inicie a conexão pelo app.',
+          ),
+        );
+      return;
+    }
+
+    let tutorId: string;
+    try {
+      tutorId = this.googleCalendarService.resolveState(state);
+    } catch {
+      this.logger.warn('Callback do Google Calendar com state inválido.');
+      res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          this.renderCallbackPage(
+            false,
+            'Link inválido',
+            'Este endereço não veio de uma autorização válida do Google, ou expirou. Inicie a conexão pelo app.',
           ),
         );
       return;
@@ -126,15 +146,15 @@ export class CalendarController {
         `Falha ao concluir o callback do Google Calendar (tutor ${tutorId})`,
         err instanceof Error ? err.stack : err,
       );
+      // A mensagem do erro fica no log, não na página: ela carrega detalhe
+      // interno (configuração, resposta do Google) para uma rota pública.
       res
         .status(HttpStatus.INTERNAL_SERVER_ERROR)
         .send(
           this.renderCallbackPage(
             false,
             'Não foi possível conectar',
-            err instanceof Error
-              ? err.message
-              : 'Erro inesperado ao conectar o Google Agenda.',
+            'Erro inesperado ao conectar o Google Agenda. Tente novamente pelo app.',
           ),
         );
     }

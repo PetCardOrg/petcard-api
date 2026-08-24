@@ -1,10 +1,12 @@
 import {
   BadGatewayException,
+  BadRequestException,
   Injectable,
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { google, calendar_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -15,6 +17,9 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
 
 /** Validade assumida quando o Google não informa expiry_date. */
 const DEFAULT_TOKEN_TTL_MS = 3_600_000;
+
+/** Janela de vida do `state` do OAuth — tempo de dar o consentimento. */
+const STATE_TTL_MS = 10 * 60 * 1000;
 
 @Injectable()
 export class GoogleCalendarService {
@@ -34,6 +39,65 @@ export class GoogleCalendarService {
       this.configService.get<string>('googleCalendar.clientSecret') ?? '';
     this.redirectUri =
       this.configService.get<string>('googleCalendar.redirectUri') ?? '';
+  }
+
+  /**
+   * Assina o `state` do OAuth com o id do tutor, um nonce e um prazo.
+   *
+   * O `state` viajava como o id do tutor em texto puro, e o callback é uma
+   * rota pública: bastava chamar `/calendar/callback?code=<código do
+   * atacante>&state=<id da vítima>` para pendurar a agenda do atacante na
+   * conta da vítima — e passar a receber, no Google Calendar dele, todos os
+   * compromissos que ela criasse. Sem assinatura o parâmetro não prova nada
+   * sobre quem começou o fluxo.
+   */
+  private signState(tutorId: string): string {
+    const nonce = randomBytes(16).toString('base64url');
+    const expiresAt = Date.now() + STATE_TTL_MS;
+    const payload = `${tutorId}.${nonce}.${expiresAt}`;
+    return `${payload}.${this.stateSignature(payload)}`;
+  }
+
+  /**
+   * Confere a assinatura e o prazo do `state` e devolve o tutor de origem.
+   * Qualquer inconsistência derruba o fluxo antes de trocar o código.
+   */
+  resolveState(state: string): string {
+    const partes = state?.split('.') ?? [];
+    if (partes.length !== 4) {
+      throw new BadRequestException('Parâmetro state inválido.');
+    }
+
+    const [tutorId, nonce, expiresAtRaw, assinatura] = partes;
+    const esperada = this.stateSignature(`${tutorId}.${nonce}.${expiresAtRaw}`);
+
+    const recebida = Buffer.from(assinatura);
+    const referencia = Buffer.from(esperada);
+    if (
+      recebida.length !== referencia.length ||
+      !timingSafeEqual(recebida, referencia)
+    ) {
+      throw new BadRequestException('Parâmetro state inválido.');
+    }
+
+    const expiresAt = Number(expiresAtRaw);
+    if (!Number.isFinite(expiresAt) || Date.now() > expiresAt) {
+      throw new BadRequestException(
+        'A autorização expirou. Inicie a conexão pelo app novamente.',
+      );
+    }
+
+    return tutorId;
+  }
+
+  private stateSignature(payload: string): string {
+    const secret = this.configService.get<string>('auth.jwtSecret');
+    if (!secret) {
+      throw new Error(
+        'JWT_SECRET é obrigatória para assinar o state do OAuth.',
+      );
+    }
+    return createHmac('sha256', secret).update(payload).digest('base64url');
   }
 
   private get isConfigured(): boolean {
@@ -56,7 +120,7 @@ export class GoogleCalendarService {
       access_type: 'offline',
       scope: SCOPES,
       prompt: 'consent',
-      state: tutorId,
+      state: this.signState(tutorId),
     });
   }
 
