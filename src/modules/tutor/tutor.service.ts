@@ -62,6 +62,20 @@ export class TutorService {
     return tutor;
   }
 
+  /**
+   * Apaga a conta do tutor e tudo que pende dela.
+   *
+   * O cascata leva pets, prontuário, carteira, agendamentos e notificações —
+   * inclusive a trilha de ações clínicas dos pets dele, que é a consequência
+   * de "exclusão definitiva" pedida por quem apaga a conta. A trilha das ações
+   * que um veterinário registrou em pets de OUTROS tutores não é afetada:
+   * nome e CRMV do autor são copiados na gravação, não referenciados.
+   */
+  async removeById(id: string): Promise<void> {
+    await this.findById(id);
+    await this.prisma.tutor.delete({ where: { id } });
+  }
+
   async findByEmail(email: string): Promise<Tutor | null> {
     return this.prisma.tutor.findUnique({ where: { email } });
   }

@@ -211,6 +211,7 @@ export class AuthService {
       email: vet.email,
       crmv: vet.crmv,
       telefone: vet.telefone,
+      foto_url: vet.photoUrl ?? undefined,
       role: Role.VET,
     };
   }

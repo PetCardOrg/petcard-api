@@ -100,6 +100,29 @@ describe('VeterinarioService', () => {
       );
     });
 
+    it('grava a foto de perfil no campo do banco', async () => {
+      prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+
+      await service.update('vet-1', {
+        foto_url: 'https://bucket.s3.us-east-1.amazonaws.com/vets/foto.png',
+      });
+
+      expect(dadosGravados()).toEqual({
+        photoUrl: 'https://bucket.s3.us-east-1.amazonaws.com/vets/foto.png',
+      });
+    });
+
+    it('não toca na foto quando o campo não vem no pedido', async () => {
+      // Editar só o nome não pode apagar a foto já cadastrada.
+      prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+
+      await service.update('vet-1', { nome: 'Dra. Camila Ferreira' });
+
+      expect(dadosGravados()).not.toHaveProperty('photoUrl');
+    });
+
     it('derruba a verificação quando o CRMV muda', async () => {
       prisma.veterinario.findUnique
         .mockResolvedValueOnce(vetFixture)

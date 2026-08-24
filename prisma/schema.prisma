@@ -125,7 +125,7 @@ model Pet {
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
-  tutor             Tutor              @relation(fields: [tutorId], references: [id])
+  tutor             Tutor              @relation(fields: [tutorId], references: [id], onDelete: Cascade)
   vaccineRecords    VaccineRecord[]
   dewormingRecords  DewormingRecord[]
   medicationRecords MedicationRecord[]
@@ -277,6 +277,7 @@ model Veterinario {
   password String
   crmv     String  @unique
   telefone String?
+  photoUrl String? @map("photo_url")
 
   /// Verificação do CRMV numa base externa (api#113). Nulo = não verificado.
   crmvVerifiedAt DateTime? @map("crmv_verified_at")
