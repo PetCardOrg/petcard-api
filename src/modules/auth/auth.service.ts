@@ -69,6 +69,8 @@ export class AuthService {
         id: tutor.id,
         name: tutor.name,
         email: tutor.email,
+        phone: tutor.phone ?? undefined,
+        profile_image_url: tutor.profileImageUrl ?? undefined,
         role: tutor.role,
       },
     };
@@ -96,6 +98,8 @@ export class AuthService {
         id: tutor.id,
         name: tutor.name,
         email: tutor.email,
+        phone: tutor.phone ?? undefined,
+        profile_image_url: tutor.profileImageUrl ?? undefined,
         role: tutor.role,
       },
     };
@@ -191,6 +195,8 @@ export class AuthService {
         nome: vet.nome,
         email: vet.email,
         crmv: vet.crmv,
+        telefone: vet.telefone,
+        foto_url: vet.photoUrl ?? undefined,
         role: Role.VET,
       },
     };
