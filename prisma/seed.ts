@@ -1,4 +1,4 @@
-import { PrismaClient, Role, Species, Sex } from '@prisma/client';
+import { PrismaClient, Species, Sex } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -10,19 +10,11 @@ const tutors = [
     name: 'Ana Carolina Silva',
     email: 'ana.silva@example.com',
     phone: '+5511987654321',
-    role: Role.TUTOR,
   },
   {
     name: 'Bruno Henrique Costa',
     email: 'bruno.costa@example.com',
     phone: '+5521991234567',
-    role: Role.TUTOR,
-  },
-  {
-    name: 'Dra. Camila Ferreira',
-    email: 'camila.ferreira@vet.example.com',
-    phone: '+5531988887777',
-    role: Role.VET,
   },
 ];
 
@@ -269,7 +261,6 @@ async function main() {
         update: {
           name: tutor.name,
           phone: tutor.phone,
-          role: tutor.role,
         },
         create: { ...tutor, password: hashedPassword },
       });

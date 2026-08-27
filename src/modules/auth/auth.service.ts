@@ -61,7 +61,7 @@ export class AuthService {
       },
     });
 
-    const token = this.signToken(tutor.id, tutor.email, tutor.role as Role);
+    const token = this.signToken(tutor.id, tutor.email, Role.TUTOR);
 
     return {
       access_token: token,
@@ -71,7 +71,7 @@ export class AuthService {
         email: tutor.email,
         phone: tutor.phone ?? undefined,
         profile_image_url: tutor.profileImageUrl ?? undefined,
-        role: tutor.role,
+        role: Role.TUTOR,
       },
     };
   }
@@ -90,7 +90,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const token = this.signToken(tutor.id, tutor.email, tutor.role as Role);
+    const token = this.signToken(tutor.id, tutor.email, Role.TUTOR);
 
     return {
       access_token: token,
@@ -100,7 +100,7 @@ export class AuthService {
         email: tutor.email,
         phone: tutor.phone ?? undefined,
         profile_image_url: tutor.profileImageUrl ?? undefined,
-        role: tutor.role,
+        role: Role.TUTOR,
       },
     };
   }
