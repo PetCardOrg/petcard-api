@@ -33,6 +33,8 @@ describe('AuthService', () => {
     name: 'Alice',
     email: 'alice@example.com',
     password: 'hashed-password',
+    phone: '85988887777',
+    profileImageUrl: 'https://cdn.petcard.com/tutor-1.jpg',
     role: 'TUTOR',
   };
 
@@ -96,6 +98,23 @@ describe('AuthService', () => {
         }),
       ).rejects.toThrow(ConflictException);
     });
+
+    it('inclui phone e profile_image_url na resposta', async () => {
+      prisma.tutor.findUnique.mockResolvedValue(null);
+      prisma.tutor.create.mockResolvedValue(tutorFixture);
+      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
+
+      const result = await service.register({
+        name: 'Alice',
+        email: 'alice@example.com',
+        password: '123456',
+      });
+
+      expect(result.user.phone).toBe('85988887777');
+      expect(result.user.profile_image_url).toBe(
+        'https://cdn.petcard.com/tutor-1.jpg',
+      );
+    });
   });
 
   describe('login', () => {
@@ -109,6 +128,21 @@ describe('AuthService', () => {
       });
 
       expect(result.access_token).toBe('jwt-token');
+    });
+
+    it('inclui phone e profile_image_url na resposta (regressão: sumiam após logout/login)', async () => {
+      prisma.tutor.findUnique.mockResolvedValue(tutorFixture);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      const result = await service.login({
+        email: 'alice@example.com',
+        password: '123456',
+      });
+
+      expect(result.user.phone).toBe('85988887777');
+      expect(result.user.profile_image_url).toBe(
+        'https://cdn.petcard.com/tutor-1.jpg',
+      );
     });
 
     it('should throw UnauthorizedException for wrong password', async () => {
@@ -238,6 +272,7 @@ describe('AuthService', () => {
       password: 'hashed-password',
       crmv: 'CRMV-SP-12345',
       telefone: '11999990000',
+      photoUrl: 'https://cdn.petcard.com/vet-1.jpg',
     };
 
     it('should return token for valid vet credentials', async () => {
@@ -253,6 +288,19 @@ describe('AuthService', () => {
       expect(result.user.nome).toBe('Dr. Bob');
       expect(result.user.crmv).toBe('CRMV-SP-12345');
       expect(result.user.role).toBe('VET');
+    });
+
+    it('inclui telefone e foto_url na resposta (regressão: sumiam após logout/login)', async () => {
+      prisma.veterinario.findUnique.mockResolvedValue(vetFixture);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      const result = await service.loginVeterinario({
+        email: 'bob@vet.com',
+        password: '123456',
+      });
+
+      expect(result.user.telefone).toBe('11999990000');
+      expect(result.user.foto_url).toBe('https://cdn.petcard.com/vet-1.jpg');
     });
 
     it('should throw UnauthorizedException for unknown vet email', async () => {
