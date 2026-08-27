@@ -69,7 +69,6 @@ model Tutor {
   password        String
   phone           String?
   profileImageUrl String?  @map("profile_image_url")
-  role            Role     @default(TUTOR)
   timezone        String   @default("America/Fortaleza")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
