@@ -261,8 +261,16 @@ async function main() {
         update: {
           name: tutor.name,
           phone: tutor.phone,
+          emailVerifiedAt: new Date(),
         },
-        create: { ...tutor, password: hashedPassword },
+        // Contas de demo já nascem verificadas — a verificação de e-mail é
+        // "soft" (não bloqueia login), mas assim o roteiro dos UCs não vê o
+        // aviso de "confirme seu e-mail".
+        create: {
+          ...tutor,
+          password: hashedPassword,
+          emailVerifiedAt: new Date(),
+        },
       });
     }
     console.log(

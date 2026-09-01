@@ -14,7 +14,9 @@ import { googleMapsConfig } from './config/google-maps.config';
 import { rabbitmqConfig } from './config/rabbitmq.config';
 import { reminderConfig } from './config/reminder.config';
 import { googleCalendarConfig } from './config/google-calendar.config';
+import { googleAuthConfig } from './config/google-auth.config';
 import { encryptionConfig } from './config/encryption.config';
+import { mailConfig } from './config/mail.config';
 import { throttlerConfig } from './config/throttler.config';
 import { CryptoModule } from './common/crypto/crypto.module';
 import { AppointmentModule } from './modules/appointment/appointment.module';
@@ -51,7 +53,9 @@ import { PrismaModule } from './prisma/prisma.module';
         rabbitmqConfig,
         reminderConfig,
         googleCalendarConfig,
+        googleAuthConfig,
         encryptionConfig,
+        mailConfig,
         throttlerConfig,
       ],
     }),

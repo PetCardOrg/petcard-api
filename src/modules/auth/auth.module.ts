@@ -5,8 +5,11 @@ import { JwtModule, type JwtModuleOptions } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { VeterinarioModule } from '../veterinario/veterinario.module';
+import { MailModule } from '../mail/mail.module';
 import { AuthController } from './auth.controller';
+import { AuthWebController } from './auth-web.controller';
 import { AuthService } from './auth.service';
+import { AuthTokenService } from './auth-token.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { JwtStrategy } from './strategies/jwt.strategy';
@@ -24,13 +27,15 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       }),
     }),
     PrismaModule,
+    MailModule,
     // O cadastro de veterinário verifica o CRMV; o módulo de veterinário, por
     // sua vez, depende dos guards daqui. forwardRef resolve o ciclo.
     forwardRef(() => VeterinarioModule),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, AuthWebController],
   providers: [
     AuthService,
+    AuthTokenService,
     JwtStrategy,
     RolesGuard,
     // Guards globais: toda rota HTTP exige autenticação + papel por padrão

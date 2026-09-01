@@ -37,7 +37,8 @@ export async function registerTutor(
   const body = {
     name: overrides.name ?? 'Alice Tutora',
     email: overrides.email ?? 'tutor@petcard.com',
-    password: overrides.password ?? 'senha123',
+    // Precisa passar na regra de senha forte do RegisterDto (mobile#54).
+    password: overrides.password ?? 'Senha123!',
   };
 
   const res = await request(app.getHttpServer())
