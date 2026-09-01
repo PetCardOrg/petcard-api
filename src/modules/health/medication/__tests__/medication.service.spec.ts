@@ -19,6 +19,7 @@ describe('MedicationService', () => {
       delete: jest.Mock;
     };
     veterinario: { findUnique: jest.Mock };
+    notification: { deleteMany: jest.Mock };
   };
   let petService: {
     assertAccess: jest.Mock;
@@ -53,6 +54,7 @@ describe('MedicationService', () => {
       veterinario: {
         findUnique: jest.fn().mockResolvedValue({ nome: 'Dra. Camila' }),
       },
+      notification: { deleteMany: jest.fn() },
     };
     petService = {
       assertAccess: jest.fn().mockResolvedValue({ id: 'pet-1' }),
@@ -141,6 +143,17 @@ describe('MedicationService', () => {
     >;
     expect(chamada.where).toEqual({ id: 'med-1' });
     expect(chamada.data.deletedAt).toBeInstanceOf(Date);
+  });
+
+  it('apaga as notificações pendentes vinculadas à prescrição (api#112)', async () => {
+    prisma.medicationRecord.findFirst.mockResolvedValue(record);
+    prisma.medicationRecord.update.mockResolvedValue(record);
+
+    await service.remove('med-1', 'tutor-1', false);
+
+    expect(prisma.notification.deleteMany).toHaveBeenCalledWith({
+      where: { referenceType: 'MEDICATION_RECORD', referenceId: 'med-1' },
+    });
   });
 
   it('o veterinário remove a própria prescrição', async () => {

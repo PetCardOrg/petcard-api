@@ -21,6 +21,7 @@ describe('DoseReminderService', () => {
   let prisma: {
     vaccineRecord: { findMany: jest.Mock; update: jest.Mock };
     dewormingRecord: { findMany: jest.Mock; update: jest.Mock };
+    medicationRecord: { findMany: jest.Mock; update: jest.Mock };
   };
   let notificationService: { schedulePush: jest.Mock };
   let config: { get: jest.Mock };
@@ -29,6 +30,7 @@ describe('DoseReminderService', () => {
     prisma = {
       vaccineRecord: { findMany: jest.fn(), update: jest.fn() },
       dewormingRecord: { findMany: jest.fn(), update: jest.fn() },
+      medicationRecord: { findMany: jest.fn(), update: jest.fn() },
     };
     notificationService = {
       schedulePush: jest.fn().mockResolvedValue([{ id: 'n1' }]),
@@ -42,6 +44,7 @@ describe('DoseReminderService', () => {
     };
     prisma.vaccineRecord.findMany.mockResolvedValue([]);
     prisma.dewormingRecord.findMany.mockResolvedValue([]);
+    prisma.medicationRecord.findMany.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -79,7 +82,7 @@ describe('DoseReminderService', () => {
     it('returns zero counts when no records are in the window', async () => {
       const result = await service.runDoseReminders();
 
-      expect(result).toEqual({ vaccine: 0, deworming: 0 });
+      expect(result).toEqual({ vaccine: 0, deworming: 0, medication: 0 });
       expect(notificationService.schedulePush).not.toHaveBeenCalled();
     });
 
@@ -160,6 +163,61 @@ describe('DoseReminderService', () => {
         where: { id: 'dew-1' },
         data: { lastNotifiedAt: expect.any(Date) as unknown },
       });
+    });
+
+    it('schedules a reminder when a medication treatment is about to start (api#111)', async () => {
+      prisma.medicationRecord.findMany.mockResolvedValue([
+        {
+          id: 'med-1',
+          petId: 'pet-1',
+          medicationName: 'Amoxicilina',
+          startDate: new Date(Date.now() + 2 * DAY_MS),
+          lastNotifiedAt: null,
+          pet: { name: 'Rex', tutorId: 'tutor-1' },
+        },
+      ]);
+
+      const result = await service.runDoseReminders();
+
+      expect(result.medication).toBe(1);
+      expect(notificationService.schedulePush).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tutorId: 'tutor-1',
+          referenceType: 'MEDICATION_RECORD',
+          referenceId: 'med-1',
+        }),
+      );
+      expect(prisma.medicationRecord.update).toHaveBeenCalledWith({
+        where: { id: 'med-1' },
+        data: { lastNotifiedAt: expect.any(Date) as unknown },
+      });
+    });
+
+    it('does not re-notify a medication already notified for its start date', async () => {
+      prisma.medicationRecord.findMany.mockResolvedValue([
+        {
+          id: 'med-1',
+          petId: 'pet-1',
+          medicationName: 'Amoxicilina',
+          startDate: new Date(Date.now() + 2 * DAY_MS),
+          lastNotifiedAt: new Date(),
+          pet: { name: 'Rex', tutorId: 'tutor-1' },
+        },
+      ]);
+
+      const result = await service.runDoseReminders();
+
+      expect(result.medication).toBe(0);
+      expect(prisma.medicationRecord.update).not.toHaveBeenCalled();
+    });
+
+    it('só busca medicação sem deletedAt e dentro da janela', async () => {
+      await service.runDoseReminders();
+
+      const [[queryArg]] = prisma.medicationRecord.findMany.mock.calls as Array<
+        [{ where: { deletedAt: unknown } }]
+      >;
+      expect(queryArg.where.deletedAt).toBeNull();
     });
   });
 });

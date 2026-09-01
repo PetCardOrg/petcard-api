@@ -178,6 +178,12 @@ export class MedicationService {
         where: { id },
         data: { deletedAt: new Date() },
       });
+      // A exclusão é lógica — não existe FK pra cascatear — então a
+      // notificação de lembrete pendente é apagada aqui, explicitamente
+      // (api#112). A prescrição em si continua no histórico.
+      await tx.notification.deleteMany({
+        where: { referenceType: 'MEDICATION_RECORD', referenceId: id },
+      });
       await this.acoes.registrar(
         {
           petId: record.petId,

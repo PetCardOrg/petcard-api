@@ -38,12 +38,17 @@ export class DoseReminderService {
   }
 
   /**
-   * Scans vaccine and deworming records whose next dose falls within the
-   * reminder window and schedules a single push per record. Idempotent via
-   * `lastNotifiedAt`: a record is re-notified only once its current dose
-   * window opens, so a vet setting a new future dose triggers a fresh push.
+   * Scans vaccine, deworming and medication records whose next dose (ou, para
+   * medicação, o início do tratamento) falls within the reminder window and
+   * schedules a single push per record. Idempotent via `lastNotifiedAt`: a
+   * record is re-notified only once its current dose window opens, so a vet
+   * setting a new future dose triggers a fresh push.
    */
-  async runDoseReminders(): Promise<{ vaccine: number; deworming: number }> {
+  async runDoseReminders(): Promise<{
+    vaccine: number;
+    deworming: number;
+    medication: number;
+  }> {
     const windowDays = this.config.get<number>('reminder.windowDays') ?? 3;
     const now = new Date();
     const windowEnd = new Date(now.getTime() + windowDays * DAY_MS);
@@ -58,11 +63,16 @@ export class DoseReminderService {
       windowEnd,
       windowDays,
     );
+    const medication = await this.processMedicationReminders(
+      now,
+      windowEnd,
+      windowDays,
+    );
 
     this.logger.log(
-      `Dose reminders: ${vaccine} vaccine + ${deworming} deworming notification(s) scheduled`,
+      `Dose reminders: ${vaccine} vaccine + ${deworming} deworming + ${medication} medication notification(s) scheduled`,
     );
-    return { vaccine, deworming };
+    return { vaccine, deworming, medication };
   }
 
   private async processVaccineReminders(
@@ -119,6 +129,53 @@ export class DoseReminderService {
       );
       if (delivered) {
         await this.prisma.dewormingRecord.update({
+          where: { id: record.id },
+          data: { lastNotifiedAt: new Date() },
+        });
+        scheduled++;
+      }
+    }
+    return scheduled;
+  }
+
+  /**
+   * Lembrete de medicação (api#111): um único aviso quando o tratamento
+   * começa, não um aviso recorrente por dose — `startDate` faz o papel de
+   * `nextDoseAt` para reaproveitar `isDue`/`notify` sem duplicar a lógica.
+   */
+  private async processMedicationReminders(
+    now: Date,
+    windowEnd: Date,
+    windowDays: number,
+  ): Promise<number> {
+    const records = await this.prisma.medicationRecord.findMany({
+      where: { startDate: { gte: now, lte: windowEnd }, deletedAt: null },
+      include: { pet: { select: { name: true, tutorId: true } } },
+    });
+
+    let scheduled = 0;
+    for (const record of records) {
+      const dueRecord: DueRecord = {
+        id: record.id,
+        petId: record.petId,
+        nextDoseAt: record.startDate,
+        lastNotifiedAt: record.lastNotifiedAt,
+        pet: record.pet,
+      };
+      if (!this.isDue(dueRecord, windowDays)) continue;
+
+      const date = record.startDate.toLocaleDateString('pt-BR', {
+        timeZone: 'America/Fortaleza',
+      });
+      const label = `${record.pet.name}: inicio do tratamento com ${record.medicationName} previsto para ${date}.`;
+      const delivered = await this.notify(
+        dueRecord,
+        'MEDICATION_RECORD',
+        'Medicacao chegando',
+        label,
+      );
+      if (delivered) {
+        await this.prisma.medicationRecord.update({
           where: { id: record.id },
           data: { lastNotifiedAt: new Date() },
         });

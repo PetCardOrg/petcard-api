@@ -21,6 +21,7 @@
     "prepare": "husky",
     "postinstall": "prisma generate",
     "db:seed": "npx prisma db seed",
+    "reminders:run": "nest build && node -r reflect-metadata dist/scripts/run-reminders.js",
     "openapi:json": "nest build && node -r reflect-metadata dist/scripts/generate-openapi.js"
   },
   "prisma": {

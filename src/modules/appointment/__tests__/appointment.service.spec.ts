@@ -201,6 +201,32 @@ describe('AppointmentService', () => {
       );
       expect(prisma.appointment.update).not.toHaveBeenCalled();
     });
+
+    it('reagendar (scheduled_at novo) zera lastNotifiedAt para liberar um novo lembrete (api#111)', async () => {
+      prisma.appointment.findUnique.mockResolvedValue(appointment);
+      prisma.appointment.update.mockResolvedValue(appointment);
+
+      await service.update('appt-1', 'tutor-1', {
+        scheduled_at: '2026-07-01T14:00:00Z',
+      });
+
+      const updateArg = prisma.appointment.update.mock.calls[0][0] as {
+        data: { lastNotifiedAt: unknown };
+      };
+      expect(updateArg.data.lastNotifiedAt).toBeNull();
+    });
+
+    it('não mexe em lastNotifiedAt quando o update não reagenda', async () => {
+      prisma.appointment.findUnique.mockResolvedValue(appointment);
+      prisma.appointment.update.mockResolvedValue(appointment);
+
+      await service.update('appt-1', 'tutor-1', { title: 'Novo título' });
+
+      const updateArg = prisma.appointment.update.mock.calls[0][0] as {
+        data: { lastNotifiedAt: unknown };
+      };
+      expect(updateArg.data.lastNotifiedAt).toBeUndefined();
+    });
   });
 
   describe('remove', () => {
