@@ -31,6 +31,7 @@ describe('MedicationController (integração)', () => {
       delete: jest.Mock;
     };
     petAtendido: { findUnique: jest.Mock };
+    notification: { deleteMany: jest.Mock };
   };
 
   const pet = { id: 'pet-1', tutorId: 'tutor-1' };
@@ -62,6 +63,7 @@ describe('MedicationController (integração)', () => {
         delete: jest.fn(),
       },
       petAtendido: { findUnique: jest.fn() },
+      notification: { deleteMany: jest.fn() },
     };
 
     comTransacao(prisma);

@@ -119,6 +119,10 @@ export class AppointmentService {
         location: dto.location,
         petId: dto.pet_id,
         syncStatus: 'PENDING_UPDATE',
+        // Reagendar libera um novo lembrete para o horário novo (api#111) —
+        // sem isto o cron nunca mais avisaria, porque já tinha notificado
+        // para o horário antigo.
+        lastNotifiedAt: dto.scheduled_at ? null : undefined,
       },
       include: { pet: { select: { name: true } } },
     });

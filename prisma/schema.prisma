@@ -262,6 +262,9 @@ model Appointment {
   syncStatus      AppointmentSyncStatus @default(PENDING_CREATE) @map("sync_status")
   syncError       String?               @map("sync_error")
   lastSyncedAt    DateTime?             @map("last_synced_at")
+  /// Lembrete já enviado para o horário atual (api#111). Reagendar zera este
+  /// campo para permitir um novo aviso.
+  lastNotifiedAt  DateTime?             @map("last_notified_at")
   createdAt       DateTime              @default(now()) @map("created_at")
   updatedAt       DateTime              @updatedAt @map("updated_at")
 
@@ -289,8 +292,11 @@ model Notification {
   sentAt        DateTime?          @map("sent_at")
   createdAt     DateTime           @default(now()) @map("created_at")
 
-  tutor       Tutor        @relation(fields: [tutorId], references: [id], onDelete: Cascade)
-  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  tutor Tutor @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  // Cascade (não SetNull): excluir o agendamento leva junto as notificações
+  // vinculadas a ele (api#112) — uma notificação de consulta que não existe
+  // mais não tem por que continuar na caixa do tutor.
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
   @@index([tutorId, createdAt])
   @@index([referenceType, referenceId])
