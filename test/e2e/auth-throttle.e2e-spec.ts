@@ -62,7 +62,7 @@ describe('Rate limit de autenticação (e2e)', () => {
         .send({
           name: 'Alice',
           email: `nova${i}@petcard.com`,
-          password: 'senha123',
+          password: 'Senha123!',
         });
 
     for (let i = 0; i < LIMITE; i++) {

@@ -8,8 +8,13 @@ import { UpdateTutorDto } from '@petcardorg/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /** Tutor sem o hash da senha — o que pode sair da API. */
-export type TutorPublico = Omit<Tutor, 'password' | 'profileImageUrl'> & {
+export type TutorPublico = Omit<
+  Tutor,
+  'password' | 'profileImageUrl' | 'googleId' | 'emailVerifiedAt'
+> & {
   profile_image_url: string | null;
+  /** Deriva de `emailVerifiedAt` — o app usa isto no aviso de verificação. */
+  email_verified: boolean;
 };
 
 /**
@@ -26,9 +31,20 @@ export type TutorPublico = Omit<Tutor, 'password' | 'profileImageUrl'> & {
  * mobile lia `undefined` e a foto de perfil salva nunca aparecia de volta.
  */
 function semSenha(tutor: Tutor): TutorPublico {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { password, profileImageUrl, ...rest } = tutor;
-  return { ...rest, profile_image_url: profileImageUrl };
+  const {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    password,
+    profileImageUrl,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    googleId,
+    emailVerifiedAt,
+    ...rest
+  } = tutor;
+  return {
+    ...rest,
+    profile_image_url: profileImageUrl,
+    email_verified: emailVerifiedAt !== null,
+  };
 }
 
 @Injectable()

@@ -2,6 +2,8 @@
 import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types';
 import request from 'supertest';
+import { createHash } from 'node:crypto';
+import { AuthTokenPurpose } from '@prisma/client';
 import { createE2EApp } from '../utils/e2e-app';
 import { createAndLoginVet, registerTutor, resetDb } from '../utils/e2e-db';
 import { PrismaService } from '../../src/prisma/prisma.service';
@@ -32,7 +34,7 @@ describe('Auth (e2e)', () => {
         where: { email: 'tutor@petcard.com' },
       });
       expect(stored).not.toBeNull();
-      expect(stored?.password).not.toBe('senha123');
+      expect(stored?.password).not.toBe('Senha123!');
 
       const me = await request(app.getHttpServer())
         .get('/tutors/me')
@@ -47,7 +49,7 @@ describe('Auth (e2e)', () => {
 
       const res = await request(app.getHttpServer())
         .post('/auth/login')
-        .send({ email: 'login@petcard.com', password: 'senha123' })
+        .send({ email: 'login@petcard.com', password: 'Senha123!' })
         .expect(201);
       expect(res.body.access_token).toEqual(expect.any(String));
     });
@@ -57,7 +59,11 @@ describe('Auth (e2e)', () => {
 
       await request(app.getHttpServer())
         .post('/auth/register')
-        .send({ name: 'Outra', email: 'dup@petcard.com', password: 'senha123' })
+        .send({
+          name: 'Outra',
+          email: 'dup@petcard.com',
+          password: 'Senha123!',
+        })
         .expect(409);
     });
 
@@ -79,6 +85,109 @@ describe('Auth (e2e)', () => {
 
     it('bloqueia /tutors/me sem token (401)', async () => {
       await request(app.getHttpServer()).get('/tutors/me').expect(401);
+    });
+
+    it('rejeita registro com senha fraca (400) — regra de senha forte', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          name: 'Alice',
+          email: 'fraca@petcard.com',
+          password: 'senhafraca',
+        })
+        .expect(400);
+
+      expect(
+        await prisma.tutor.count({ where: { email: 'fraca@petcard.com' } }),
+      ).toBe(0);
+    });
+
+    it('novo cadastro nasce com email_verified=false e gera token de verificação', async () => {
+      const { user } = await registerTutor(app, { email: 'verif@petcard.com' });
+
+      expect(user.email_verified).toBe(false);
+      const tokens = await prisma.authToken.findMany({
+        where: {
+          tutorId: user.id,
+          purpose: AuthTokenPurpose.EMAIL_VERIFICATION,
+        },
+      });
+      expect(tokens).toHaveLength(1);
+    });
+  });
+
+  describe('Recuperação de senha', () => {
+    it('POST /auth/password/forgot responde 202 e não vaza se a conta existe', async () => {
+      await registerTutor(app, { email: 'reset@petcard.com' });
+
+      await request(app.getHttpServer())
+        .post('/auth/password/forgot')
+        .send({ email: 'reset@petcard.com' })
+        .expect(202);
+      await request(app.getHttpServer())
+        .post('/auth/password/forgot')
+        .send({ email: 'ninguem@petcard.com' })
+        .expect(202);
+
+      const criados = await prisma.authToken.count({
+        where: { purpose: AuthTokenPurpose.PASSWORD_RESET },
+      });
+      expect(criados).toBe(1);
+    });
+
+    it('redefine a senha com um token válido e o login novo passa', async () => {
+      const { user } = await registerTutor(app, { email: 'troca@petcard.com' });
+
+      // Simula o token entregue por e-mail: grava o hash e usa o valor cru.
+      const rawToken = 'token-e2e-reset';
+      await prisma.authToken.create({
+        data: {
+          tutorId: user.id,
+          purpose: AuthTokenPurpose.PASSWORD_RESET,
+          tokenHash: createHash('sha256').update(rawToken).digest('hex'),
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+
+      await request(app.getHttpServer())
+        .post('/auth/password/reset')
+        .send({ token: rawToken, password: 'NovaSenha1!' })
+        .expect(204);
+
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'troca@petcard.com', password: 'NovaSenha1!' })
+        .expect(201);
+
+      // Token de uso único: a segunda tentativa falha.
+      await request(app.getHttpServer())
+        .post('/auth/password/reset')
+        .send({ token: rawToken, password: 'OutraSenha1!' })
+        .expect(400);
+    });
+
+    it('confirma o e-mail com o token de verificação', async () => {
+      const { user } = await registerTutor(app, { email: 'conf@petcard.com' });
+      const rawToken = 'token-e2e-verify';
+      await prisma.authToken.create({
+        data: {
+          tutorId: user.id,
+          purpose: AuthTokenPurpose.EMAIL_VERIFICATION,
+          tokenHash: createHash('sha256').update(rawToken).digest('hex'),
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+
+      await request(app.getHttpServer())
+        .post('/auth/email/verify')
+        .send({ token: rawToken })
+        .expect(204);
+
+      const login = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'conf@petcard.com', password: 'Senha123!' })
+        .expect(201);
+      expect(login.body.user.email_verified).toBe(true);
     });
   });
 
