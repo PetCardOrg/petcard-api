@@ -8,6 +8,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import * as QRCode from 'qrcode';
 import { Sex, Species } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { NotificationService } from '../../notification/notification.service';
+import type { SchedulePushInput } from '../../notification/notification.service';
 import { TutorService } from '../../tutor/tutor.service';
 import { CardService } from '../card.service';
 
@@ -23,13 +25,18 @@ describe('CardService', () => {
     };
     pet: {
       findUnique: jest.Mock;
+      findFirst: jest.Mock;
     };
     veterinario: { findUnique: jest.Mock };
     medicationRecord: { findMany: jest.Mock };
     notaClinica: { findMany: jest.Mock };
+    petScan: { create: jest.Mock; findMany: jest.Mock };
   };
   let configService: { get: jest.Mock };
   let tutorService: { findById: jest.Mock };
+  let notificationService: {
+    schedulePush: jest.Mock<Promise<unknown[]>, [SchedulePushInput]>;
+  };
   const mockedQRCode = jest.mocked(QRCode);
 
   beforeEach(async () => {
@@ -41,10 +48,15 @@ describe('CardService', () => {
       },
       pet: {
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
       },
       veterinario: { findUnique: jest.fn() },
       medicationRecord: { findMany: jest.fn().mockResolvedValue([]) },
       notaClinica: { findMany: jest.fn().mockResolvedValue([]) },
+      petScan: {
+        create: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
     configService = {
       get: jest.fn().mockReturnValue('https://card.petcard.app'),
@@ -52,6 +64,10 @@ describe('CardService', () => {
     tutorService = {
       findById: jest.fn(),
     };
+    notificationService = {
+      schedulePush: jest.fn<Promise<unknown[]>, [SchedulePushInput]>(),
+    };
+    notificationService.schedulePush.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -59,6 +75,7 @@ describe('CardService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: ConfigService, useValue: configService },
         { provide: TutorService, useValue: tutorService },
+        { provide: NotificationService, useValue: notificationService },
       ],
     }).compile();
 
@@ -673,6 +690,152 @@ describe('CardService', () => {
       await expect(
         service.findByPetIdForTutor('pet-1', 'tutor-1'),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('registerScan', () => {
+    const cardComPet = {
+      pet: { id: 'pet-1', name: 'Rex', tutorId: 'tutor-1' },
+    };
+
+    function scanCriado(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'scan-1',
+        petId: 'pet-1',
+        latitude: null,
+        longitude: null,
+        accuracyMeters: null,
+        createdAt: new Date('2026-09-05T12:00:00.000Z'),
+        ...overrides,
+      };
+    }
+
+    it('grava a leitura e avisa o tutor de que o pet foi encontrado', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue(cardComPet);
+      prisma.petScan.create.mockResolvedValue(
+        scanCriado({ latitude: -3.73, longitude: -38.52, accuracyMeters: 12 }),
+      );
+
+      const result = await service.registerScan('tok-abc', {
+        latitude: -3.73,
+        longitude: -38.52,
+        accuracy_meters: 12,
+      });
+
+      expect(prisma.petScan.create).toHaveBeenCalledWith({
+        data: {
+          petId: 'pet-1',
+          latitude: -3.73,
+          longitude: -38.52,
+          accuracyMeters: 12,
+        },
+      });
+      expect(result).toMatchObject({
+        id: 'scan-1',
+        pet_id: 'pet-1',
+        latitude: -3.73,
+        longitude: -38.52,
+      });
+
+      const push = notificationService.schedulePush.mock.calls[0][0];
+      expect(push.tutorId).toBe('tutor-1');
+      expect(push.referenceId).toBe('scan-1');
+      expect(push.body).toContain('compartilhou');
+    });
+
+    it('avisa o tutor mesmo quem escaneou recusando a localização', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue(cardComPet);
+      prisma.petScan.create.mockResolvedValue(scanCriado());
+
+      const result = await service.registerScan('tok-abc', {});
+
+      expect(result.latitude).toBeUndefined();
+      expect(notificationService.schedulePush).toHaveBeenCalledTimes(1);
+      const push = notificationService.schedulePush.mock.calls[0][0];
+      expect(push.body).toContain('não compartilhou');
+      expect(push.data).not.toHaveProperty('latitude');
+    });
+
+    it('manda coordenada como string — o FCM não transporta número no data', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue(cardComPet);
+      prisma.petScan.create.mockResolvedValue(
+        scanCriado({ latitude: -3.73, longitude: -38.52 }),
+      );
+
+      await service.registerScan('tok-abc', {
+        latitude: -3.73,
+        longitude: -38.52,
+      });
+
+      const { data } = notificationService.schedulePush.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
+      Object.values(data).forEach((value) =>
+        expect(typeof value).toBe('string'),
+      );
+      expect(data.latitude).toBe('-3.73');
+    });
+
+    it('mantém a leitura gravada quando o push falha', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue(cardComPet);
+      prisma.petScan.create.mockResolvedValue(scanCriado());
+      notificationService.schedulePush.mockRejectedValue(
+        new Error('fila fora'),
+      );
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+      const result = await service.registerScan('tok-abc', {});
+
+      expect(result.id).toBe('scan-1');
+      expect(prisma.petScan.create).toHaveBeenCalled();
+    });
+
+    it('não grava nada quando o token não existe', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue(null);
+
+      await expect(service.registerScan('bad', {})).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(prisma.petScan.create).not.toHaveBeenCalled();
+      expect(notificationService.schedulePush).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listScansForTutor', () => {
+    it('devolve as leituras do pet do tutor', async () => {
+      prisma.pet.findFirst.mockResolvedValue({ id: 'pet-1' });
+      prisma.petScan.findMany.mockResolvedValue([
+        {
+          id: 'scan-1',
+          petId: 'pet-1',
+          latitude: -3.73,
+          longitude: -38.52,
+          accuracyMeters: null,
+          createdAt: new Date('2026-09-05T12:00:00.000Z'),
+        },
+      ]);
+
+      const result = await service.listScansForTutor('pet-1', 'tutor-1');
+
+      expect(result).toEqual([
+        {
+          id: 'scan-1',
+          pet_id: 'pet-1',
+          latitude: -3.73,
+          longitude: -38.52,
+          accuracy_meters: undefined,
+          created_at: '2026-09-05T12:00:00.000Z',
+        },
+      ]);
+    });
+
+    it('responde 404 para pet de outro tutor, sem consultar as leituras', async () => {
+      prisma.pet.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.listScansForTutor('pet-1', 'tutor-2'),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.petScan.findMany).not.toHaveBeenCalled();
     });
   });
 });

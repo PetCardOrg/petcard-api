@@ -54,6 +54,7 @@ enum NotificationKind {
   DOSE_REMINDER
   APPOINTMENT_REMINDER
   CLINICAL_NOTE
+  PET_SCAN
 }
 
 enum NotificationStatus {
@@ -161,8 +162,34 @@ model Pet {
   appointments      Appointment[]
   notasClinicas     NotaClinica[]
   veterinarios      PetAtendido[]
+  scans             PetScan[]
 
   @@map("pet")
+}
+
+/// Leitura do QR da coleira por quem encontrou o pet.
+///
+/// Guardado, e não só notificado: num pet perdido, perder a localização
+/// porque o push falhou (tutor sem device token, FCM fora) é o pior desfecho
+/// possível. O tutor consulta o histórico no app mesmo que nenhuma
+/// notificação chegue.
+///
+/// Quem escaneou não é identificado — só a coordenada que ela concordou em
+/// compartilhar, e nem essa é obrigatória: o aviso de "seu pet foi
+/// encontrado" vale por si só.
+model PetScan {
+  id             String   @id @default(uuid())
+  petId          String   @map("pet_id")
+  latitude       Float?
+  longitude      Float?
+  /// Raio de precisão em metros informado pelo navegador de quem escaneou.
+  accuracyMeters Float?   @map("accuracy_meters")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId, createdAt])
+  @@map("pet_scan")
 }
 
 model CarteiraDigital {
@@ -292,7 +319,7 @@ model Notification {
   sentAt        DateTime?          @map("sent_at")
   createdAt     DateTime           @default(now()) @map("created_at")
 
-  tutor Tutor @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  tutor       Tutor        @relation(fields: [tutorId], references: [id], onDelete: Cascade)
   // Cascade (não SetNull): excluir o agendamento leva junto as notificações
   // vinculadas a ele (api#112) — uma notificação de consulta que não existe
   // mais não tem por que continuar na caixa do tutor.

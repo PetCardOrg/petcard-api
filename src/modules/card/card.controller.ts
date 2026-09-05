@@ -1,6 +1,7 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import {
+  ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -20,6 +21,8 @@ import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { AuthCrmvVerificado } from '../veterinario/crmv/auth-crmv.decorator';
 import { CardService } from './card.service';
+import { PetScanResponseDto } from './dto/pet-scan-response.dto';
+import { RegisterScanDto } from './dto/register-scan.dto';
 
 @ApiTags('cards')
 @Controller('cards')
@@ -36,6 +39,47 @@ export class CardController {
     @CurrentUser() user: JwtPayload,
   ): Promise<CarteiraDigitalResponseDto> {
     return this.cardService.findByPetIdForTutor(petId, user.sub);
+  }
+
+  // Antes do `@Get(':token')`: aquele é catch-all e engoliria este caminho.
+  @Get('pets/:petId/scans')
+  @Auth(Role.TUTOR)
+  @ApiOperation({
+    summary: 'Leituras do QR da coleira do pet (visão do tutor dono)',
+    description:
+      'Histórico de quem encontrou o pet, da leitura mais recente para a mais ' +
+      'antiga. Coordenadas só aparecem quando quem escaneou consentiu.',
+  })
+  @ApiOkResponse({ type: PetScanResponseDto, isArray: true })
+  @ApiNotFoundResponse({ description: 'Pet não encontrado' })
+  async getPetScans(
+    @Param('petId') petId: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<PetScanResponseDto[]> {
+    return this.cardService.listScansForTutor(petId, user.sub);
+  }
+
+  @Post(':token/scan')
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ 'public-card': {} })
+  @SkipThrottle({ auth: true })
+  @ApiOperation({
+    summary: 'Registrar que alguém encontrou o pet (sem autenticação)',
+    description:
+      'Chamado por uma ação explícita de quem leu o QR da coleira, não pela ' +
+      'abertura da carteira — a mesma página é o caminho do veterinário para ' +
+      'o prontuário, e avisar a cada visita viraria ruído. A localização é ' +
+      'opcional: sem ela o tutor ainda é avisado de que o pet foi encontrado.',
+  })
+  @ApiCreatedResponse({ type: PetScanResponseDto })
+  @ApiNotFoundResponse({ description: 'Carteira não encontrada' })
+  @ApiTooManyRequestsResponse({ description: 'Limite de requisições excedido' })
+  async registerScan(
+    @Param('token') token: string,
+    @Body() dto: RegisterScanDto,
+  ): Promise<PetScanResponseDto> {
+    return this.cardService.registerScan(token, dto);
   }
 
   @Get(':token/clinico')
