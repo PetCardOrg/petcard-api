@@ -264,6 +264,163 @@ describe('PlacesService', () => {
     }
   });
 
+  describe('autocomplete', () => {
+    const suggestion = (placeId: string, main: string, secondary?: string) => ({
+      placePrediction: {
+        placeId,
+        text: { text: secondary ? `${main}, ${secondary}` : main },
+        structuredFormat: {
+          mainText: { text: main },
+          ...(secondary ? { secondaryText: { text: secondary } } : {}),
+        },
+      },
+    });
+
+    it('mapeia sugestões de lugar para o DTO', async () => {
+      global.fetch = jest.fn().mockResolvedValue(
+        okResponse({
+          suggestions: [
+            suggestion('p1', 'Petshop Amigo Fiel', 'Rua A, 100 - Fortaleza'),
+          ],
+        }),
+      );
+
+      const service = new PlacesService(makeConfig('key'));
+      const result = await service.autocomplete({ input: 'petshop' });
+
+      expect(result).toEqual([
+        {
+          placeId: 'p1',
+          mainText: 'Petshop Amigo Fiel',
+          secondaryText: 'Rua A, 100 - Fortaleza',
+          fullText: 'Petshop Amigo Fiel, Rua A, 100 - Fortaleza',
+        },
+      ]);
+    });
+
+    it('descarta queryPrediction — não é um lugar selecionável', async () => {
+      global.fetch = jest.fn().mockResolvedValue(
+        okResponse({
+          suggestions: [
+            { queryPrediction: { text: { text: 'petshop perto de mim' } } },
+            suggestion('p1', 'Petshop Amigo Fiel', 'Rua A, 100'),
+          ],
+        }),
+      );
+
+      const service = new PlacesService(makeConfig('key'));
+      const result = await service.autocomplete({ input: 'petshop' });
+
+      expect(result.map((s) => s.placeId)).toEqual(['p1']);
+    });
+
+    it('cai no texto completo quando falta structuredFormat', async () => {
+      global.fetch = jest.fn().mockResolvedValue(
+        okResponse({
+          suggestions: [
+            { placePrediction: { placeId: 'p1', text: { text: 'Rua B, 50' } } },
+          ],
+        }),
+      );
+
+      const service = new PlacesService(makeConfig('key'));
+      const [dto] = await service.autocomplete({ input: 'rua b' });
+
+      expect(dto.mainText).toBe('Rua B, 50');
+      expect(dto.secondaryText).toBeUndefined();
+      expect(dto.fullText).toBe('Rua B, 50');
+    });
+
+    it('limita a 5 sugestões', async () => {
+      global.fetch = jest.fn().mockResolvedValue(
+        okResponse({
+          suggestions: Array.from({ length: 9 }, (_, i) =>
+            suggestion(`p${i}`, `Lugar ${i}`, 'Rua X'),
+          ),
+        }),
+      );
+
+      const service = new PlacesService(makeConfig('key'));
+      const result = await service.autocomplete({ input: 'lugar' });
+
+      expect(result).toHaveLength(5);
+    });
+
+    it('não restringe por tipo — endereço avulso precisa aparecer', async () => {
+      const fetchMock = jest.fn().mockResolvedValue(okResponse({}));
+      global.fetch = fetchMock;
+
+      const service = new PlacesService(makeConfig('key'));
+      await service.autocomplete({ input: 'rua das flores' });
+
+      const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+      const body = JSON.parse(requestInit.body as string) as Record<
+        string,
+        unknown
+      >;
+      expect(body).not.toHaveProperty('includedPrimaryTypes');
+      expect(body.input).toBe('rua das flores');
+    });
+
+    it('envia locationBias e sessionToken quando informados', async () => {
+      const fetchMock = jest.fn().mockResolvedValue(okResponse({}));
+      global.fetch = fetchMock;
+
+      const service = new PlacesService(makeConfig('key'));
+      await service.autocomplete({
+        input: 'petshop',
+        lat: userLat,
+        lng: userLng,
+        sessionToken: 'tok-1',
+      });
+
+      const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+      const body = JSON.parse(requestInit.body as string) as {
+        sessionToken?: string;
+        locationBias?: {
+          circle: { center: { latitude: number; longitude: number } };
+        };
+      };
+      expect(body.sessionToken).toBe('tok-1');
+      expect(body.locationBias?.circle.center).toEqual({
+        latitude: userLat,
+        longitude: userLng,
+      });
+    });
+
+    it('omite locationBias quando não há coordenadas', async () => {
+      const fetchMock = jest.fn().mockResolvedValue(okResponse({}));
+      global.fetch = fetchMock;
+
+      const service = new PlacesService(makeConfig('key'));
+      await service.autocomplete({ input: 'petshop' });
+
+      const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+      const body = JSON.parse(requestInit.body as string) as Record<
+        string,
+        unknown
+      >;
+      expect(body).not.toHaveProperty('locationBias');
+      expect(body).not.toHaveProperty('sessionToken');
+    });
+
+    it('lança 502 quando a resposta do Google não é ok', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        text: async () => 'quota exceeded',
+      });
+
+      const service = new PlacesService(makeConfig('key'));
+      expect.assertions(2);
+      try {
+        await service.autocomplete({ input: 'petshop' });
+      } catch (error) {
+        expect(error).toBeInstanceOf(HttpException);
+        expect((error as HttpException).getStatus()).toBe(502);
+      }
+    });
+  });
+
   it('getPhotoUrl monta a URL de mídia com a chave e largura', () => {
     const service = new PlacesService(makeConfig('key-photo'));
     expect(service.getPhotoUrl('places/p/photos/x', 250)).toBe(
