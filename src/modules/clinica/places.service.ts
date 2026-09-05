@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PlacesClinicResponseDto } from '@petcardorg/shared';
+import { PlaceSuggestionResponseDto } from './dto/place-suggestion-response.dto';
 
 type NearbySearchParams = {
   lat: number;
@@ -9,6 +10,19 @@ type NearbySearchParams = {
   openNow?: boolean;
   maxResults?: number;
 };
+
+type AutocompleteParams = {
+  input: string;
+  lat?: number;
+  lng?: number;
+  sessionToken?: string;
+};
+
+/** Raio do viés de localização do autocomplete. */
+const AUTOCOMPLETE_BIAS_RADIUS_METERS = 50_000;
+
+/** Teto de sugestões devolvidas — a lista rola dentro de um modal. */
+const AUTOCOMPLETE_MAX_SUGGESTIONS = 5;
 
 type PlacePhoto = {
   name: string;
@@ -42,6 +56,27 @@ type PlaceResult = {
 
 type NearbySearchResponse = {
   places?: PlaceResult[];
+};
+
+type PlacePrediction = {
+  placeId?: string;
+  text?: { text?: string };
+  structuredFormat?: {
+    mainText?: { text?: string };
+    secondaryText?: { text?: string };
+  };
+};
+
+/**
+ * O autocomplete devolve dois tipos de sugestão. `queryPrediction` é uma busca
+ * textual ("petshop perto de mim"), não um lugar — chega sem `placeId` e não
+ * serve para preencher o campo de local.
+ */
+type AutocompleteResponse = {
+  suggestions?: {
+    placePrediction?: PlacePrediction;
+    queryPrediction?: unknown;
+  }[];
 };
 
 @Injectable()
@@ -127,8 +162,97 @@ export class PlacesService {
       .filter((clinic) => !params.openNow || clinic.openNow === true);
   }
 
+  /**
+   * Sugere locais conforme o tutor digita, no campo "Local" do agendamento.
+   *
+   * Sem `includedPrimaryTypes`: o tutor tanto escolhe um petshop pelo nome
+   * quanto digita um endereço avulso (consulta em domicílio), e restringir por
+   * tipo eliminaria o segundo caso.
+   *
+   * Não há chamada de Place Details depois da escolha — o agendamento guarda
+   * só texto, e o próprio `text.text` da sugestão já traz nome + endereço.
+   * Details custaria uma requisição a mais por agendamento sem nada em troca.
+   */
+  async autocomplete(
+    params: AutocompleteParams,
+  ): Promise<PlaceSuggestionResponseDto[]> {
+    const body: Record<string, unknown> = {
+      input: params.input,
+      languageCode: 'pt-BR',
+      regionCode: 'BR',
+    };
+
+    if (params.sessionToken) {
+      body.sessionToken = params.sessionToken;
+    }
+
+    if (params.lat !== undefined && params.lng !== undefined) {
+      body.locationBias = {
+        circle: {
+          center: { latitude: params.lat, longitude: params.lng },
+          radius: AUTOCOMPLETE_BIAS_RADIUS_METERS,
+        },
+      };
+    }
+
+    const response = await fetch(
+      'https://places.googleapis.com/v1/places:autocomplete',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': this.apiKey,
+        },
+        body: JSON.stringify(body),
+      },
+    );
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new HttpException(
+        `Erro ao sugerir locais no Google Places: ${errorBody}`,
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const raw = await response.json();
+    const data = raw as AutocompleteResponse;
+
+    return (data.suggestions ?? [])
+      .map((suggestion) => suggestion.placePrediction)
+      .filter(
+        (prediction): prediction is PlacePrediction =>
+          prediction?.placeId !== undefined,
+      )
+      .map((prediction) => this.mapPredictionToDto(prediction))
+      .slice(0, AUTOCOMPLETE_MAX_SUGGESTIONS);
+  }
+
   getPhotoUrl(photoName: string, maxWidth = 400): string {
     return `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=${maxWidth}&key=${this.apiKey}`;
+  }
+
+  /**
+   * `structuredFormat` é opcional na resposta do Google. Quando falta, o
+   * `text.text` é a única string disponível e vira o rótulo principal, para a
+   * sugestão não aparecer em branco na lista.
+   */
+  private mapPredictionToDto(
+    prediction: PlacePrediction,
+  ): PlaceSuggestionResponseDto {
+    const mainText = prediction.structuredFormat?.mainText?.text;
+    const secondaryText = prediction.structuredFormat?.secondaryText?.text;
+    const fullText =
+      prediction.text?.text ??
+      [mainText, secondaryText].filter(Boolean).join(', ');
+
+    return {
+      placeId: prediction.placeId!,
+      mainText: mainText ?? fullText,
+      secondaryText: mainText ? secondaryText : undefined,
+      fullText,
+    };
   }
 
   private mapPlaceToDto(

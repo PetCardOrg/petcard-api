@@ -13,7 +13,9 @@ import {
 } from '@petcardorg/shared';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { Role } from '../auth/enums/role.enum';
+import { AutocompleteQueryDto } from './dto/autocomplete-query.dto';
 import { GeocodeQueryDto } from './dto/geocode-query.dto';
+import { PlaceSuggestionResponseDto } from './dto/place-suggestion-response.dto';
 import { GeocodingService } from './geocoding.service';
 import { PlacesService } from './places.service';
 
@@ -40,6 +42,26 @@ export class ClinicaController {
       radiusMeters: query.radiusKm * 1000,
       openNow: query.openNow,
       maxResults: query.maxResults,
+    });
+  }
+
+  @Get('autocomplete')
+  @Auth(Role.TUTOR, Role.VET)
+  @ApiOperation({
+    summary: 'Sugerir locais conforme o usuário digita (Google Places)',
+    description:
+      'Alimenta o campo "Local" do agendamento. Devolve tanto estabelecimentos ' +
+      '(petshop, clínica) quanto endereços, no máximo 5 por chamada.',
+  })
+  @ApiOkResponse({ type: PlaceSuggestionResponseDto, isArray: true })
+  async autocomplete(
+    @Query() query: AutocompleteQueryDto,
+  ): Promise<PlaceSuggestionResponseDto[]> {
+    return this.placesService.autocomplete({
+      input: query.input,
+      lat: query.lat,
+      lng: query.lng,
+      sessionToken: query.sessionToken,
     });
   }
 

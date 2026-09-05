@@ -11,11 +11,11 @@ import { PlacesService } from '../places.service';
 
 describe('ClinicaController (integração)', () => {
   let harness: ControllerHarness;
-  let places: { searchNearbyVetClinics: jest.Mock };
+  let places: { searchNearbyVetClinics: jest.Mock; autocomplete: jest.Mock };
   let geocoding: { geocode: jest.Mock };
 
   beforeAll(async () => {
-    places = { searchNearbyVetClinics: jest.fn() };
+    places = { searchNearbyVetClinics: jest.fn(), autocomplete: jest.fn() };
     geocoding = { geocode: jest.fn() };
 
     harness = await createControllerTestApp({
@@ -69,6 +69,56 @@ describe('ClinicaController (integração)', () => {
 
       await request(harness.app.getHttpServer())
         .get('/clinicas/places?lat=-3.73&lng=-38.52&radiusKm=2')
+        .expect(401);
+    });
+  });
+
+  describe('GET /clinicas/autocomplete', () => {
+    it('repassa o viés de localização e devolve as sugestões (200)', async () => {
+      places.autocomplete.mockResolvedValue([
+        { placeId: 'p1', mainText: 'Petshop Amigo', fullText: 'Petshop Amigo' },
+      ]);
+
+      const res = await request(harness.app.getHttpServer())
+        .get(
+          '/clinicas/autocomplete?input=petshop&lat=-3.73&lng=-38.52&sessionToken=abc',
+        )
+        .expect(200);
+
+      expect(res.body).toHaveLength(1);
+      expect(places.autocomplete).toHaveBeenCalledWith({
+        input: 'petshop',
+        lat: -3.73,
+        lng: -38.52,
+        sessionToken: 'abc',
+      });
+    });
+
+    it('aceita busca sem localização — a permissão pode estar negada (200)', async () => {
+      places.autocomplete.mockResolvedValue([]);
+
+      await request(harness.app.getHttpServer())
+        .get('/clinicas/autocomplete?input=rua das flores')
+        .expect(200);
+
+      const arg = places.autocomplete.mock.calls[0][0];
+      expect(arg.lat).toBeUndefined();
+      expect(arg.lng).toBeUndefined();
+    });
+
+    it('rejeita input curto demais sem chamar o Google (400)', async () => {
+      await request(harness.app.getHttpServer())
+        .get('/clinicas/autocomplete?input=pe')
+        .expect(400);
+
+      expect(places.autocomplete).not.toHaveBeenCalled();
+    });
+
+    it('exige autenticação (401)', async () => {
+      harness.setUser(null);
+
+      await request(harness.app.getHttpServer())
+        .get('/clinicas/autocomplete?input=petshop')
         .expect(401);
     });
   });
