@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { CardModule } from '../card/card.module';
+import { ColeiraModule } from '../coleira/coleira.module';
 import { UploadModule } from '../upload/upload.module';
 import { CalendarSyncPublisher } from './calendar-sync.publisher';
 import { NotificationPushPublisher } from './notification-push.publisher';
@@ -24,6 +25,7 @@ import { RabbitMqTopologyService } from './rabbitmq-topology.service';
 @Module({
   imports: [
     CardModule,
+    ColeiraModule,
     UploadModule,
     ClientsModule.registerAsync([
       {

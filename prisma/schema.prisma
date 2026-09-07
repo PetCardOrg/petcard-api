@@ -163,6 +163,7 @@ model Pet {
   notasClinicas     NotaClinica[]
   veterinarios      PetAtendido[]
   scans             PetScan[]
+  tagColeira        TagColeira?
 
   @@map("pet")
 }
@@ -190,6 +191,25 @@ model PetScan {
 
   @@index([petId, createdAt])
   @@map("pet_scan")
+}
+
+/// QR da coleira: o código que um estranho lê ao encontrar o pet na rua.
+///
+/// Token próprio, separado do da CarteiraDigital, porque os dois públicos não
+/// são o mesmo. A carteira é do tutor e do veterinário e carrega histórico
+/// clínico; a coleira é de quem achou o animal e não deve expor nada disso.
+/// Separados, revogar um não derruba o outro e o achador nunca alcança o
+/// prontuário.
+model TagColeira {
+  id        String   @id @default(uuid())
+  petId     String   @unique @map("pet_id")
+  token     String   @unique
+  qrCodeUrl String?  @map("qr_code_url")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@map("tag_coleira")
 }
 
 model CarteiraDigital {

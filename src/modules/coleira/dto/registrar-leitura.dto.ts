@@ -10,21 +10,21 @@ import {
 } from 'class-validator';
 
 /**
- * Localização de quem leu o QR da coleira, quando ela concorda em compartilhar.
+ * Localização de quem leu o QR da coleira, quando o navegador a entrega.
  *
- * Tudo é opcional: a leitura sozinha já avisa o tutor de que alguém encontrou
- * o pet, e recusar a localização não pode impedir esse aviso.
+ * Tudo opcional: a leitura sozinha já avisa o tutor de que alguém encontrou o
+ * pet, e negar a localização não pode impedir esse aviso.
  *
  * O `@ValidateIf` cruzado torna as coordenadas um par indivisível — meia
  * coordenada não localiza nada e entraria no banco como ruído silencioso.
  */
-export class RegisterScanDto {
-  @ValidateIf((o: RegisterScanDto) => o.longitude !== undefined)
+export class RegistrarLeituraDto {
+  @ValidateIf((o: RegistrarLeituraDto) => o.longitude !== undefined)
   @Type(() => Number)
   @IsLatitude()
   latitude?: number;
 
-  @ValidateIf((o: RegisterScanDto) => o.latitude !== undefined)
+  @ValidateIf((o: RegistrarLeituraDto) => o.latitude !== undefined)
   @Type(() => Number)
   @IsLongitude()
   longitude?: number;

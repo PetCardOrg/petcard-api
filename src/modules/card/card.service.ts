@@ -15,12 +15,8 @@ import {
   Sex,
   Species,
 } from '@petcardorg/shared';
-import { NotificationKind, PetScan } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { NotificationService } from '../notification/notification.service';
 import { TutorService } from '../tutor/tutor.service';
-import { PetScanResponseDto } from './dto/pet-scan-response.dto';
-import { RegisterScanDto } from './dto/register-scan.dto';
 
 interface CarteiraDigitalFullResponseDto extends CarteiraDigitalResponseDto {
   weight?: number;
@@ -41,17 +37,6 @@ function isMedicationActive(endDate?: Date | null): boolean {
   return !endDate || isFutureOrToday(endDate);
 }
 
-function toPetScanResponseDto(scan: PetScan): PetScanResponseDto {
-  return {
-    id: scan.id,
-    pet_id: scan.petId,
-    latitude: scan.latitude ?? undefined,
-    longitude: scan.longitude ?? undefined,
-    accuracy_meters: scan.accuracyMeters ?? undefined,
-    created_at: scan.createdAt.toISOString(),
-  };
-}
-
 @Injectable()
 export class CardService implements OnModuleInit {
   private readonly logger = new Logger(CardService.name);
@@ -60,7 +45,6 @@ export class CardService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly tutorService: TutorService,
-    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -323,104 +307,6 @@ export class CardService implements OnModuleInit {
       ).length,
       issued_at: card.createdAt,
     };
-  }
-
-  /**
-   * Registra que alguém encontrou o pet e avisa o tutor.
-   *
-   * Disparado por uma ação explícita de quem achou o pet, não pela abertura da
-   * carteira: a mesma página é o caminho do veterinário para o prontuário
-   * (web#38), e notificar a cada visita transformaria o aviso de "seu pet foi
-   * encontrado" em ruído que o tutor aprende a ignorar.
-   *
-   * A leitura é gravada antes do push e o push é best-effort. A ordem importa:
-   * tutor sem device token, FCM desligado ou fila fora do ar não podem apagar
-   * a única pista de onde o pet está.
-   */
-  async registerScan(
-    token: string,
-    dto: RegisterScanDto,
-  ): Promise<PetScanResponseDto> {
-    const card = await this.prisma.carteiraDigital.findUnique({
-      where: { token },
-      select: { pet: { select: { id: true, name: true, tutorId: true } } },
-    });
-
-    if (!card) {
-      throw new NotFoundException('Carteira digital not found');
-    }
-
-    const { pet } = card;
-    const temLocalizacao =
-      dto.latitude !== undefined && dto.longitude !== undefined;
-
-    const scan = await this.prisma.petScan.create({
-      data: {
-        petId: pet.id,
-        latitude: dto.latitude,
-        longitude: dto.longitude,
-        accuracyMeters: dto.accuracy_meters,
-      },
-    });
-
-    try {
-      await this.notificationService.schedulePush({
-        tutorId: pet.tutorId,
-        kind: NotificationKind.PET_SCAN,
-        referenceType: 'PET_SCAN',
-        referenceId: scan.id,
-        title: `${pet.name} foi encontrado`,
-        body: temLocalizacao
-          ? `Alguém leu o QR da coleira e compartilhou onde ${pet.name} está.`
-          : `Alguém leu o QR da coleira de ${pet.name}, mas não compartilhou a localização.`,
-        // O FCM só transporta string no data — número vira payload inválido.
-        data: {
-          type: 'pet_scan',
-          pet_id: pet.id,
-          scan_id: scan.id,
-          ...(temLocalizacao
-            ? {
-                latitude: String(dto.latitude),
-                longitude: String(dto.longitude),
-              }
-            : {}),
-        },
-      });
-    } catch (error) {
-      this.logger.error(
-        `Failed to schedule push notification for pet scan ${scan.id}`,
-        error instanceof Error ? error.stack : error,
-      );
-    }
-
-    return toPetScanResponseDto(scan);
-  }
-
-  /**
-   * Leituras do QR de um pet, da mais recente para a mais antiga.
-   *
-   * Pet de outro tutor responde 404, e não 403: dizer "existe, mas não é seu"
-   * deixaria o id do pet servir de sonda para descobrir cadastros alheios.
-   */
-  async listScansForTutor(
-    petId: string,
-    tutorId: string,
-  ): Promise<PetScanResponseDto[]> {
-    const pet = await this.prisma.pet.findFirst({
-      where: { id: petId, tutorId },
-      select: { id: true },
-    });
-
-    if (!pet) {
-      throw new NotFoundException('Pet not found');
-    }
-
-    const scans = await this.prisma.petScan.findMany({
-      where: { petId },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    return scans.map(toPetScanResponseDto);
   }
 
   private publicBaseUrl(): string {

@@ -3,6 +3,7 @@ import { Ctx, MessagePattern, Payload } from '@nestjs/microservices';
 import type { RmqContext } from '@nestjs/microservices';
 import type { Channel, ConsumeMessage } from 'amqplib';
 import { CardService } from '../card/card.service';
+import { ColeiraService } from '../coleira/coleira.service';
 import { UploadService } from '../upload/upload.service';
 import type { QrCodeGenerateMessage } from './dto/qr-code-generate.message';
 import {
@@ -17,6 +18,7 @@ export class QrCodeConsumer {
 
   constructor(
     private readonly cardService: CardService,
+    private readonly coleiraService: ColeiraService,
     private readonly uploadService: UploadService,
   ) {}
 
@@ -44,6 +46,19 @@ export class QrCodeConsumer {
         'image/png',
       );
       await this.cardService.setCardQrCodeUrl(petId, url);
+
+      // O QR da coleira nasce junto com o da carteira, com token próprio e
+      // apontando para a página do achador. São dois códigos porque são dois
+      // públicos: o da carteira leva ao prontuário, o da coleira não.
+      const coleiraToken = await this.coleiraService.issueTokenForPet(petId);
+      const coleiraBuffer =
+        await this.coleiraService.generateQrCode(coleiraToken);
+      const coleiraUrl = await this.uploadService.uploadBuffer(
+        coleiraBuffer,
+        `qr-codes/coleira-${petId}.png`,
+        'image/png',
+      );
+      await this.coleiraService.setQrCodeUrl(petId, coleiraUrl);
       this.logger.log(`QR Code generated for pet ${petId}`);
       channel.ack(originalMessage);
     } catch (error) {
