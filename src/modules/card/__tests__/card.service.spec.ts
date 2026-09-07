@@ -23,6 +23,7 @@ describe('CardService', () => {
     };
     pet: {
       findUnique: jest.Mock;
+      findFirst: jest.Mock;
     };
     veterinario: { findUnique: jest.Mock };
     medicationRecord: { findMany: jest.Mock };
@@ -41,6 +42,7 @@ describe('CardService', () => {
       },
       pet: {
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
       },
       veterinario: { findUnique: jest.fn() },
       medicationRecord: { findMany: jest.fn().mockResolvedValue([]) },

@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { RmqContext } from '@nestjs/microservices';
 import { CardService } from '../../card/card.service';
+import { ColeiraService } from '../../coleira/coleira.service';
 import { UploadService } from '../../upload/upload.service';
 import { QrCodeConsumer } from '../qr-code.consumer';
 import { QR_CODE_MAX_RETRIES, QR_CODE_RETRY_HEADER } from '../queue.constants';
@@ -36,6 +37,11 @@ describe('QrCodeConsumer', () => {
     generateQrCode: jest.Mock;
     setCardQrCodeUrl: jest.Mock;
   };
+  let coleiraService: {
+    issueTokenForPet: jest.Mock;
+    generateQrCode: jest.Mock;
+    setQrCodeUrl: jest.Mock;
+  };
   let uploadService: { uploadBuffer: jest.Mock };
   let channel: { ack: jest.Mock; nack: jest.Mock; publish: jest.Mock };
 
@@ -44,6 +50,11 @@ describe('QrCodeConsumer', () => {
       issueTokenForPet: jest.fn().mockResolvedValue('tok-123'),
       generateQrCode: jest.fn().mockResolvedValue(Buffer.from('fake-png')),
       setCardQrCodeUrl: jest.fn().mockResolvedValue(undefined),
+    };
+    coleiraService = {
+      issueTokenForPet: jest.fn().mockResolvedValue('coleira-tok'),
+      generateQrCode: jest.fn().mockResolvedValue(Buffer.from('fake-png')),
+      setQrCodeUrl: jest.fn().mockResolvedValue(undefined),
     };
     uploadService = {
       uploadBuffer: jest.fn().mockResolvedValue(QR_URL),
@@ -54,6 +65,7 @@ describe('QrCodeConsumer', () => {
       providers: [
         QrCodeConsumer,
         { provide: CardService, useValue: cardService },
+        { provide: ColeiraService, useValue: coleiraService },
         { provide: UploadService, useValue: uploadService },
       ],
     }).compile();
