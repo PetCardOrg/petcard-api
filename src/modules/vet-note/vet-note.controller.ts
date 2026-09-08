@@ -16,7 +16,6 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { Auth } from '../auth/decorators/auth.decorator';
 import { AuthCrmvVerificado } from '../veterinario/crmv/auth-crmv.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '../auth/enums/role.enum';
@@ -62,7 +61,7 @@ export class VetNoteController {
   }
 
   @Get('clinical-notes/:id')
-  @Auth(Role.TUTOR, Role.VET)
+  @AuthCrmvVerificado(Role.TUTOR, Role.VET)
   @ApiOperation({ summary: 'Buscar nota clínica por id' })
   @ApiOkResponse({ type: NotaClinicaResponseDto })
   @ApiNotFoundResponse({ description: 'Nota clínica não encontrada' })
@@ -88,7 +87,7 @@ export class VetNoteController {
   }
 
   @Delete('clinical-notes/:id')
-  @Auth(Role.VET)
+  @AuthCrmvVerificado(Role.VET)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remover nota clínica (somente o vet autor)' })
   @ApiNotFoundResponse({ description: 'Nota clínica não encontrada' })

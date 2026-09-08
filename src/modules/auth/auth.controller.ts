@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import {
-  ApiBearerAuth,
   ApiConflictResponse,
   ApiOperation,
   ApiTags,
@@ -28,7 +27,6 @@ import { VerifyEmailDto } from './dto/verify-email.dto';
 import { Auth } from './decorators/auth.decorator';
 import { Public } from './decorators/public.decorator';
 import { Role } from './enums/role.enum';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import type { JwtPayload } from './strategies/jwt.strategy';
 
 /**
@@ -148,10 +146,8 @@ export class AuthController {
   }
 
   @Get('profile')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @Auth()
   @ApiOperation({ summary: 'Payload do JWT do usuário autenticado' })
-  @ApiUnauthorizedResponse({ description: 'Token ausente ou inválido' })
   getProfile(@CurrentUser() user: JwtPayload): JwtPayload {
     return user;
   }

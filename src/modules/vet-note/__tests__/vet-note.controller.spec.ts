@@ -77,7 +77,7 @@ describe('VetNoteController (integração)', () => {
           // O guard real roda; só a consulta de verificação é mockada.
           provide: CrmvVerificationService,
           useValue: {
-            getStatus: jest.fn().mockResolvedValue({ verified: true }),
+            getStatus: jest.fn(),
           },
         },
       ],
@@ -88,6 +88,8 @@ describe('VetNoteController (integração)', () => {
     await harness.app.close();
   });
 
+  let crmvVerification: { getStatus: jest.Mock };
+
   beforeEach(() => {
     jest.clearAllMocks();
     harness.setUser(VET);
@@ -95,6 +97,8 @@ describe('VetNoteController (integração)', () => {
     prisma.veterinario.findUnique.mockResolvedValue({ id: 'vet-1' });
     // Vínculo vet-pet presente por padrão; os casos de bloqueio zeram.
     prisma.petAtendido.findUnique.mockResolvedValue({ id: 'vinculo-1' });
+    crmvVerification = harness.app.get(CrmvVerificationService);
+    crmvVerification.getStatus.mockResolvedValue({ verified: true });
   });
 
   describe('POST /pets/:petId/clinical-notes', () => {
@@ -207,6 +211,18 @@ describe('VetNoteController (integração)', () => {
         .get('/clinical-notes/missing')
         .expect(404);
     });
+
+    it('barra o VET com CRMV não verificado (403, api#audit-2)', async () => {
+      // A listagem por pet (@AuthCrmvVerificado) já barrava; esta rota usava
+      // @Auth simples e furava a regra do api#113 para busca por id.
+      crmvVerification.getStatus.mockResolvedValue({ verified: false });
+
+      await request(harness.app.getHttpServer())
+        .get('/clinical-notes/nota-1')
+        .expect(403);
+
+      expect(prisma.notaClinica.findFirst).not.toHaveBeenCalled();
+    });
   });
 
   describe('DELETE /clinical-notes/:id', () => {
@@ -240,6 +256,18 @@ describe('VetNoteController (integração)', () => {
       await request(harness.app.getHttpServer())
         .delete('/clinical-notes/nota-1')
         .expect(403);
+    });
+
+    it('barra o VET com CRMV não verificado (403, api#audit-2)', async () => {
+      // Mesmo furo do GET por id: DELETE usava @Auth(VET) puro, sem exigir
+      // CRMV em dia (TTL de 180 dias vencido ou zerado por troca de registro).
+      crmvVerification.getStatus.mockResolvedValue({ verified: false });
+
+      await request(harness.app.getHttpServer())
+        .delete('/clinical-notes/nota-1')
+        .expect(403);
+
+      expect(prisma.notaClinica.delete).not.toHaveBeenCalled();
     });
   });
 });

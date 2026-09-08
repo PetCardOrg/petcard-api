@@ -6,7 +6,9 @@ import {
   TUTOR,
   VET,
 } from '../../../../test/utils/controller-harness';
+import { ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { PetService } from '../../pet/pet.service';
 import { CalendarSyncPublisher } from '../../queue/calendar-sync.publisher';
 import { AppointmentController } from '../appointment.controller';
 import { AppointmentService } from '../appointment.service';
@@ -23,6 +25,7 @@ describe('AppointmentController (integração)', () => {
     };
   };
   let publisher: { publish: jest.Mock };
+  let petService: { assertOwnership: jest.Mock };
 
   const appointment = {
     id: 'appt-1',
@@ -51,6 +54,9 @@ describe('AppointmentController (integração)', () => {
       },
     };
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
+    petService = {
+      assertOwnership: jest.fn().mockResolvedValue({ id: 'pet-1' }),
+    };
 
     harness = await createControllerTestApp({
       controllers: [AppointmentController],
@@ -58,6 +64,7 @@ describe('AppointmentController (integração)', () => {
         AppointmentService,
         { provide: PrismaService, useValue: prisma },
         { provide: CalendarSyncPublisher, useValue: publisher },
+        { provide: PetService, useValue: petService },
       ],
     });
   });
@@ -68,6 +75,7 @@ describe('AppointmentController (integração)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    petService.assertOwnership.mockResolvedValue({ id: 'pet-1' });
     harness.setUser(TUTOR);
   });
 
@@ -94,6 +102,23 @@ describe('AppointmentController (integração)', () => {
         .post('/appointments')
         .send({ title: 'x' })
         .expect(400);
+
+      expect(prisma.appointment.create).not.toHaveBeenCalled();
+    });
+
+    it('recusa pet_id de outro tutor (403) e não grava nada (api#audit-1)', async () => {
+      petService.assertOwnership.mockRejectedValue(
+        new ForbiddenException('You do not own this pet'),
+      );
+
+      await request(harness.app.getHttpServer())
+        .post('/appointments')
+        .send({
+          title: 'Consulta de rotina',
+          scheduled_at: '2026-06-01T14:00:00Z',
+          pet_id: '123e4567-e89b-12d3-a456-426614174000',
+        })
+        .expect(403);
 
       expect(prisma.appointment.create).not.toHaveBeenCalled();
     });
