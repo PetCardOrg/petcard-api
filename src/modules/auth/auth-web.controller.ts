@@ -35,7 +35,7 @@ export class AuthWebController {
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
-  @SkipThrottle({ 'public-card': true })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
   async verifyEmail(@Query('token') token: string, @Res() res: Response) {
     try {
       await this.authService.verifyEmail({ token: token ?? '' });
@@ -65,7 +65,7 @@ export class AuthWebController {
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
-  @SkipThrottle({ 'public-card': true })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
   resetPasswordForm(@Query('token') token: string, @Res() res: Response) {
     if (!token) {
       this.sendPage(
@@ -87,7 +87,7 @@ export class AuthWebController {
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
-  @SkipThrottle({ 'public-card': true })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
   async resetPasswordSubmit(
     @Body() body: { token?: string; password?: string; confirm?: string },
     @Res() res: Response,

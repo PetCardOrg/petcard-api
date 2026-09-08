@@ -68,7 +68,7 @@ export class CardController {
   @Throttle({ 'public-card': {} })
   // Pelo mesmo motivo do @SkipThrottle no auth.controller: o guard olharia
   // também o throttler de autenticação.
-  @SkipThrottle({ auth: true })
+  @SkipThrottle({ auth: true, places: true, 'clinica-photo': true })
   @ApiOperation({
     summary: 'Carteira pública por token do QR Code (sem autenticação)',
   })

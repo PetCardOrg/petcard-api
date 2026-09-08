@@ -76,6 +76,17 @@ import { PrismaModule } from './prisma/prisma.module';
             ttl: config.get<number>('card.publicThrottleTtlSeconds', 60) * 1000,
             limit: config.get<number>('card.publicThrottleLimit', 10),
           },
+          {
+            name: 'places',
+            ttl: config.get<number>('throttler.placesTtlSeconds', 60) * 1000,
+            limit: config.get<number>('throttler.placesLimit', 30),
+          },
+          {
+            name: 'clinica-photo',
+            ttl:
+              config.get<number>('throttler.clinicaPhotoTtlSeconds', 60) * 1000,
+            limit: config.get<number>('throttler.clinicaPhotoLimit', 60),
+          },
         ],
       }),
     }),

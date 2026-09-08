@@ -76,7 +76,7 @@ export class VeterinarioController {
   // ação rara, ninguém precisa fazê-la dez vezes por minuto.
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: { limit: LIMITE_DE_ROTA_CARA } })
-  @SkipThrottle({ 'public-card': true })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
   @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({
     summary: 'Verificar meu CRMV na base externa',

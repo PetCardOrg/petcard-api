@@ -48,7 +48,7 @@ export class AuthController {
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
-  @SkipThrottle({ 'public-card': true })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
   @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({ summary: 'Registrar novo tutor' })
   @ApiConflictResponse({ description: 'Email já cadastrado' })
@@ -60,7 +60,7 @@ export class AuthController {
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
-  @SkipThrottle({ 'public-card': true })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
   @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({ summary: 'Login do tutor (JWT com role TUTOR)' })
   @ApiUnauthorizedResponse({ description: 'Credenciais inválidas' })
@@ -72,7 +72,7 @@ export class AuthController {
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
-  @SkipThrottle({ 'public-card': true })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
   @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({
     summary: 'Login/cadastro do tutor com Google (ID token)',
@@ -90,7 +90,7 @@ export class AuthController {
   @HttpCode(202)
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
-  @SkipThrottle({ 'public-card': true })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
   @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({
     summary: 'Solicitar link de redefinição de senha',
@@ -110,7 +110,7 @@ export class AuthController {
   @HttpCode(204)
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
-  @SkipThrottle({ 'public-card': true })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
   @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({ summary: 'Redefinir a senha a partir do token do e-mail' })
   resetPassword(@Body() dto: ResetPasswordDto) {
@@ -122,7 +122,7 @@ export class AuthController {
   @HttpCode(204)
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
-  @SkipThrottle({ 'public-card': true })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
   @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({ summary: 'Confirmar o e-mail a partir do token do link' })
   verifyEmail(@Body() dto: VerifyEmailDto) {
@@ -139,7 +139,7 @@ export class AuthController {
   // reenviar confirmação é ação de exceção, não de repetição.
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: { limit: LIMITE_DE_ROTA_CARA } })
-  @SkipThrottle({ 'public-card': true })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
   @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({ summary: 'Reenviar o e-mail de verificação ao tutor logado' })
   async resendVerification(@CurrentUser() user: JwtPayload) {
@@ -160,7 +160,7 @@ export class AuthController {
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
-  @SkipThrottle({ 'public-card': true })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
   @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({
     summary: 'Cadastrar veterinário (JWT com role VET)',
@@ -178,7 +178,7 @@ export class AuthController {
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
-  @SkipThrottle({ 'public-card': true })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
   @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({ summary: 'Login do veterinário (JWT com role VET)' })
   @ApiUnauthorizedResponse({ description: 'Credenciais inválidas' })

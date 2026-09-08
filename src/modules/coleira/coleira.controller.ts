@@ -59,7 +59,7 @@ export class ColeiraController {
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ 'public-card': {} })
-  @SkipThrottle({ auth: true })
+  @SkipThrottle({ auth: true, places: true, 'clinica-photo': true })
   @ApiOperation({
     summary: 'Registrar que alguém encontrou o pet (sem autenticação)',
     description:
@@ -80,7 +80,7 @@ export class ColeiraController {
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ 'public-card': {} })
-  @SkipThrottle({ auth: true })
+  @SkipThrottle({ auth: true, places: true, 'clinica-photo': true })
   @ApiOperation({
     summary: 'Dados do pet para quem encontrou (sem autenticação)',
     description:

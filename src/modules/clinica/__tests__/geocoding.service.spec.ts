@@ -1,10 +1,14 @@
-/* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/require-await */
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GeocodingService } from '../geocoding.service';
 
 const makeConfig = (key: string | undefined): ConfigService =>
-  ({ get: jest.fn().mockReturnValue(key) }) as unknown as ConfigService;
+  ({
+    get: jest.fn((path: string) =>
+      path === 'googleMaps.apiKey' ? key : undefined,
+    ),
+  }) as unknown as ConfigService;
 
 async function expectHttpStatus(
   promise: Promise<unknown>,
@@ -56,9 +60,20 @@ describe('GeocodingService', () => {
       formattedAddress: 'Fortaleza - CE, Brasil',
     });
 
-    const calledUrl = fetchMock.mock.calls[0][0] as string;
+    const [calledUrl, requestInit] = fetchMock.mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
     expect(calledUrl).toContain('address=Av.+Beira+Mar');
     expect(calledUrl).toContain('key=key-123');
+    expect(requestInit.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('lança 502 quando o Google não responde (timeout/rede)', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error('timeout'));
+
+    const service = new GeocodingService(makeConfig('key'));
+    await expectHttpStatus(service.geocode('Av. Beira Mar'), 502);
   });
 
   it('lança 404 quando o Google retorna ZERO_RESULTS', async () => {

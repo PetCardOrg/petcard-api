@@ -1,5 +1,12 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { PlacesClinicResponseDto } from '@petcardorg/shared';
 import { PlaceSuggestionResponseDto } from './dto/place-suggestion-response.dto';
 
@@ -23,6 +30,16 @@ const AUTOCOMPLETE_BIAS_RADIUS_METERS = 50_000;
 
 /** Teto de sugestões devolvidas — a lista rola dentro de um modal. */
 const AUTOCOMPLETE_MAX_SUGGESTIONS = 5;
+
+/** Largura da foto de clínica — a única usada pelo card do mobile hoje. */
+const PHOTO_MAX_WIDTH_PX = 400;
+
+/**
+ * Validade do token assinado da foto. Curta de propósito: o token só precisa
+ * sobreviver do momento em que `GET /clinicas/places` responde até o card da
+ * clínica terminar de carregar a imagem, não para guardar o link.
+ */
+const PHOTO_TOKEN_TTL_MS = 15 * 60 * 1000;
 
 type PlacePhoto = {
   name: string;
@@ -81,7 +98,10 @@ type AutocompleteResponse = {
 
 @Injectable()
 export class PlacesService {
+  private readonly logger = new Logger(PlacesService.name);
   private readonly apiKey: string;
+  private readonly apiBaseUrl: string;
+  private readonly timeoutMs: number;
 
   constructor(private readonly configService: ConfigService) {
     const key = this.configService.get<string>('googleMaps.apiKey');
@@ -89,6 +109,15 @@ export class PlacesService {
       throw new Error('GOOGLE_MAPS_API_KEY is not configured');
     }
     this.apiKey = key;
+
+    const apiBaseUrl = this.configService.get<string>('app.apiBaseUrl');
+    if (!apiBaseUrl) {
+      throw new Error('API_BASE_URL is not configured');
+    }
+    this.apiBaseUrl = apiBaseUrl;
+
+    this.timeoutMs =
+      this.configService.get<number>('googleMaps.timeoutMs') ?? 15000;
   }
 
   async searchNearbyVetClinics(
@@ -123,18 +152,31 @@ export class PlacesService {
       },
     };
 
-    const response = await fetch(
-      'https://places.googleapis.com/v1/places:searchNearby',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': this.apiKey,
-          'X-Goog-FieldMask': fieldMask,
+    let response: Response;
+    try {
+      response = await fetch(
+        'https://places.googleapis.com/v1/places:searchNearby',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': this.apiKey,
+            'X-Goog-FieldMask': fieldMask,
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(this.timeoutMs),
         },
-        body: JSON.stringify(body),
-      },
-    );
+      );
+    } catch (error) {
+      this.logger.error(
+        'Falha ao buscar clínicas no Google Places',
+        error instanceof Error ? error.stack : error,
+      );
+      throw new HttpException(
+        'Não foi possível buscar clínicas agora. Tente novamente.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -195,17 +237,30 @@ export class PlacesService {
       };
     }
 
-    const response = await fetch(
-      'https://places.googleapis.com/v1/places:autocomplete',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': this.apiKey,
+    let response: Response;
+    try {
+      response = await fetch(
+        'https://places.googleapis.com/v1/places:autocomplete',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': this.apiKey,
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(this.timeoutMs),
         },
-        body: JSON.stringify(body),
-      },
-    );
+      );
+    } catch (error) {
+      this.logger.error(
+        'Falha ao sugerir locais no Google Places',
+        error instanceof Error ? error.stack : error,
+      );
+      throw new HttpException(
+        'Não foi possível sugerir locais agora. Tente novamente.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -229,8 +284,117 @@ export class PlacesService {
       .slice(0, AUTOCOMPLETE_MAX_SUGGESTIONS);
   }
 
-  getPhotoUrl(photoName: string, maxWidth = 400): string {
-    return `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=${maxWidth}&key=${this.apiKey}`;
+  /**
+   * Busca os bytes da foto no Google e devolve prontos para a API repassar.
+   *
+   * Antes, `photoUrl` ia com `key=${apiKey}` embutida na URL do Google, direto
+   * na resposta de `GET /clinicas/places` — qualquer tutor logado extraía a
+   * chave do JSON e chamava Places/Geocoding por fora até estourar a cota
+   * (faturada por chamada). Agora a chave nunca sai do servidor: o `photoUrl`
+   * devolvido aponta para `GET /clinicas/fotos/:token` (`buildPhotoUrl`
+   * abaixo), esta função busca a foto de verdade e a API devolve os bytes.
+   *
+   * O `name` do Google já inclui o `placeId`, então um 302 para a URL dele
+   * vazaria a chave no header `Location` — por isso a busca acontece aqui, no
+   * servidor, e não um redirect.
+   */
+  async fetchPhoto(
+    token: string,
+  ): Promise<{ contentType: string; body: Buffer }> {
+    const photoName = this.resolvePhotoToken(token);
+
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=${PHOTO_MAX_WIDTH_PX}&key=${this.apiKey}`,
+        { signal: AbortSignal.timeout(this.timeoutMs) },
+      );
+    } catch (error) {
+      this.logger.error(
+        `Falha ao buscar a foto ${photoName} no Google Places`,
+        error instanceof Error ? error.stack : error,
+      );
+      throw new HttpException(
+        'Não foi possível carregar a foto da clínica agora.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    if (!response.ok) {
+      throw new HttpException(
+        'Não foi possível carregar a foto da clínica agora.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    const upstreamContentType = response.headers.get('content-type') ?? '';
+    const contentType = upstreamContentType.startsWith('image/')
+      ? upstreamContentType
+      : 'application/octet-stream';
+    const body = Buffer.from(await response.arrayBuffer());
+    return { contentType, body };
+  }
+
+  /** Monta o `photoUrl` público a partir do `name` da foto no Google. */
+  private buildPhotoUrl(photoName: string): string {
+    const token = this.signPhotoToken(photoName);
+    return `${this.apiBaseUrl}/clinicas/fotos/${token}`;
+  }
+
+  /**
+   * Assina o `name` da foto (ex.: `places/{placeId}/photos/{photoId}`) com um
+   * prazo curto. Mesmo padrão do `state` do OAuth do Calendar
+   * (`GoogleCalendarService.signState`): reaproveita o `JWT_SECRET` em vez de
+   * introduzir mais um segredo só para isso.
+   */
+  private signPhotoToken(photoName: string): string {
+    const encodedName = Buffer.from(photoName, 'utf8').toString('base64url');
+    const expiresAt = Date.now() + PHOTO_TOKEN_TTL_MS;
+    const payload = `${encodedName}.${expiresAt}`;
+    return `${payload}.${this.photoTokenSignature(payload)}`;
+  }
+
+  /**
+   * Confere a assinatura e o prazo do token e devolve o `name` da foto de
+   * origem. Qualquer inconsistência recusa o pedido antes de gastar uma
+   * chamada no Google.
+   */
+  private resolvePhotoToken(token: string): string {
+    const partes = token?.split('.') ?? [];
+    if (partes.length !== 3) {
+      throw new BadRequestException('Token de foto inválido.');
+    }
+
+    const [encodedName, expiresAtRaw, assinatura] = partes;
+    const esperada = this.photoTokenSignature(`${encodedName}.${expiresAtRaw}`);
+
+    const recebida = Buffer.from(assinatura);
+    const referencia = Buffer.from(esperada);
+    if (
+      recebida.length !== referencia.length ||
+      !timingSafeEqual(recebida, referencia)
+    ) {
+      throw new BadRequestException('Token de foto inválido.');
+    }
+
+    const expiresAt = Number(expiresAtRaw);
+    if (!Number.isFinite(expiresAt) || Date.now() > expiresAt) {
+      throw new BadRequestException(
+        'O link da foto expirou. Busque a clínica de novo.',
+      );
+    }
+
+    return Buffer.from(encodedName, 'base64url').toString('utf8');
+  }
+
+  private photoTokenSignature(payload: string): string {
+    const secret = this.configService.get<string>('auth.jwtSecret');
+    if (!secret) {
+      throw new Error(
+        'JWT_SECRET é obrigatória para assinar a URL de foto da clínica.',
+      );
+    }
+    return createHmac('sha256', secret).update(payload).digest('base64url');
   }
 
   /**
@@ -282,7 +446,7 @@ export class PlacesService {
         place.location!.longitude,
       ),
       photoUrl: place.photos?.[0]
-        ? this.getPhotoUrl(place.photos[0].name)
+        ? this.buildPhotoUrl(place.photos[0].name)
         : undefined,
       websiteUrl: place.websiteUri,
       googleMapsUrl: place.googleMapsUri,
