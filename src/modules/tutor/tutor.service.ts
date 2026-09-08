@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Tutor } from '@prisma/client';
 import { UpdateTutorDto, normalizeEmail } from '@petcardorg/shared';
+import { temVinculoComTutor } from '../../common/authorization/pet-atendido';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UploadService } from '../upload/upload.service';
 
@@ -73,11 +74,7 @@ export class TutorService {
   ): Promise<TutorPublico> {
     const tutor = await this.findById(id);
 
-    const vinculo = await this.prisma.petAtendido.findFirst({
-      where: { veterinarioId, pet: { tutorId: id } },
-      select: { id: true },
-    });
-    if (!vinculo) {
+    if (!(await temVinculoComTutor(this.prisma, veterinarioId, id))) {
       throw new ForbiddenException(
         'Tutor sem pet na sua lista de atendidos. Leia o QR Code da carteira para iniciar o atendimento.',
       );

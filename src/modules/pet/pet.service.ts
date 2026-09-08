@@ -12,6 +12,7 @@ import {
   Species,
   UpdatePetDto,
 } from '@petcardorg/shared';
+import { temVinculoComPet } from '../../common/authorization/pet-atendido';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CardService } from '../card/card.service';
 import { ColeiraService } from '../coleira/coleira.service';
@@ -211,10 +212,7 @@ export class PetService {
     petId: string,
     veterinarioId: string,
   ): Promise<void> {
-    const vinculo = await this.prisma.petAtendido.findUnique({
-      where: { veterinarioId_petId: { veterinarioId, petId } },
-    });
-    if (!vinculo) {
+    if (!(await temVinculoComPet(this.prisma, veterinarioId, petId))) {
       throw new ForbiddenException(
         'Pet fora da sua lista de atendidos. Leia o QR Code da carteira para iniciar o atendimento.',
       );

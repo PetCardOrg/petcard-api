@@ -16,6 +16,7 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import { randomBytes } from 'node:crypto';
 import type { Response } from 'express';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -186,6 +187,16 @@ export class CalendarController {
       return;
     }
 
+    // A CSP global é `script-src 'self'`, que bloqueia o <script> inline e o
+    // `onclick` desta página; afrouxada por resposta com nonce, como no
+    // AuthWebController.
+    const nonce = randomBytes(16).toString('base64');
+    res.setHeader(
+      'Content-Security-Policy',
+      `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; ` +
+        `connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
+    );
+
     res.send(`<!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="utf-8"><title>PetCard - Calendar Dev Connect</title>
 <style>
@@ -204,10 +215,11 @@ export class CalendarController {
   <p><strong>1.</strong> Faca login com sua conta do PetCard:</p>
   <input id="email" type="email" placeholder="Email" />
   <input id="password" type="password" placeholder="Senha" />
-  <button onclick="login()">Entrar</button>
+  <button id="login-btn">Entrar</button>
 </div>
 <div id="status" class="step"></div>
-<script>
+<script nonce="${nonce}">
+document.getElementById('login-btn').addEventListener('click', login);
 async function login() {
   const email = document.getElementById('email').value;
   const password = document.getElementById('password').value;
