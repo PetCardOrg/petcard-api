@@ -22,6 +22,8 @@
     "postinstall": "prisma generate",
     "db:seed": "npx prisma db seed",
     "reminders:run": "nest build && node -r reflect-metadata dist/scripts/run-reminders.js",
+    "scan:simulate": "nest build && node -r reflect-metadata dist/scripts/simulate-scan.js",
+    "qr:regenerate": "nest build && node -r reflect-metadata dist/scripts/regenerate-qr.js",
     "openapi:json": "nest build && node -r reflect-metadata dist/scripts/generate-openapi.js"
   },
   "prisma": {
