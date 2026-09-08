@@ -75,7 +75,28 @@ export class CardService implements OnModuleInit {
     return this.generateBuffer(this.buildPublicUrl(token));
   }
 
-  async issueTokenForPet(petId: string): Promise<string> {
+  /**
+   * Devolve o token da carteira, criando um só quando ainda não existe.
+   *
+   * É o que o job de QR usa. Emitir e rotacionar são caminhos separados de
+   * propósito: o job tem 3 retries e o broker pode reentregar a mensagem, então
+   * uma falha transitória no S3 no meio da geração faria o token ser trocado
+   * de novo a cada tentativa — e o QR já impresso na coleira passaria a apontar
+   * para um token que não existe mais (404 na página do achador). Rotação é
+   * decisão do tutor, e acontece uma vez só, no caminho da requisição
+   * (`POST /pets/:id/qr-code` → `PetService.regenerateQrCode`).
+   */
+  async ensureTokenForPet(petId: string): Promise<string> {
+    const card = await this.prisma.carteiraDigital.upsert({
+      where: { petId },
+      create: { petId, token: randomUUID() },
+      update: {},
+    });
+    return card.token;
+  }
+
+  /** Troca o token da carteira, invalidando o QR anterior. */
+  async rotateTokenForPet(petId: string): Promise<string> {
     const token = randomUUID();
     await this.prisma.carteiraDigital.upsert({
       where: { petId },

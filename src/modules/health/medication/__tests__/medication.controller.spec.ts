@@ -12,6 +12,8 @@ import {
 } from '../../../../../test/utils/controller-harness';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { QrCodePublisher } from '../../../queue/qr-code.publisher';
+import { CardService } from '../../../card/card.service';
+import { ColeiraService } from '../../../coleira/coleira.service';
 import { PetService } from '../../../pet/pet.service';
 import { TutorService } from '../../../tutor/tutor.service';
 import { MedicationController } from '../medication.controller';
@@ -80,6 +82,8 @@ describe('MedicationController (integração)', () => {
           provide: QrCodePublisher,
           useValue: { publishGenerate: jest.fn() },
         },
+        { provide: CardService, useValue: { rotateTokenForPet: jest.fn() } },
+        { provide: ColeiraService, useValue: { rotateTokenForPet: jest.fn() } },
         {
           // O guard real roda; só a consulta de verificação é mockada.
           provide: CrmvVerificationService,

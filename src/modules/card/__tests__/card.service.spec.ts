@@ -106,11 +106,13 @@ describe('CardService', () => {
     });
   });
 
-  describe('issueTokenForPet', () => {
-    it('should upsert carteira_digital with a new uuid token', async () => {
-      prisma.carteiraDigital.upsert.mockResolvedValue({});
+  describe('ensureTokenForPet', () => {
+    it('cria a carteira com um token novo quando o pet ainda não tem uma', async () => {
+      prisma.carteiraDigital.upsert.mockImplementation(
+        (args: { create: { token: string } }) => ({ token: args.create.token }),
+      );
 
-      const token = await service.issueTokenForPet('pet-1');
+      const token = await service.ensureTokenForPet('pet-1');
 
       expect(token).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
@@ -118,17 +120,38 @@ describe('CardService', () => {
       expect(prisma.carteiraDigital.upsert).toHaveBeenCalledWith({
         where: { petId: 'pet-1' },
         create: { petId: 'pet-1', token },
-        update: { token },
+        update: {},
       });
     });
 
-    it('should rotate token on subsequent calls for the same pet', async () => {
+    it('preserva o token existente — o QR impresso não pode mudar sozinho', async () => {
+      prisma.carteiraDigital.upsert.mockResolvedValue({ token: 'tok-antigo' });
+
+      const t1 = await service.ensureTokenForPet('pet-1');
+      const t2 = await service.ensureTokenForPet('pet-1');
+
+      expect(t1).toBe('tok-antigo');
+      expect(t2).toBe('tok-antigo');
+      const [[args]] = prisma.carteiraDigital.upsert.mock.calls as Array<
+        [{ update: Record<string, unknown> }]
+      >;
+      expect(args.update).toEqual({});
+    });
+  });
+
+  describe('rotateTokenForPet', () => {
+    it('grava um token novo a cada chamada', async () => {
       prisma.carteiraDigital.upsert.mockResolvedValue({});
 
-      const t1 = await service.issueTokenForPet('pet-1');
-      const t2 = await service.issueTokenForPet('pet-1');
+      const t1 = await service.rotateTokenForPet('pet-1');
+      const t2 = await service.rotateTokenForPet('pet-1');
 
       expect(t1).not.toBe(t2);
+      expect(prisma.carteiraDigital.upsert).toHaveBeenLastCalledWith({
+        where: { petId: 'pet-1' },
+        create: { petId: 'pet-1', token: t2 },
+        update: { token: t2 },
+      });
     });
   });
 

@@ -33,12 +33,12 @@ const buildContext = (
 describe('QrCodeConsumer', () => {
   let consumer: QrCodeConsumer;
   let cardService: {
-    issueTokenForPet: jest.Mock;
+    ensureTokenForPet: jest.Mock;
     generateQrCode: jest.Mock;
     setCardQrCodeUrl: jest.Mock;
   };
   let coleiraService: {
-    issueTokenForPet: jest.Mock;
+    ensureTokenForPet: jest.Mock;
     generateQrCode: jest.Mock;
     setQrCodeUrl: jest.Mock;
   };
@@ -47,12 +47,12 @@ describe('QrCodeConsumer', () => {
 
   beforeEach(async () => {
     cardService = {
-      issueTokenForPet: jest.fn().mockResolvedValue('tok-123'),
+      ensureTokenForPet: jest.fn().mockResolvedValue('tok-123'),
       generateQrCode: jest.fn().mockResolvedValue(Buffer.from('fake-png')),
       setCardQrCodeUrl: jest.fn().mockResolvedValue(undefined),
     };
     coleiraService = {
-      issueTokenForPet: jest.fn().mockResolvedValue('coleira-tok'),
+      ensureTokenForPet: jest.fn().mockResolvedValue('coleira-tok'),
       generateQrCode: jest.fn().mockResolvedValue(Buffer.from('fake-png')),
       setQrCodeUrl: jest.fn().mockResolvedValue(undefined),
     };
@@ -78,7 +78,7 @@ describe('QrCodeConsumer', () => {
 
     await consumer.handleGenerate({ pet_id: 'pet-1' }, context);
 
-    expect(cardService.issueTokenForPet).toHaveBeenCalledWith('pet-1');
+    expect(cardService.ensureTokenForPet).toHaveBeenCalledWith('pet-1');
     expect(cardService.generateQrCode).toHaveBeenCalledWith('tok-123');
     expect(uploadService.uploadBuffer).toHaveBeenCalledWith(
       expect.any(Buffer),
@@ -91,17 +91,52 @@ describe('QrCodeConsumer', () => {
     expect(channel.publish).not.toHaveBeenCalled();
   });
 
+  // A regressão que este teste pega: quando o handler emitia o token
+  // (`issueTokenForPet`, upsert com `update: { token }`), uma falha transitória
+  // no S3 fazia o retry rotacionar carteira e coleira de novo — o QR já
+  // impresso na coleira passava a apontar para um token inexistente e a página
+  // do achador respondia 404.
+  it('não troca os tokens quando o job é reexecutado depois de uma falha', async () => {
+    // Os serviços devolvem sempre o token que já está no banco.
+    cardService.ensureTokenForPet.mockResolvedValue('tok-carteira');
+    coleiraService.ensureTokenForPet.mockResolvedValue('tok-coleira');
+    // Primeira execução morre no upload; a segunda (retry) vai até o fim.
+    uploadService.uploadBuffer
+      .mockRejectedValueOnce(new Error('S3 timeout'))
+      .mockResolvedValue(QR_URL);
+
+    const primeira = buildContext(channel);
+    await consumer.handleGenerate({ pet_id: 'pet-1' }, primeira.context);
+
+    const retry = buildContext(channel, { [QR_CODE_RETRY_HEADER]: 1 });
+    await consumer.handleGenerate({ pet_id: 'pet-1' }, retry.context);
+
+    // As duas execuções desenharam o MESMO token, nas duas pontas.
+    expect(cardService.generateQrCode.mock.calls).toEqual([
+      ['tok-carteira'],
+      ['tok-carteira'],
+    ]);
+    expect(coleiraService.generateQrCode.mock.calls).toEqual([['tok-coleira']]);
+    // E a imagem vai para a mesma chave do S3, não para uma nova.
+    expect(uploadService.uploadBuffer).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      'qr-codes/pet-1.png',
+      'image/png',
+    );
+    expect(coleiraService.setQrCodeUrl).toHaveBeenCalledWith('pet-1', QR_URL);
+  });
+
   it('should ack and skip when pet_id is missing', async () => {
     const { context, message } = buildContext(channel);
 
     await consumer.handleGenerate({} as unknown as { pet_id: string }, context);
 
-    expect(cardService.issueTokenForPet).not.toHaveBeenCalled();
+    expect(cardService.ensureTokenForPet).not.toHaveBeenCalled();
     expect(channel.ack).toHaveBeenCalledWith(message);
   });
 
   it('should republish with incremented retry counter on first failure', async () => {
-    cardService.issueTokenForPet.mockRejectedValue(new Error('DB down'));
+    cardService.ensureTokenForPet.mockRejectedValue(new Error('DB down'));
     const { context, message } = buildContext(channel);
 
     await consumer.handleGenerate({ pet_id: 'pet-1' }, context);
@@ -121,7 +156,7 @@ describe('QrCodeConsumer', () => {
   });
 
   it('should increment existing retry counter on subsequent failures', async () => {
-    cardService.issueTokenForPet.mockRejectedValue(new Error('DB down'));
+    cardService.ensureTokenForPet.mockRejectedValue(new Error('DB down'));
     const { context } = buildContext(channel, { [QR_CODE_RETRY_HEADER]: 1 });
 
     await consumer.handleGenerate({ pet_id: 'pet-1' }, context);
@@ -139,7 +174,7 @@ describe('QrCodeConsumer', () => {
   });
 
   it('should nack without requeue (route to DLQ) when retries are exhausted', async () => {
-    cardService.issueTokenForPet.mockRejectedValue(new Error('DB down'));
+    cardService.ensureTokenForPet.mockRejectedValue(new Error('DB down'));
     const { context, message } = buildContext(channel, {
       [QR_CODE_RETRY_HEADER]: QR_CODE_MAX_RETRIES,
     });

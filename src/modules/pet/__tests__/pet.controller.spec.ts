@@ -7,6 +7,8 @@ import {
   VET,
 } from '../../../../test/utils/controller-harness';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { CardService } from '../../card/card.service';
+import { ColeiraService } from '../../coleira/coleira.service';
 import { QrCodePublisher } from '../../queue/qr-code.publisher';
 import { TutorService } from '../../tutor/tutor.service';
 import { PetController } from '../pet.controller';
@@ -70,6 +72,14 @@ describe('PetController (integração)', () => {
         TutorService,
         { provide: PrismaService, useValue: prisma },
         { provide: QrCodePublisher, useValue: qrPublisher },
+        {
+          provide: CardService,
+          useValue: { rotateTokenForPet: jest.fn().mockResolvedValue('tok') },
+        },
+        {
+          provide: ColeiraService,
+          useValue: { rotateTokenForPet: jest.fn().mockResolvedValue('tag') },
+        },
       ],
     });
   });
