@@ -92,10 +92,12 @@ describe('Conta do tutor — exclusão (e2e)', () => {
       .expect(204);
 
     // O JWT continua com assinatura válida até expirar, mas não há mais conta
-    // por trás dele: as rotas que resolvem o tutor precisam recusar.
+    // por trás dele. A recusa passou a vir da própria autenticação (401), não
+    // mais de cada rota que resolvia o tutor e devolvia 404: a JwtStrategy
+    // confere a conta antes de a request chegar ao controller.
     await request(app.getHttpServer())
       .get('/tutors/me')
       .set('Authorization', `Bearer ${tutorToken}`)
-      .expect(404);
+      .expect(401);
   });
 });

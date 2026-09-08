@@ -9,13 +9,17 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
+import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiTags,
+  ApiTooManyRequestsResponse,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { AuthCrmvVerificado } from './crmv/auth-crmv.decorator';
@@ -27,6 +31,7 @@ import {
   PetAtendidoResponseDto,
   UpdateVeterinarioDto,
 } from '@petcardorg/shared';
+import { LIMITE_DE_ROTA_CARA } from '../../config/throttler.config';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import {
   CrmvVerificationService,
@@ -39,6 +44,11 @@ import {
   VeterinarioService,
 } from './veterinario.service';
 
+/**
+ * Como em `auth.controller.ts`, o `ThrottlerGuard` avalia TODOS os throttlers
+ * nomeados da configuração — por isso quem usa `@Throttle({ auth: ... })`
+ * também dispensa o da carteira pública, senão seria o limite dela a valer.
+ */
 @ApiTags('veterinarios')
 @Controller('veterinarios')
 export class VeterinarioController {
@@ -60,11 +70,20 @@ export class VeterinarioController {
   @Post('me/crmv/verificar')
   @Auth(Role.VET)
   @HttpCode(HttpStatus.OK)
+  // `force=true` pula o cache de 180 dias, e cada chamada que passa por aqui é
+  // uma consulta cobrada na base externa. Sem limite, um laço nesta rota vira
+  // conta a pagar. Teto mais baixo que o das rotas de auth: verificar CRMV é
+  // ação rara, ninguém precisa fazê-la dez vezes por minuto.
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ auth: { limit: LIMITE_DE_ROTA_CARA } })
+  @SkipThrottle({ 'public-card': true })
+  @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({
     summary: 'Verificar meu CRMV na base externa',
     description:
       'A consulta é paga por chamada: uma verificação dentro do prazo é ' +
-      'reaproveitada. Use force=true para consultar de novo mesmo assim.',
+      'reaproveitada. Use force=true para consultar de novo mesmo assim. ' +
+      'Rota com limite próprio, mais apertado que o das rotas de login.',
   })
   @ApiQuery({ name: 'force', required: false, type: Boolean })
   async verificarCrmv(
@@ -81,8 +100,11 @@ export class VeterinarioController {
     description:
       'Só o próprio veterinário altera o próprio cadastro — o id vem do ' +
       'token, não da rota. Trocar o CRMV zera a verificação: o registro novo ' +
-      'precisa ser verificado antes de liberar dado clínico de novo.',
+      'precisa ser verificado antes de liberar dado clínico de novo. ' +
+      'Trocar a senha exige `senha_atual` e encerra as sessões abertas, ' +
+      'inclusive a que fez a troca — é preciso entrar de novo.',
   })
+  @ApiUnauthorizedResponse({ description: 'Senha atual incorreta' })
   async updateMe(
     @CurrentUser() user: JwtPayload,
     @Body() dto: UpdateVeterinarioDto,

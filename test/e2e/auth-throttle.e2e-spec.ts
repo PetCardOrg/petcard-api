@@ -1,9 +1,12 @@
 import type { INestApplication } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import type { App } from 'supertest/types';
 import request from 'supertest';
 import { createE2EApp, E2EApp } from '../utils/e2e-app';
 import { resetDb } from '../utils/e2e-db';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { LIMITE_DE_ROTA_CARA } from '../../src/config/throttler.config';
+import { Role } from '../../src/modules/auth/enums/role.enum';
 
 const LIMITE = 3;
 
@@ -71,5 +74,73 @@ describe('Rate limit de autenticação (e2e)', () => {
 
     await cadastro(LIMITE).expect(429);
     expect(await prisma.tutor.count()).toBe(LIMITE);
+  });
+
+  /**
+   * Rotas com sessão que custam mais que uma tentativa de login: uma queima
+   * cota de SMTP e reputação de remetente, a outra é uma consulta cobrada por
+   * chamada. Ter token não é salvo-conduto para repetir à vontade.
+   */
+  describe('rotas caras (com sessão)', () => {
+    /**
+     * A conta e o token saem daqui, não dos endpoints de cadastro/login: nesta
+     * suíte o orçamento deles já foi gasto pelos testes acima, e o que está
+     * sob teste é o limite próprio destas rotas.
+     */
+    async function sessaoDeTutor(email: string): Promise<string> {
+      const tutor = await prisma.tutor.create({
+        data: { name: 'Tutor', email, password: 'hash-irrelevante' },
+      });
+      return app
+        .get(JwtService)
+        .sign({ sub: tutor.id, email: tutor.email, role: Role.TUTOR });
+    }
+
+    async function sessaoDeVet(email: string): Promise<string> {
+      const vet = await prisma.veterinario.create({
+        data: {
+          nome: 'Dra. Camila',
+          email,
+          crmv: 'CRMV-CE-1234',
+          password: 'hash-irrelevante',
+          crmvVerifiedAt: new Date(),
+          crmvSituacao: 'Ativo',
+        },
+      });
+      return app
+        .get(JwtService)
+        .sign({ sub: vet.id, email: vet.email, role: Role.VET });
+    }
+
+    it('corta o reenvio do e-mail de verificação em laço', async () => {
+      const token = await sessaoDeTutor('reenvio@petcard.com');
+
+      const reenvio = () =>
+        request(app.getHttpServer())
+          .post('/auth/email/resend')
+          .set('Authorization', `Bearer ${token}`);
+
+      for (let i = 0; i < LIMITE_DE_ROTA_CARA; i++) {
+        await reenvio().expect(202);
+      }
+
+      await reenvio().expect(429);
+    });
+
+    it('corta a verificação de CRMV forçada em laço', async () => {
+      const token = await sessaoDeVet('crmv-limite@petcard.com');
+
+      // Cada `force=true` pula o cache de 180 dias e vira uma consulta paga.
+      const verificacao = () =>
+        request(app.getHttpServer())
+          .post('/veterinarios/me/crmv/verificar?force=true')
+          .set('Authorization', `Bearer ${token}`);
+
+      for (let i = 0; i < LIMITE_DE_ROTA_CARA; i++) {
+        await verificacao().expect(200);
+      }
+
+      await verificacao().expect(429);
+    });
   });
 });

@@ -236,7 +236,7 @@ describe('AuthController (integração)', () => {
         .send({
           nome: 'Dr. Carlos',
           email: 'carlos@vet.com',
-          password: 'senha-forte',
+          password: 'Senha123!',
           crmv: 'CRMV-SP 12345',
         })
         .expect(201);

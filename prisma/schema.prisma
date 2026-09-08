@@ -69,19 +69,24 @@ enum AuthTokenPurpose {
 }
 
 model Tutor {
-  id              String    @id @default(uuid())
-  name            String
-  email           String    @unique
+  id                String    @id @default(uuid())
+  name              String
+  email             String    @unique
   // Nulo para conta criada só via Google — nunca teve senha. O login por
   // e-mail/senha trata isso caindo no dummy hash, sem vazar a diferença.
-  password        String?
-  googleId        String?   @unique @map("google_id")
-  emailVerifiedAt DateTime? @map("email_verified_at")
-  phone           String?
-  profileImageUrl String?   @map("profile_image_url")
-  timezone        String    @default("America/Fortaleza")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  password          String?
+  googleId          String?   @unique @map("google_id")
+  emailVerifiedAt   DateTime? @map("email_verified_at")
+  /// Momento da última troca de senha. Todo JWT carrega este carimbo; a
+  /// JwtStrategy recusa o token cujo carimbo não bate mais com o da conta,
+  /// que é como uma redefinição derruba as sessões abertas antes dela.
+  /// Nulo = a senha nunca mudou desde o cadastro.
+  passwordChangedAt DateTime? @map("password_changed_at")
+  phone             String?
+  profileImageUrl   String?   @map("profile_image_url")
+  timezone          String    @default("America/Fortaleza")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   pets             Pet[]
   appointments     Appointment[]
@@ -358,6 +363,9 @@ model Veterinario {
   crmv     String  @unique
   telefone String?
   photoUrl String? @map("photo_url")
+
+  /// Mesmo carimbo do tutor: trocar a senha invalida os tokens emitidos antes.
+  passwordChangedAt DateTime? @map("password_changed_at")
 
   /// Verificação do CRMV numa base externa (api#113). Nulo = não verificado.
   crmvVerifiedAt DateTime? @map("crmv_verified_at")
