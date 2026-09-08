@@ -55,6 +55,8 @@ export async function createControllerTestApp(opts: {
         throttlers: [
           { name: 'auth', ttl: 60_000, limit: 10_000 },
           { name: 'public-card', ttl: 60_000, limit: 10_000 },
+          { name: 'places', ttl: 60_000, limit: 10_000 },
+          { name: 'clinica-photo', ttl: 60_000, limit: 10_000 },
         ],
       }),
     ],

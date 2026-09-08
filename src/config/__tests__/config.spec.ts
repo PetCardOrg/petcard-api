@@ -28,6 +28,7 @@ const CHAVES = [
   'JWT_SECRET',
   'SMTP_HOST',
   'APP_DEEP_LINK_BASE',
+  'API_BASE_URL',
 ] as const;
 
 describe('configuração de ambiente', () => {
@@ -60,6 +61,7 @@ describe('configuração de ambiente', () => {
 
     it('aceita a lista com espaços e entradas vazias', () => {
       process.env.NODE_ENV = 'production';
+      process.env.API_BASE_URL = 'https://api.petcard.app';
       process.env.CORS_ORIGINS =
         ' https://app.petcard.app , https://vet.petcard.app ,, ';
 
@@ -75,6 +77,29 @@ describe('configuração de ambiente', () => {
       process.env.CORS_ORIGINS = '   ';
 
       expect(appConfig().corsOrigins).toContain('http://localhost:5173');
+    });
+  });
+
+  describe('origem pública da API', () => {
+    it('recusa subir em produção sem API_BASE_URL', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CORS_ORIGINS = 'https://app.petcard.app';
+
+      // O default é um endereço de desenvolvimento: usá-lo em produção geraria
+      // um photoUrl de clínica que ninguém de fora consegue alcançar.
+      expect(() => appConfig()).toThrow(
+        'API_BASE_URL is required in production',
+      );
+    });
+
+    it('em desenvolvimento cai no localhost', () => {
+      expect(appConfig().apiBaseUrl).toBe('http://localhost:3000');
+    });
+
+    it('remove a barra final declarada', () => {
+      process.env.API_BASE_URL = 'https://api.petcard.app/';
+
+      expect(appConfig().apiBaseUrl).toBe('https://api.petcard.app');
     });
   });
 
@@ -110,14 +135,17 @@ describe('configuração de ambiente', () => {
 
   describe('rate limit das rotas de autenticação', () => {
     it('usa os padrões quando o ambiente não diz nada', () => {
-      expect(throttlerConfig()).toEqual({ authTtlSeconds: 60, authLimit: 10 });
+      expect(throttlerConfig()).toMatchObject({
+        authTtlSeconds: 60,
+        authLimit: 10,
+      });
     });
 
     it('respeita os valores declarados', () => {
       process.env.AUTH_THROTTLE_LIMIT = '3';
       process.env.AUTH_THROTTLE_TTL_SECONDS = '120';
 
-      expect(throttlerConfig()).toEqual({
+      expect(throttlerConfig()).toMatchObject({
         authTtlSeconds: 120,
         authLimit: 3,
       });
@@ -129,7 +157,10 @@ describe('configuração de ambiente', () => {
       process.env.AUTH_THROTTLE_LIMIT = 'dez';
       process.env.AUTH_THROTTLE_TTL_SECONDS = '0';
 
-      expect(throttlerConfig()).toEqual({ authTtlSeconds: 60, authLimit: 10 });
+      expect(throttlerConfig()).toMatchObject({
+        authTtlSeconds: 60,
+        authLimit: 10,
+      });
     });
   });
 

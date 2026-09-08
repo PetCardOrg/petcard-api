@@ -1,10 +1,33 @@
-/* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
-import { HttpException } from '@nestjs/common';
+/* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-member-access */
+import { BadRequestException, HttpException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PlacesService } from '../places.service';
 
-const makeConfig = (key: string | undefined): ConfigService =>
-  ({ get: jest.fn().mockReturnValue(key) }) as unknown as ConfigService;
+const DEFAULT_API_BASE_URL = 'https://api.petcard.test';
+const DEFAULT_JWT_SECRET = 'segredo-de-teste';
+
+type ConfigOverrides = {
+  apiBaseUrl?: string | undefined;
+  jwtSecret?: string | undefined;
+  timeoutMs?: number | undefined;
+};
+
+const makeConfig = (
+  apiKey: string | undefined,
+  overrides: ConfigOverrides = {},
+): ConfigService => {
+  const values: Record<string, unknown> = {
+    'googleMaps.apiKey': apiKey,
+    'app.apiBaseUrl':
+      'apiBaseUrl' in overrides ? overrides.apiBaseUrl : DEFAULT_API_BASE_URL,
+    'auth.jwtSecret':
+      'jwtSecret' in overrides ? overrides.jwtSecret : DEFAULT_JWT_SECRET,
+    'googleMaps.timeoutMs': overrides.timeoutMs,
+  };
+  return {
+    get: jest.fn((key: string) => values[key]),
+  } as unknown as ConfigService;
+};
 
 const fullPlace = {
   id: 'place-1',
@@ -45,6 +68,12 @@ describe('PlacesService', () => {
     );
   });
 
+  it('lança erro no boot quando API_BASE_URL está ausente', () => {
+    expect(
+      () => new PlacesService(makeConfig('key', { apiBaseUrl: undefined })),
+    ).toThrow('API_BASE_URL');
+  });
+
   it('mapeia um place para o DTO com distância calculada e foto', async () => {
     const fetchMock = jest
       .fn()
@@ -67,13 +96,18 @@ describe('PlacesService', () => {
       rating: 4.7,
       openNow: true,
       coordinates: { lat: -3.74, lng: -38.53 },
-      photoUrl: expect.stringContaining(
-        'places/place-1/photos/abc/media?maxWidthPx=400&key=key-xyz',
-      ),
       websiteUrl: 'https://vetcare.example',
     });
     expect(typeof result[0].distanceMeters).toBe('number');
     expect(result[0].distanceMeters).toBeGreaterThan(0);
+
+    // A chave nunca pode sair na resposta — é o próprio achado da auditoria:
+    // photoUrl aponta para o proxy da própria API, não para o Google.
+    expect(result[0].photoUrl).not.toContain('key-xyz');
+    expect(result[0].photoUrl).not.toContain('googleapis.com');
+    expect(result[0].photoUrl).toMatch(
+      /^https:\/\/api\.petcard\.test\/clinicas\/fotos\/[\w-]+\.\d+\.[\w-]+$/,
+    );
   });
 
   it('usa fallbacks quando campos opcionais estão ausentes', async () => {
@@ -264,6 +298,38 @@ describe('PlacesService', () => {
     }
   });
 
+  it('chama o Google com timeout — a requisição não pode ficar pendurada', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(okResponse({ places: [] }));
+    global.fetch = fetchMock;
+
+    const service = new PlacesService(makeConfig('key'));
+    await service.searchNearbyVetClinics({
+      lat: userLat,
+      lng: userLng,
+      radiusMeters: 5000,
+    });
+
+    const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(requestInit.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('lança 502 quando o Google não responde (timeout/rede)', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error('timeout'));
+
+    const service = new PlacesService(makeConfig('key'));
+    expect.assertions(2);
+    try {
+      await service.searchNearbyVetClinics({
+        lat: userLat,
+        lng: userLng,
+        radiusMeters: 5000,
+      });
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(502);
+    }
+  });
+
   describe('autocomplete', () => {
     const suggestion = (placeId: string, main: string, secondary?: string) => ({
       placePrediction: {
@@ -419,12 +485,169 @@ describe('PlacesService', () => {
         expect((error as HttpException).getStatus()).toBe(502);
       }
     });
+
+    it('chama o Google com timeout — a requisição não pode ficar pendurada', async () => {
+      const fetchMock = jest.fn().mockResolvedValue(okResponse({}));
+      global.fetch = fetchMock;
+
+      const service = new PlacesService(makeConfig('key'));
+      await service.autocomplete({ input: 'petshop' });
+
+      const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+      expect(requestInit.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('lança 502 quando o Google não responde (timeout/rede)', async () => {
+      global.fetch = jest.fn().mockRejectedValue(new Error('timeout'));
+
+      const service = new PlacesService(makeConfig('key'));
+      expect.assertions(2);
+      try {
+        await service.autocomplete({ input: 'petshop' });
+      } catch (error) {
+        expect(error).toBeInstanceOf(HttpException);
+        expect((error as HttpException).getStatus()).toBe(502);
+      }
+    });
   });
 
-  it('getPhotoUrl monta a URL de mídia com a chave e largura', () => {
-    const service = new PlacesService(makeConfig('key-photo'));
-    expect(service.getPhotoUrl('places/p/photos/x', 250)).toBe(
-      'https://places.googleapis.com/v1/places/p/photos/x/media?maxWidthPx=250&key=key-photo',
-    );
+  describe('fetchPhoto (proxy da foto — a chave nunca sai do servidor)', () => {
+    /** Gera um token de foto de verdade, assinado pela própria instância. */
+    async function tokenFor(service: PlacesService): Promise<string> {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue(okResponse({ places: [fullPlace] }));
+      const [dto] = await service.searchNearbyVetClinics({
+        lat: userLat,
+        lng: userLng,
+        radiusMeters: 5000,
+      });
+      return dto.photoUrl!.split('/clinicas/fotos/')[1];
+    }
+
+    it('busca a foto no Google com a chave e devolve os bytes', async () => {
+      const service = new PlacesService(makeConfig('key-photo'));
+      const token = await tokenFor(service);
+
+      const bytes = new Uint8Array([1, 2, 3]).buffer;
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'image/jpeg' },
+        arrayBuffer: async () => bytes,
+      });
+      global.fetch = fetchMock;
+
+      const { contentType, body } = await service.fetchPhoto(token);
+
+      expect(contentType).toBe('image/jpeg');
+      expect(body).toEqual(Buffer.from(bytes));
+
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(
+        'https://places.googleapis.com/v1/places/place-1/photos/abc/media?maxWidthPx=400&key=key-photo',
+      );
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('cai para application/octet-stream quando o content-type não é imagem', async () => {
+      const service = new PlacesService(makeConfig('key'));
+      const token = await tokenFor(service);
+
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'text/html' },
+        arrayBuffer: async () => new ArrayBuffer(0),
+      });
+
+      const { contentType } = await service.fetchPhoto(token);
+      expect(contentType).toBe('application/octet-stream');
+    });
+
+    it('lança 502 quando o Google recusa a busca da foto', async () => {
+      const service = new PlacesService(makeConfig('key'));
+      const token = await tokenFor(service);
+
+      global.fetch = jest.fn().mockResolvedValue({ ok: false });
+
+      await expect(service.fetchPhoto(token)).rejects.toMatchObject({
+        status: 502,
+      });
+    });
+
+    it('lança 502 quando o Google não responde (timeout/rede)', async () => {
+      const service = new PlacesService(makeConfig('key'));
+      const token = await tokenFor(service);
+
+      global.fetch = jest.fn().mockRejectedValue(new Error('timeout'));
+
+      await expect(service.fetchPhoto(token)).rejects.toMatchObject({
+        status: 502,
+      });
+    });
+
+    it('rejeita token malformado sem chamar o Google', async () => {
+      const service = new PlacesService(makeConfig('key'));
+      const fetchMock = jest.fn();
+      global.fetch = fetchMock;
+
+      await expect(service.fetchPhoto('token-qualquer')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('rejeita token com assinatura adulterada', async () => {
+      const service = new PlacesService(makeConfig('key'));
+      const token = await tokenFor(service);
+      const adulterado = `${token.slice(0, -1)}${token.endsWith('A') ? 'B' : 'A'}`;
+
+      const fetchMock = jest.fn();
+      global.fetch = fetchMock;
+
+      await expect(service.fetchPhoto(adulterado)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('rejeita token expirado', async () => {
+      const service = new PlacesService(makeConfig('key'));
+      const realNow = Date.now;
+      try {
+        Date.now = jest.fn(() => 0);
+        const token = await tokenFor(service);
+
+        Date.now = jest.fn(() => 999_999_999_999);
+        const fetchMock = jest.fn();
+        global.fetch = fetchMock;
+
+        await expect(service.fetchPhoto(token)).rejects.toThrow('expirou');
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        Date.now = realNow;
+      }
+    });
+
+    it('gera tokens diferentes para fotos diferentes', async () => {
+      const service = new PlacesService(makeConfig('key'));
+      const outraFoto = {
+        ...fullPlace,
+        id: 'place-2',
+        photos: [
+          { name: 'places/place-2/photos/xyz', widthPx: 1, heightPx: 1 },
+        ],
+      };
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue(okResponse({ places: [fullPlace, outraFoto] }));
+
+      const result = await service.searchNearbyVetClinics({
+        lat: userLat,
+        lng: userLng,
+        radiusMeters: 5000,
+      });
+
+      expect(result[0].photoUrl).not.toBe(result[1].photoUrl);
+    });
   });
 });

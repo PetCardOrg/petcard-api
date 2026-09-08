@@ -37,10 +37,43 @@ export const LIMITE_DE_ROTA_CARA = 3;
  * contra `POST /auth/login` na velocidade que a rede permitisse. O limite é por
  * IP e por janela.
  */
+/**
+ * Limite das rotas de clínica cobradas por chamada no Google
+ * (`/clinicas/places`, `/clinicas/autocomplete`, `/clinicas/geocode`).
+ * Compartilhado pelas três: o autocomplete sozinho dispara a cada tecla
+ * digitada, então o teto por IP precisa cobrir esse padrão de uso — bem mais
+ * generoso que o de login, mas ainda um teto.
+ */
+const DEFAULT_PLACES_LIMIT = 30;
+
+/**
+ * Limite do proxy de foto de clínica (`/clinicas/fotos/:token`). Uma única
+ * busca por perto pode devolver até 20 clínicas, cada uma com 1 foto — o teto
+ * é maior que o das rotas de busca de propósito, para não travar a rolagem da
+ * lista de resultados.
+ */
+const DEFAULT_CLINICA_PHOTO_LIMIT = 60;
+
 export const throttlerConfig = registerAs('throttler', () => ({
   authTtlSeconds: inteiroPositivo(
     process.env.AUTH_THROTTLE_TTL_SECONDS,
     DEFAULT_TTL_SECONDS,
   ),
   authLimit: inteiroPositivo(process.env.AUTH_THROTTLE_LIMIT, DEFAULT_LIMIT),
+  placesTtlSeconds: inteiroPositivo(
+    process.env.PLACES_THROTTLE_TTL_SECONDS,
+    DEFAULT_TTL_SECONDS,
+  ),
+  placesLimit: inteiroPositivo(
+    process.env.PLACES_THROTTLE_LIMIT,
+    DEFAULT_PLACES_LIMIT,
+  ),
+  clinicaPhotoTtlSeconds: inteiroPositivo(
+    process.env.CLINICA_PHOTO_THROTTLE_TTL_SECONDS,
+    DEFAULT_TTL_SECONDS,
+  ),
+  clinicaPhotoLimit: inteiroPositivo(
+    process.env.CLINICA_PHOTO_THROTTLE_LIMIT,
+    DEFAULT_CLINICA_PHOTO_LIMIT,
+  ),
 }));
