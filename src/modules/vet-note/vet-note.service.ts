@@ -20,17 +20,19 @@ import {
   NotaClinicaResponseDto,
 } from '@petcardorg/shared';
 
-type NotaWithVet = NotaClinica & {
-  veterinario: { nome: string; crmv: string };
-};
-
-function toResponseDto(nota: NotaWithVet): NotaClinicaResponseDto {
+/**
+ * Nome e CRMV vêm da própria nota, não de um `JOIN` com o veterinário: a
+ * assinatura é gravada na escrita e continua legível depois que a conta do
+ * autor deixa de existir (ADR-009). `veterinario_id` é o que some nesse caso,
+ * e é por ele que a UI decide se ainda há alguém autorizado a editar.
+ */
+function toResponseDto(nota: NotaClinica): NotaClinicaResponseDto {
   return {
     id: nota.id,
     pet_id: nota.petId,
-    veterinario_id: nota.veterinarioId,
-    veterinario_nome: nota.veterinario.nome,
-    veterinario_crmv: nota.veterinario.crmv,
+    veterinario_id: nota.veterinarioId ?? undefined,
+    veterinario_nome: nota.veterinarioNome,
+    veterinario_crmv: nota.veterinarioCrmv,
     google_place_id: nota.googlePlaceId ?? undefined,
     diagnostico: nota.diagnostico,
     prescricao: nota.prescricao ?? undefined,
@@ -56,7 +58,7 @@ export class VetNoteService {
     dto: CreateNotaClinicaDto,
   ): Promise<NotaClinicaResponseDto> {
     const pet = await this.findPetOrFail(petId);
-    await this.assertVeterinarioExists(veterinarioId);
+    const vet = await this.buscarVeterinarioOuFalhar(veterinarioId);
     await this.assertVinculoVet(petId, veterinarioId);
 
     const nota = await this.prisma.$transaction(async (tx) => {
@@ -64,12 +66,13 @@ export class VetNoteService {
         data: {
           petId,
           veterinarioId,
+          veterinarioNome: vet.nome,
+          veterinarioCrmv: vet.crmv,
           diagnostico: dto.diagnostico,
           prescricao: dto.prescricao,
           observacoes: dto.observacoes,
           googlePlaceId: dto.google_place_id,
         },
-        include: { veterinario: { select: { nome: true, crmv: true } } },
       });
       await this.acoes.registrar(
         {
@@ -94,7 +97,7 @@ export class VetNoteService {
         referenceType: 'CLINICAL_NOTE',
         referenceId: nota.id,
         title: 'Nova nota clínica',
-        body: `${nota.veterinario.nome} adicionou uma nota clínica para ${pet.name}`,
+        body: `${nota.veterinarioNome} adicionou uma nota clínica para ${pet.name}`,
         data: {
           pet_id: petId,
           clinical_note_id: nota.id,
@@ -127,7 +130,6 @@ export class VetNoteService {
     const notas = await this.prisma.notaClinica.findMany({
       where: { petId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
-      include: { veterinario: { select: { nome: true, crmv: true } } },
     });
 
     return notas.map(toResponseDto);
@@ -140,10 +142,7 @@ export class VetNoteService {
   ): Promise<NotaClinicaResponseDto> {
     const nota = await this.prisma.notaClinica.findFirst({
       where: { id, deletedAt: null },
-      include: {
-        veterinario: { select: { nome: true, crmv: true } },
-        pet: { select: { tutorId: true } },
-      },
+      include: { pet: { select: { tutorId: true } } },
     });
 
     if (!nota) {
@@ -160,13 +159,13 @@ export class VetNoteService {
   }
 
   /**
-   * Exclusão lógica (api#117): a nota some da listagem, mas o histórico
-   * clínico preserva o que foi diagnosticado e quem diagnosticou.
-   */
-  /**
    * Edição da própria nota (web#34). Mesma regra da exclusão: só o autor.
    * Alterar nota alheia mantendo a assinatura falsificaria a autoria — a
    * carteira seguiria dizendo quem escreveu, com outro conteúdo.
+   *
+   * Nota cuja conta de autor foi excluída tem `veterinarioId` nulo e por isso
+   * reprova a comparação para qualquer chamador: fica imutável, e é o que se
+   * espera de uma assinatura sem dono (ADR-009).
    */
   async update(
     id: string,
@@ -193,7 +192,6 @@ export class VetNoteService {
           prescricao: dto.prescricao,
           observacoes: dto.observacoes,
         },
-        include: { veterinario: { select: { nome: true, crmv: true } } },
       });
       await this.acoes.registrar(
         {
@@ -224,6 +222,10 @@ export class VetNoteService {
     return toResponseDto(atualizada);
   }
 
+  /**
+   * Exclusão lógica (api#117): a nota some da listagem, mas o histórico
+   * clínico preserva o que foi diagnosticado e quem diagnosticou.
+   */
   async remove(id: string, veterinarioId: string): Promise<void> {
     const nota = await this.prisma.notaClinica.findFirst({
       where: { id, deletedAt: null },
@@ -300,14 +302,22 @@ export class VetNoteService {
     }
   }
 
-  private async assertVeterinarioExists(veterinarioId: string): Promise<void> {
+  /**
+   * Nome e CRMV de quem assina, que a nota grava na criação. `select` e não a
+   * linha inteira: `findUnique` traria o hash da senha junto, sem uso aqui.
+   */
+  private async buscarVeterinarioOuFalhar(
+    veterinarioId: string,
+  ): Promise<{ nome: string; crmv: string }> {
     const vet = await this.prisma.veterinario.findUnique({
       where: { id: veterinarioId },
+      select: { nome: true, crmv: true },
     });
     if (!vet) {
       throw new NotFoundException(
         `Veterinario with id ${veterinarioId} not found`,
       );
     }
+    return vet;
   }
 }

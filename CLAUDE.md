@@ -15,7 +15,7 @@ Backend do PetCard (carteira digital de saúde para pets). NestJS 11 + Prisma 6 
 - **AWS S3** para mídia.
 - **Auth:** JWT próprio (HS256 + bcrypt), roles `TUTOR`/`VET` no claim `role`, guards globais + `@Public()` (seguro por padrão, api#115), logins separados (`login` / `loginVeterinario`) e cadastro de vet público em `POST /auth/veterinario/register`, que valida o CRMV na criação (api#124). Rate limit nas rotas de autenticação + `helmet`/CSP (2026-08-24). **Auth0 abandonado (M0-#7) — não reintroduzir.** Sem refresh token.
 - **Acesso do veterinário a pet exige o vínculo `PetAtendido`** — o papel VET sozinho não dá mais acesso universal a qualquer pet (correção de segurança, 2026-08-24; o vínculo nasce do QR, ver web#42/#43). Não checar só `role === VET` num guard/service novo.
-- **DTOs:** `@petcardorg/shared@0.19.0` (GitHub Packages). Resolver exige `NODE_AUTH_TOKEN` (PAT com `read:packages`). DTOs locais duplicados foram removidos — não reintroduzir.
+- **DTOs:** `@petcardorg/shared@0.22.0` (GitHub Packages). Resolver exige `NODE_AUTH_TOKEN` (PAT com `read:packages`). DTOs locais duplicados foram removidos — não reintroduzir.
 - **Swagger/OpenAPI:** plugin `@nestjs/swagger` em `nest-cli.json`; UI em **`GET /docs`**. Documento gerado por `npm run openapi:json` (preview mode, sem subir infra).
 
 ## Padrões da API

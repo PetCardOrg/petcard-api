@@ -185,7 +185,9 @@ describe('HistoricoClinicoService', () => {
         observacoes: null,
         createdAt: new Date('2026-04-01T18:30:00.000Z'),
         deletedAt: null,
-        veterinario: vet,
+        veterinarioId: vet.id,
+        veterinarioNome: vet.nome,
+        veterinarioCrmv: vet.crmv,
       },
     ]);
 
@@ -227,7 +229,9 @@ describe('HistoricoClinicoService', () => {
         observacoes: null,
         createdAt: new Date('2026-04-01'),
         deletedAt: null,
-        veterinario: vet,
+        veterinarioId: vet.id,
+        veterinarioNome: vet.nome,
+        veterinarioCrmv: vet.crmv,
       },
     ]);
     prisma.dewormingRecord.findMany.mockResolvedValue([
@@ -277,7 +281,9 @@ describe('HistoricoClinicoService', () => {
         observacoes: 'Retornar em 30 dias',
         createdAt: new Date('2026-04-02'),
         deletedAt: null,
-        veterinario: vet,
+        veterinarioId: vet.id,
+        veterinarioNome: vet.nome,
+        veterinarioCrmv: vet.crmv,
       },
     ]);
 

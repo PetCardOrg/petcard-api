@@ -5,7 +5,6 @@ import {
   MedicationRecord,
   NotaClinica,
   VaccineRecord,
-  Veterinario,
 } from '@prisma/client';
 import {
   AcaoClinicaResponseDto,
@@ -18,7 +17,19 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { PetService } from '../pet/pet.service';
 
-type ComVet<T> = T & { veterinario: Veterinario | null };
+/**
+ * Só o que o histórico exibe do veterinário. Antes o `include` trazia a linha
+ * inteira — hash de senha incluído — para usar dois campos; o mapeamento
+ * descartava o resto, mas carregar o hash sem necessidade é o mesmo passo que
+ * já vazou senha de tutor em `tutor.service.ts`.
+ */
+type VetDaAssinatura = { id: string; nome: string; crmv: string };
+
+type ComVet<T> = T & { veterinario: VetDaAssinatura | null };
+
+const ASSINATURA_DO_VET = {
+  veterinario: { select: { id: true, nome: true, crmv: true } },
+} as const;
 
 @Injectable()
 export class HistoricoClinicoService {
@@ -42,21 +53,20 @@ export class HistoricoClinicoService {
     const pet = await this.petService.assertAccess(petId, userId, isVet);
 
     const [notas, vacinas, vermifugos, medicacoes, acoes] = await Promise.all([
-      this.prisma.notaClinica.findMany({
-        where: { petId },
-        include: { veterinario: true },
-      }),
+      // A nota traz a assinatura nas próprias colunas (ADR-009); os outros
+      // três registros ainda dependem do vínculo com a conta.
+      this.prisma.notaClinica.findMany({ where: { petId } }),
       this.prisma.vaccineRecord.findMany({
         where: { petId },
-        include: { veterinario: true },
+        include: ASSINATURA_DO_VET,
       }),
       this.prisma.dewormingRecord.findMany({
         where: { petId },
-        include: { veterinario: true },
+        include: ASSINATURA_DO_VET,
       }),
       this.prisma.medicationRecord.findMany({
         where: { petId },
-        include: { veterinario: true },
+        include: ASSINATURA_DO_VET,
       }),
       this.prisma.acaoClinica.findMany({
         where: { petId },
@@ -80,7 +90,7 @@ export class HistoricoClinicoService {
   }
 
   private itemDaNota(
-    nota: ComVet<NotaClinica>,
+    nota: NotaClinica,
     acoes: Map<string, AcaoClinicaResponseDto[]>,
   ): HistoricoClinicoItemResponseDto {
     return {
@@ -93,7 +103,11 @@ export class HistoricoClinicoService {
       ocorrido_em: nota.createdAt.toISOString(),
       registrado_em: nota.createdAt,
       ...this.exclusao(nota.deletedAt),
-      ...this.vet(nota.veterinario),
+      // `veterinario_id` ausente quando a conta do autor foi excluída — a
+      // assinatura em si permanece.
+      veterinario_id: nota.veterinarioId ?? undefined,
+      veterinario_nome: nota.veterinarioNome,
+      veterinario_crmv: nota.veterinarioCrmv,
       acoes: acoes.get(chave(EntidadeClinica.NOTA_CLINICA, nota.id)) ?? [],
     };
   }
@@ -160,7 +174,7 @@ export class HistoricoClinicoService {
    * O nome em texto livre cobre o profissional que não usa o PetCard; a FK,
    * quando existe, é a atribuição confiável e traz o CRMV junto.
    */
-  private vet(veterinario: Veterinario | null, nomeLivre?: string | null) {
+  private vet(veterinario: VetDaAssinatura | null, nomeLivre?: string | null) {
     if (veterinario) {
       return {
         veterinario_id: veterinario.id,

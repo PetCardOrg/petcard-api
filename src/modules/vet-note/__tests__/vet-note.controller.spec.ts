@@ -44,7 +44,8 @@ describe('VetNoteController (integração)', () => {
     googlePlaceId: null,
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
-    veterinario: { nome: 'Dra. Vet', crmv: 'CRMV-123' },
+    veterinarioNome: 'Dra. Vet',
+    veterinarioCrmv: 'CRMV-123',
   };
 
   beforeAll(async () => {

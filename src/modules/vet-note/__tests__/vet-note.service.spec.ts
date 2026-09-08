@@ -49,7 +49,9 @@ describe('VetNoteService', () => {
     observacoes: null,
     createdAt: new Date(),
     updatedAt: new Date(),
-    veterinario: { nome: 'Dr. Carlos', crmv: 'CRMV-CE-12345' },
+    // Assinatura gravada na própria nota (ADR-009), não trazida por `include`.
+    veterinarioNome: 'Dr. Carlos',
+    veterinarioCrmv: 'CRMV-CE-12345',
   };
 
   beforeEach(async () => {
@@ -166,7 +168,8 @@ describe('VetNoteService', () => {
         id: 'nota-3',
         petId: 'pet-3',
         veterinarioId: 'vet-2',
-        veterinario: { nome: 'Dra. Camila', crmv: 'CRMV-SP-999' },
+        veterinarioNome: 'Dra. Camila',
+        veterinarioCrmv: 'CRMV-SP-999',
       });
 
       await service.create('pet-3', 'vet-2', {
