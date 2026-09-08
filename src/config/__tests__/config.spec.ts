@@ -1,4 +1,5 @@
 import { appConfig } from '../app.config';
+import { cardConfig } from '../card.config';
 import { firebaseConfig } from '../firebase.config';
 import { authConfig } from '../auth.config';
 import { mailConfig } from '../mail.config';
@@ -22,6 +23,8 @@ const CHAVES = [
   'FIREBASE_PRIVATE_KEY',
   'AUTH_THROTTLE_LIMIT',
   'AUTH_THROTTLE_TTL_SECONDS',
+  'PUBLIC_CARD_THROTTLE_LIMIT',
+  'PUBLIC_CARD_THROTTLE_TTL_SECONDS',
   'JWT_SECRET',
   'SMTP_HOST',
   'APP_DEEP_LINK_BASE',
@@ -127,6 +130,29 @@ describe('configuração de ambiente', () => {
       process.env.AUTH_THROTTLE_TTL_SECONDS = '0';
 
       expect(throttlerConfig()).toEqual({ authTtlSeconds: 60, authLimit: 10 });
+    });
+  });
+
+  describe('rate limit das rotas públicas da carteira/coleira', () => {
+    it('usa os padrões quando o ambiente não diz nada', () => {
+      expect(cardConfig().publicThrottleTtlSeconds).toBe(60);
+      expect(cardConfig().publicThrottleLimit).toBe(10);
+    });
+
+    it('respeita os valores declarados', () => {
+      process.env.PUBLIC_CARD_THROTTLE_LIMIT = '3';
+      process.env.PUBLIC_CARD_THROTTLE_TTL_SECONDS = '30';
+
+      expect(cardConfig().publicThrottleLimit).toBe(3);
+      expect(cardConfig().publicThrottleTtlSeconds).toBe(30);
+    });
+
+    it('ignora valor inválido em vez de desligar o limite', () => {
+      // Mesmo risco do throttler de autenticação: `Number('dez')` é NaN, e
+      // NaN como limite faz o throttler liberar geral em silêncio.
+      process.env.PUBLIC_CARD_THROTTLE_LIMIT = 'dez';
+
+      expect(cardConfig().publicThrottleLimit).toBe(10);
     });
   });
 
