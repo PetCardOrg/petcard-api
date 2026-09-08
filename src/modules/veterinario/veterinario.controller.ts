@@ -158,7 +158,12 @@ export class VeterinarioController {
     summary: 'Tirar o pet da minha lista',
     description:
       'Remove só o vínculo. O pet, os registros clínicos e a trilha de ações ' +
-      'permanecem — inclusive para outros veterinários.',
+      'permanecem — inclusive para outros veterinários. NÃO revoga o acesso ' +
+      'à carteira clínica: o token do QR continua válido, e reabrir ' +
+      '`GET /cards/:token/clinico` ou chamar `POST /veterinarios/me/pets` de ' +
+      'novo recria o vínculo. A revogação de verdade é o tutor regerar o QR ' +
+      '(`POST /pets/:id/qr-code`), que também invalida a tag física da ' +
+      'coleira.',
   })
   @ApiNotFoundResponse({ description: 'Pet não está na lista' })
   async removerPet(
