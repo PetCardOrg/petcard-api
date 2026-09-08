@@ -5,6 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma, Veterinario } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 import { BCRYPT_ROUNDS } from '../../common/crypto/password.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -14,12 +15,6 @@ import {
 } from '@petcardorg/shared';
 import { UploadService } from '../upload/upload.service';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const bcrypt = require('bcrypt') as {
-  hash(data: string, rounds: number): Promise<string>;
-  compare(data: string, encrypted: string): Promise<boolean>;
-};
 
 export type VeterinarioResponse = Omit<Veterinario, 'password' | 'photoUrl'> & {
   foto_url: string | null;

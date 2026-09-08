@@ -72,8 +72,12 @@ async function bootstrap() {
     .setVersion('1.0')
     .addBearerAuth()
     .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('docs', app, document);
+  // Publicar o Swagger em produção expõe o mapa completo da API (rotas, DTOs,
+  // exemplos) para reconhecimento — só habilitar fora de produção.
+  if (config.get<string>('app.nodeEnv') !== 'production') {
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('docs', app, document);
+  }
 
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.RMQ,
