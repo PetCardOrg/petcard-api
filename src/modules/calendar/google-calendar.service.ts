@@ -9,11 +9,21 @@ import { ConfigService } from '@nestjs/config';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { google, calendar_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
+import { Appointment } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EncryptionService } from '../../common/crypto/encryption.service';
+import { resolveTimeZone } from '../../common/time/timezone';
 import { isAlreadyGoneError } from './google-api-error';
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
+
+interface CalendarEventInput {
+  title: string;
+  description?: string;
+  startTime: Date;
+  durationMinutes: number;
+  location?: string;
+}
 
 /** Validade assumida quando o Google não informa expiry_date. */
 const DEFAULT_TOKEN_TTL_MS = 3_600_000;
@@ -215,13 +225,8 @@ export class GoogleCalendarService {
   async createEvent(
     tutorId: string,
     appointmentId: string,
-    event: {
-      title: string;
-      description?: string;
-      startTime: Date;
-      durationMinutes: number;
-      location?: string;
-    },
+    event: CalendarEventInput,
+    timeZone?: string,
   ): Promise<void> {
     const calendar = await this.getCalendarClient(tutorId);
     if (!calendar) return;
@@ -231,10 +236,9 @@ export class GoogleCalendarService {
         event.startTime.getTime() + event.durationMinutes * 60_000,
       );
 
-      const tutor = await this.prisma.tutor.findUnique({
-        where: { id: tutorId },
-        select: { timezone: true },
-      });
+      // O fuso pode vir pronto de quem chama em laço (`syncAllPending`), que já
+      // o buscou uma vez para o tutor inteiro.
+      const tz = timeZone ?? (await this.tutorTimeZone(tutorId));
 
       const res = await calendar.events.insert({
         calendarId: 'primary',
@@ -243,11 +247,11 @@ export class GoogleCalendarService {
           description: event.description,
           start: {
             dateTime: event.startTime.toISOString(),
-            timeZone: tutor?.timezone ?? 'America/Fortaleza',
+            timeZone: tz,
           },
           end: {
             dateTime: endTime.toISOString(),
-            timeZone: tutor?.timezone ?? 'America/Fortaleza',
+            timeZone: tz,
           },
           location: event.location,
           reminders: {
@@ -293,18 +297,20 @@ export class GoogleCalendarService {
   async updateEvent(
     tutorId: string,
     appointmentId: string,
-    event: {
-      title: string;
-      description?: string;
-      startTime: Date;
-      durationMinutes: number;
-      location?: string;
-    },
+    event: CalendarEventInput,
+    timeZone?: string,
+    googleEventId?: string,
   ): Promise<void> {
-    const appointment = await this.prisma.appointment.findUnique({
-      where: { id: appointmentId },
-    });
-    if (!appointment?.googleEventId) return;
+    // O id do evento pode vir de quem já carregou o appointment (`syncAllPending`).
+    const eventId =
+      googleEventId ??
+      (
+        await this.prisma.appointment.findUnique({
+          where: { id: appointmentId },
+          select: { googleEventId: true },
+        })
+      )?.googleEventId;
+    if (!eventId) return;
 
     const calendar = await this.getCalendarClient(tutorId);
     if (!calendar) return;
@@ -314,24 +320,21 @@ export class GoogleCalendarService {
         event.startTime.getTime() + event.durationMinutes * 60_000,
       );
 
-      const tutor = await this.prisma.tutor.findUnique({
-        where: { id: tutorId },
-        select: { timezone: true },
-      });
+      const tz = timeZone ?? (await this.tutorTimeZone(tutorId));
 
       const res = await calendar.events.update({
         calendarId: 'primary',
-        eventId: appointment.googleEventId,
+        eventId,
         requestBody: {
           summary: event.title,
           description: event.description,
           start: {
             dateTime: event.startTime.toISOString(),
-            timeZone: tutor?.timezone ?? 'America/Fortaleza',
+            timeZone: tz,
           },
           end: {
             dateTime: endTime.toISOString(),
-            timeZone: tutor?.timezone ?? 'America/Fortaleza',
+            timeZone: tz,
           },
           location: event.location,
         },
@@ -391,11 +394,25 @@ export class GoogleCalendarService {
   async syncAppointment(tutorId: string, appointmentId: string): Promise<void> {
     const appointment = await this.prisma.appointment.findUnique({
       where: { id: appointmentId },
-      include: { pet: { select: { name: true } } },
     });
     if (!appointment) return;
 
-    const event = {
+    await this.syncOne(tutorId, appointment);
+  }
+
+  /**
+   * Sincroniza um agendamento já carregado.
+   *
+   * Existe para o laço do `syncAllPending` não refazer, por item, o
+   * `findUnique` do agendamento que o `findMany` acabou de trazer nem a busca
+   * do fuso do tutor, que é o mesmo para a leva inteira.
+   */
+  private async syncOne(
+    tutorId: string,
+    appointment: Appointment,
+    timeZone?: string,
+  ): Promise<void> {
+    const event: CalendarEventInput = {
       title: appointment.title,
       description: appointment.description ?? undefined,
       startTime: appointment.scheduledAt,
@@ -404,12 +421,27 @@ export class GoogleCalendarService {
     };
 
     if (appointment.googleEventId) {
-      await this.updateEvent(tutorId, appointmentId, event);
+      await this.updateEvent(
+        tutorId,
+        appointment.id,
+        event,
+        timeZone,
+        appointment.googleEventId,
+      );
     } else {
-      await this.createEvent(tutorId, appointmentId, event);
+      await this.createEvent(tutorId, appointment.id, event, timeZone);
     }
   }
 
+  /**
+   * Sincroniza o que ficou pendente e devolve quantos realmente foram parar na
+   * agenda do Google.
+   *
+   * Contava `pending.length`, o tamanho da fila de entrada: com o token
+   * revogado, todas as chamadas falhavam e o `POST /calendar/sync` ainda
+   * respondia `{synced: 12}` — o app dizia ao tutor que sincronizou quando não
+   * criou evento nenhum. O que o tutor precisa saber é quantos deram certo.
+   */
   async syncAllPending(tutorId: string): Promise<number> {
     const connected = await this.isConnected(tutorId);
     if (!connected) return 0;
@@ -420,10 +452,15 @@ export class GoogleCalendarService {
         syncStatus: { in: ['PENDING_CREATE', 'PENDING_UPDATE', 'FAILED'] },
       },
     });
+    if (pending.length === 0) return 0;
 
+    const timeZone = await this.tutorTimeZone(tutorId);
+
+    let synced = 0;
     for (const appointment of pending) {
       try {
-        await this.syncAppointment(tutorId, appointment.id);
+        await this.syncOne(tutorId, appointment, timeZone);
+        synced++;
       } catch (error) {
         // syncStatus=FAILED is already persisted inside createEvent/updateEvent.
         this.logger.warn(
@@ -434,7 +471,21 @@ export class GoogleCalendarService {
       }
     }
 
-    return pending.length;
+    if (synced < pending.length) {
+      this.logger.warn(
+        `Sync do tutor ${tutorId}: ${synced}/${pending.length} agendamento(s) sincronizado(s)`,
+      );
+    }
+    return synced;
+  }
+
+  /** Fuso do tutor, com o padrão do projeto quando a conta não tem um. */
+  private async tutorTimeZone(tutorId: string): Promise<string> {
+    const tutor = await this.prisma.tutor.findUnique({
+      where: { id: tutorId },
+      select: { timezone: true },
+    });
+    return resolveTimeZone(tutor?.timezone);
   }
 
   private async getCalendarClient(

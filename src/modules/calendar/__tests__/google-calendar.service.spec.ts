@@ -601,6 +601,17 @@ describe('GoogleCalendarService', () => {
   });
 
   describe('syncAllPending', () => {
+    /** Agendamento como o `findMany` do lote o entrega: já completo. */
+    const pendingAppointment = (id: string) => ({
+      id,
+      title: 'Consulta',
+      description: null,
+      scheduledAt: eventInput.startTime,
+      durationMinutes: 30,
+      location: null,
+      googleEventId: null,
+    });
+
     it('retorna 0 e não busca pendências quando não está conectado', async () => {
       prisma.googleOAuthToken.findUnique.mockResolvedValue(null);
 
@@ -613,19 +624,9 @@ describe('GoogleCalendarService', () => {
     it('sincroniza todas as pendências e retorna a contagem', async () => {
       prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
       prisma.appointment.findMany.mockResolvedValue([
-        { id: 'appt-1' },
-        { id: 'appt-2' },
+        pendingAppointment('appt-1'),
+        pendingAppointment('appt-2'),
       ]);
-      // syncAppointment busca cada appointment; sem googleEventId → createEvent
-      prisma.appointment.findUnique.mockResolvedValue({
-        title: 'Consulta',
-        description: null,
-        scheduledAt: eventInput.startTime,
-        durationMinutes: 30,
-        location: null,
-        googleEventId: null,
-        pet: { name: 'Rex' },
-      });
       prisma.tutor.findUnique.mockResolvedValue(null);
       mockCalendarEvents.insert.mockResolvedValue({
         data: { id: 'evt-1', etag: 'etag-1' },
@@ -637,27 +638,68 @@ describe('GoogleCalendarService', () => {
       expect(mockCalendarEvents.insert).toHaveBeenCalledTimes(2);
     });
 
-    it('continua o lote quando uma sincronização falha', async () => {
+    it('não refaz por item o findUnique do agendamento nem a busca do fuso', async () => {
       prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
       prisma.appointment.findMany.mockResolvedValue([
-        { id: 'appt-1' },
-        { id: 'appt-2' },
+        pendingAppointment('appt-1'),
+        pendingAppointment('appt-2'),
+        pendingAppointment('appt-3'),
       ]);
-      prisma.appointment.findUnique.mockResolvedValue({
-        title: 'Consulta',
-        description: null,
-        scheduledAt: eventInput.startTime,
-        durationMinutes: 30,
-        location: null,
-        googleEventId: null,
-        pet: { name: 'Rex' },
+      prisma.tutor.findUnique.mockResolvedValue({
+        timezone: 'America/Sao_Paulo',
       });
+      mockCalendarEvents.insert.mockResolvedValue({
+        data: { id: 'evt-1', etag: 'etag-1' },
+      });
+
+      await service.syncAllPending('tutor-1');
+
+      // O findMany já trouxe os agendamentos, e o fuso é o mesmo para a leva.
+      expect(prisma.appointment.findUnique).not.toHaveBeenCalled();
+      expect(prisma.tutor.findUnique).toHaveBeenCalledTimes(1);
+      expect(mockCalendarEvents.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestBody: expect.objectContaining({
+            start: expect.objectContaining({
+              timeZone: 'America/Sao_Paulo',
+            }) as unknown,
+          }) as unknown,
+        }),
+      );
+    });
+
+    // O contador devolvia `pending.length`: com o token do Google revogado,
+    // toda chamada falhava e o POST /calendar/sync ainda respondia
+    // {synced: N} — o app dizia ao tutor que sincronizou sem criar evento.
+    it('conta só o que realmente foi para a agenda', async () => {
+      prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
+      prisma.appointment.findMany.mockResolvedValue([
+        pendingAppointment('appt-1'),
+        pendingAppointment('appt-2'),
+      ]);
       prisma.tutor.findUnique.mockResolvedValue(null);
-      mockCalendarEvents.insert.mockRejectedValue(new Error('falha'));
+      mockCalendarEvents.insert.mockRejectedValue(new Error('invalid_grant'));
 
       const count = await service.syncAllPending('tutor-1');
 
-      expect(count).toBe(2);
+      expect(count).toBe(0);
+      expect(mockCalendarEvents.insert).toHaveBeenCalledTimes(2);
+    });
+
+    it('continua o lote quando uma sincronização falha e conta as que deram certo', async () => {
+      prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
+      prisma.appointment.findMany.mockResolvedValue([
+        pendingAppointment('appt-1'),
+        pendingAppointment('appt-2'),
+      ]);
+      prisma.tutor.findUnique.mockResolvedValue(null);
+      mockCalendarEvents.insert
+        .mockRejectedValueOnce(new Error('falha'))
+        .mockResolvedValue({ data: { id: 'evt-2', etag: 'etag-2' } });
+
+      const count = await service.syncAllPending('tutor-1');
+
+      expect(count).toBe(1);
       expect(mockCalendarEvents.insert).toHaveBeenCalledTimes(2);
     });
   });
