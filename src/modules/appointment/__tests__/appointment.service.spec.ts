@@ -2,6 +2,7 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { PetService } from '../../pet/pet.service';
 import { CalendarSyncPublisher } from '../../queue/calendar-sync.publisher';
 import { AppointmentService } from '../appointment.service';
 import { CreateAppointmentDto } from '../dto/create-appointment.dto';
@@ -18,6 +19,7 @@ describe('AppointmentService', () => {
     };
   };
   let publisher: { publish: jest.Mock };
+  let petService: { assertOwnership: jest.Mock };
 
   const now = new Date('2026-05-01T10:00:00Z');
   const appointment = {
@@ -47,12 +49,16 @@ describe('AppointmentService', () => {
       },
     };
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
+    petService = {
+      assertOwnership: jest.fn().mockResolvedValue({ id: 'pet-1' }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AppointmentService,
         { provide: PrismaService, useValue: prisma },
         { provide: CalendarSyncPublisher, useValue: publisher },
+        { provide: PetService, useValue: petService },
       ],
     }).compile();
 
@@ -95,6 +101,52 @@ describe('AppointmentService', () => {
         pet_name: 'Rex',
         sync_status: 'PENDING_CREATE',
       });
+    });
+
+    it('confere a posse do pet antes de criar o agendamento', async () => {
+      prisma.appointment.create.mockResolvedValue(appointment);
+
+      await service.create('tutor-1', {
+        title: 'Consulta de rotina',
+        scheduled_at: '2026-06-01T14:00:00Z',
+        pet_id: 'pet-1',
+      });
+
+      expect(petService.assertOwnership).toHaveBeenCalledWith(
+        'pet-1',
+        'tutor-1',
+      );
+    });
+
+    it('recusa agendar com pet_id de outro tutor e não grava nada (api#audit-1)', async () => {
+      petService.assertOwnership.mockRejectedValue(
+        new ForbiddenException('You do not own this pet'),
+      );
+
+      await expect(
+        service.create('tutor-1', {
+          title: 'Consulta de rotina',
+          scheduled_at: '2026-06-01T14:00:00Z',
+          pet_id: 'pet-de-outro-tutor',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(prisma.appointment.create).not.toHaveBeenCalled();
+    });
+
+    it('não confere posse quando o agendamento não referencia um pet', async () => {
+      prisma.appointment.create.mockResolvedValue({
+        ...appointment,
+        petId: null,
+        pet: null,
+      });
+
+      await service.create('tutor-1', {
+        title: 'Consulta de rotina',
+        scheduled_at: '2026-06-01T14:00:00Z',
+      });
+
+      expect(petService.assertOwnership).not.toHaveBeenCalled();
     });
 
     it('usa 60 minutos como duração padrão', async () => {
@@ -188,6 +240,33 @@ describe('AppointmentService', () => {
         expect.objectContaining({ action: 'UPDATE', appointment_id: 'appt-1' }),
       );
       expect(result.title).toBe('Reagendada');
+    });
+
+    it('confere a posse do novo pet_id antes de atualizar', async () => {
+      prisma.appointment.findUnique.mockResolvedValue(appointment);
+      prisma.appointment.update.mockResolvedValue(appointment);
+
+      await service.update('appt-1', 'tutor-1', { pet_id: 'pet-2' });
+
+      expect(petService.assertOwnership).toHaveBeenCalledWith(
+        'pet-2',
+        'tutor-1',
+      );
+    });
+
+    it('recusa trocar pet_id para pet de outro tutor e não grava nada (api#audit-1)', async () => {
+      prisma.appointment.findUnique.mockResolvedValue(appointment);
+      petService.assertOwnership.mockRejectedValue(
+        new ForbiddenException('You do not own this pet'),
+      );
+
+      await expect(
+        service.update('appt-1', 'tutor-1', {
+          pet_id: 'pet-de-outro-tutor',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(prisma.appointment.update).not.toHaveBeenCalled();
     });
 
     it('recusa update de não-dono sem chamar o banco', async () => {
