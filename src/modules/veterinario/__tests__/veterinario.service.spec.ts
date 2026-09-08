@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { UploadService } from '../../upload/upload.service';
 import { VeterinarioService } from '../veterinario.service';
 
 // Mock do bcrypt para o teste não pagar o custo do hash real.
@@ -67,6 +68,7 @@ describe('VeterinarioService', () => {
       providers: [
         VeterinarioService,
         { provide: PrismaService, useValue: prisma },
+        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
       ],
     }).compile();
 

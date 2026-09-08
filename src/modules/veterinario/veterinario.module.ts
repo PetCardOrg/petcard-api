@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthModule } from '../auth/auth.module';
+import { UploadModule } from '../upload/upload.module';
 import { CRMV_VALIDATOR, type CrmvValidator } from './crmv/crmv-validator';
 import { CrmvVerificationService } from './crmv/crmv-verification.service';
 import { CrmvVerifiedGuard } from './crmv/crmv-verified.guard';
@@ -24,7 +25,7 @@ const crmvValidatorProvider = {
 };
 
 @Module({
-  imports: [forwardRef(() => AuthModule)],
+  imports: [forwardRef(() => AuthModule), UploadModule],
   controllers: [VeterinarioController],
   providers: [
     VeterinarioService,

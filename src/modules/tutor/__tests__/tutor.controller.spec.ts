@@ -7,6 +7,7 @@ import {
   VET,
 } from '../../../../test/utils/controller-harness';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { UploadService } from '../../upload/upload.service';
 import { TutorController } from '../tutor.controller';
 import { TutorService } from '../tutor.service';
 
@@ -39,7 +40,11 @@ describe('TutorController (integração)', () => {
 
     harness = await createControllerTestApp({
       controllers: [TutorController],
-      providers: [TutorService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        TutorService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
+      ],
     });
   });
 

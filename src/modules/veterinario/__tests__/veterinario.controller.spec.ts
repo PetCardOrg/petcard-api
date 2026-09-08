@@ -6,6 +6,7 @@ import {
   VET,
 } from '../../../../test/utils/controller-harness';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { UploadService } from '../../upload/upload.service';
 import { VeterinarioController } from '../veterinario.controller';
 import { VeterinarioService } from '../veterinario.service';
 import { CrmvVerificationService } from '../crmv/crmv-verification.service';
@@ -71,6 +72,7 @@ describe('VeterinarioController (integração)', () => {
         VeterinarioService,
         { provide: PrismaService, useValue: prisma },
         { provide: CrmvVerificationService, useValue: crmv },
+        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
       ],
     });
   });

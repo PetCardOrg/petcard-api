@@ -16,6 +16,7 @@ import { CardService } from '../../../card/card.service';
 import { ColeiraService } from '../../../coleira/coleira.service';
 import { PetService } from '../../../pet/pet.service';
 import { TutorService } from '../../../tutor/tutor.service';
+import { UploadService } from '../../../upload/upload.service';
 import { MedicationController } from '../medication.controller';
 import { CrmvVerificationService } from '../../../veterinario/crmv/crmv-verification.service';
 import { MedicationService } from '../medication.service';
@@ -77,6 +78,7 @@ describe('MedicationController (integração)', () => {
         MedicationService,
         PetService,
         TutorService,
+        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
         { provide: PrismaService, useValue: prisma },
         {
           provide: QrCodePublisher,

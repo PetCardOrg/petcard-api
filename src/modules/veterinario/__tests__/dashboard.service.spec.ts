@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { UploadService } from '../../upload/upload.service';
 import { VeterinarioService } from '../veterinario.service';
 
 jest.mock('bcrypt', () => ({
@@ -81,6 +82,7 @@ describe('VeterinarioService - lista de pets atendidos', () => {
       providers: [
         VeterinarioService,
         { provide: PrismaService, useValue: prisma },
+        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
       ],
     }).compile();
 
