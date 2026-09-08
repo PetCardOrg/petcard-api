@@ -255,6 +255,50 @@ describe('CardService', () => {
       expect(result.tutor_phone).toBeUndefined();
     });
 
+    it('não expõe o notes de vacina/vermífugo — texto livre pode revelar condição de saúde', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue(
+        makeCard({
+          pet: {
+            ...makeCard().pet,
+            vaccineRecords: [
+              {
+                id: 'v1',
+                petId: 'pet-1',
+                vaccineName: 'V8',
+                appliedAt: baseDate,
+                nextDoseAt: null,
+                veterinarianName: 'Dra. Camila',
+                notes: 'portador de FIV, protocolo reduzido',
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+            dewormingRecords: [
+              {
+                id: 'd1',
+                petId: 'pet-1',
+                productName: 'Drontal',
+                appliedAt: baseDate,
+                nextDoseAt: null,
+                veterinarianName: 'Dra. Camila',
+                notes: 'reação alérgica na última dose',
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+          },
+        }),
+      );
+
+      const result = await service.findPublicByToken('tok-abc');
+
+      // O resto do registro continua público — só o texto livre soma.
+      expect(result.vaccines[0]).toMatchObject({ vaccine_name: 'V8' });
+      expect(result.vaccines[0].notes).toBeUndefined();
+      expect(result.dewormings[0]).toMatchObject({ product_name: 'Drontal' });
+      expect(result.dewormings[0].notes).toBeUndefined();
+    });
+
     it('should map vaccine/deworming optional fields and withhold sensitive clinical data (api#114)', async () => {
       prisma.carteiraDigital.findUnique.mockResolvedValue(
         makeCard({
@@ -324,17 +368,18 @@ describe('CardService', () => {
       expect(result.vaccines[0]).toMatchObject({
         next_dose_at: '2026-05-01T10:00:00.000Z',
         veterinarian_name: 'Dra. Camila',
-        notes: 'reforço anual',
       });
       expect(result.dewormings[0]).toMatchObject({
         product_name: 'Drontal',
         next_dose_at: '2026-07-01T10:00:00.000Z',
         veterinarian_name: 'Dra. Camila',
-        notes: 'dose única',
       });
       // api#114: mesmo com medicações e notas clínicas presentes no banco, a
       // carteira pública NÃO as expõe — ficam restritas aos endpoints
-      // autenticados do tutor/veterinário.
+      // autenticados do tutor/veterinário. O notes de vacina/vermífugo segue
+      // a mesma regra (achado 1 da auditoria de rotas públicas).
+      expect(result.vaccines[0].notes).toBeUndefined();
+      expect(result.dewormings[0].notes).toBeUndefined();
       expect(result.medications).toEqual([]);
       expect(
         (result as Record<string, unknown>).clinical_notes,
@@ -490,6 +535,47 @@ describe('CardService', () => {
         diagnostico: 'Otite',
         veterinario_crmv: 'CRMV-SP 999',
       });
+    });
+
+    it('mantém o notes de vacina/vermífugo — o vet com CRMV verificado pode ler', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue({
+        id: 'card-1',
+        petId: 'pet-1',
+        token: 'tok-abc',
+        qrCodeUrl: null,
+        createdAt: baseDate,
+        pet: {
+          id: 'pet-1',
+          name: 'Rex',
+          species: Species.DOG,
+          breed: null,
+          sex: Sex.MALE,
+          birthDate: null,
+          weight: null,
+          photoUrl: null,
+          tutor: { name: 'Alice' },
+          vaccineRecords: [
+            {
+              id: 'v1',
+              petId: 'pet-1',
+              vaccineName: 'V8',
+              appliedAt: baseDate,
+              nextDoseAt: null,
+              veterinarianName: null,
+              notes: 'portador de FIV, protocolo reduzido',
+              createdAt: baseDate,
+              updatedAt: baseDate,
+            },
+          ],
+          dewormingRecords: [],
+        },
+      });
+
+      const result = await service.findClinicaByToken('tok-abc', 'vet-1');
+
+      expect(result.vaccines[0].notes).toBe(
+        'portador de FIV, protocolo reduzido',
+      );
     });
 
     it('registra o CRMV de quem acessou', async () => {
