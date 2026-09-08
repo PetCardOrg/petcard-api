@@ -18,7 +18,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { PetService } from '../pet/pet.service';
 
 /**
- * Só o que o histórico exibe do veterinário. O `include` trazia a linha
+ * Só o que o histórico exibe do veterinário. Antes o `include` trazia a linha
  * inteira — hash de senha incluído — para usar dois campos; o mapeamento
  * descartava o resto, mas carregar o hash sem necessidade é o mesmo passo que
  * já vazou senha de tutor em `tutor.service.ts`.
@@ -53,10 +53,9 @@ export class HistoricoClinicoService {
     const pet = await this.petService.assertAccess(petId, userId, isVet);
 
     const [notas, vacinas, vermifugos, medicacoes, acoes] = await Promise.all([
-      this.prisma.notaClinica.findMany({
-        where: { petId },
-        include: ASSINATURA_DO_VET,
-      }),
+      // A nota traz a assinatura nas próprias colunas (ADR-009); os outros
+      // três registros ainda dependem do vínculo com a conta.
+      this.prisma.notaClinica.findMany({ where: { petId } }),
       this.prisma.vaccineRecord.findMany({
         where: { petId },
         include: ASSINATURA_DO_VET,
@@ -91,7 +90,7 @@ export class HistoricoClinicoService {
   }
 
   private itemDaNota(
-    nota: ComVet<NotaClinica>,
+    nota: NotaClinica,
     acoes: Map<string, AcaoClinicaResponseDto[]>,
   ): HistoricoClinicoItemResponseDto {
     return {
@@ -104,7 +103,11 @@ export class HistoricoClinicoService {
       ocorrido_em: nota.createdAt.toISOString(),
       registrado_em: nota.createdAt,
       ...this.exclusao(nota.deletedAt),
-      ...this.vet(nota.veterinario),
+      // `veterinario_id` ausente quando a conta do autor foi excluída — a
+      // assinatura em si permanece.
+      veterinario_id: nota.veterinarioId ?? undefined,
+      veterinario_nome: nota.veterinarioNome,
+      veterinario_crmv: nota.veterinarioCrmv,
       acoes: acoes.get(chave(EntidadeClinica.NOTA_CLINICA, nota.id)) ?? [],
     };
   }

@@ -202,7 +202,6 @@ export class CardService implements OnModuleInit {
       this.prisma.notaClinica.findMany({
         where: { petId: publica.pet_id, deletedAt: null },
         orderBy: { createdAt: 'desc' },
-        include: { veterinario: { select: { nome: true, crmv: true } } },
       }),
     ]);
 
@@ -220,12 +219,15 @@ export class CardService implements OnModuleInit {
         created_at: r.createdAt,
         updated_at: r.updatedAt,
       })),
+      // Assinatura lida da própria nota: a carteira continua mostrando quem
+      // diagnosticou mesmo depois que a conta daquele veterinário sumiu
+      // (ADR-009). Só `veterinario_id` fica ausente nesse caso.
       clinical_notes: notas.map((n) => ({
         id: n.id,
         pet_id: n.petId,
-        veterinario_id: n.veterinarioId,
-        veterinario_nome: n.veterinario.nome,
-        veterinario_crmv: n.veterinario.crmv,
+        veterinario_id: n.veterinarioId ?? undefined,
+        veterinario_nome: n.veterinarioNome,
+        veterinario_crmv: n.veterinarioCrmv,
         google_place_id: n.googlePlaceId ?? undefined,
         diagnostico: n.diagnostico,
         prescricao: n.prescricao ?? undefined,

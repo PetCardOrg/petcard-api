@@ -126,6 +126,73 @@ describe('Nota clínica — escrita reversa (e2e)', () => {
     expect(await prisma.notaClinica.count()).toBe(0);
   });
 
+  /**
+   * ADR-009. Antes a FK cascateava: o veterinário encerrar a própria conta
+   * apagava o diagnóstico da carteira de um pet que não é dele, e a
+   * `AcaoClinica` — que não tem FK — continuava afirmando que a nota existia.
+   *
+   * O `onDelete` é do banco, então só um Postgres de verdade prova o
+   * comportamento; mesma razão do e2e de exclusão de conta do tutor.
+   */
+  it('mantém a nota depois que o veterinário exclui a própria conta', async () => {
+    const criada = await request(app.getHttpServer())
+      .post(`/pets/${petId}/clinical-notes`)
+      .set('Authorization', `Bearer ${vetToken}`)
+      .send({ diagnostico: 'Otite externa', prescricao: 'Antibiótico 7 dias' })
+      .expect(201);
+    const notaId = criada.body.id as string;
+
+    await request(app.getHttpServer())
+      .delete('/veterinarios/me')
+      .set('Authorization', `Bearer ${vetToken}`)
+      .expect(204);
+
+    expect(
+      await prisma.veterinario.findUnique({ where: { id: vetId } }),
+    ).toBeNull();
+
+    const nota = await prisma.notaClinica.findUnique({ where: { id: notaId } });
+    expect(nota).not.toBeNull();
+    // O vínculo com a conta some; a assinatura, não.
+    expect(nota?.veterinarioId).toBeNull();
+    expect(nota?.veterinarioNome).toBe('Dra. Camila');
+    expect(nota?.veterinarioCrmv).toBe('CRMV-CE-1234');
+    expect(nota?.diagnostico).toBe('Otite externa');
+
+    // O tutor continua enxergando o diagnóstico do próprio pet, assinado.
+    const lista = await request(app.getHttpServer())
+      .get(`/pets/${petId}/clinical-notes`)
+      .set('Authorization', `Bearer ${tutorToken}`)
+      .expect(200);
+    expect(lista.body).toHaveLength(1);
+    expect(lista.body[0]).toMatchObject({
+      id: notaId,
+      diagnostico: 'Otite externa',
+      veterinario_nome: 'Dra. Camila',
+      veterinario_crmv: 'CRMV-CE-1234',
+    });
+    // Sem autor ativo: é por esta ausência que a UI não oferece edição.
+    expect(lista.body[0].veterinario_id).toBeUndefined();
+
+    // A trilha da api#117 deixa de ser referência quebrada: a ação registrada
+    // aponta para uma nota que continua existindo.
+    const acoes = await prisma.acaoClinica.findMany({
+      where: { entidade: 'NOTA_CLINICA', entidadeId: notaId },
+    });
+    expect(acoes).toHaveLength(1);
+    expect(acoes[0].autorNome).toBe('Dra. Camila');
+
+    const historico = await request(app.getHttpServer())
+      .get(`/pets/${petId}/historico-clinico`)
+      .set('Authorization', `Bearer ${tutorToken}`)
+      .expect(200);
+    expect(historico.body.itens).toHaveLength(1);
+    expect(historico.body.itens[0]).toMatchObject({
+      entidade_id: notaId,
+      veterinario_nome: 'Dra. Camila',
+    });
+  });
+
   it('proíbe tutor que não é dono de listar as notas (403)', async () => {
     const { token: outroToken } = await registerTutor(app, {
       email: 'outro@petcard.com',

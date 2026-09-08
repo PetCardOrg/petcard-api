@@ -405,9 +405,28 @@ model PetAtendido {
   @@map("pet_atendido")
 }
 
+/// Nota clínica: diagnóstico, prescrição e observações assinados por um
+/// veterinário dentro do prontuário de um pet de outra pessoa.
+///
+/// A nota sobrevive à exclusão da conta de quem a escreveu (ADR-009). Antes
+/// a FK cascateava, e encerrar a conta apagava o diagnóstico da carteira de
+/// pets de outros tutores — enquanto a `AcaoClinica`, que não tem FK,
+/// continuava afirmando que a nota existia.
 model NotaClinica {
-  id            String    @id @default(uuid())
-  veterinarioId String    @map("veterinario_id")
+  id String @id @default(uuid())
+
+  /// Nulo quando a conta do autor foi excluída. É também o que autoriza
+  /// editar e apagar: sem FK, a comparação de autoria reprova e a nota órfã
+  /// fica imutável — assinatura sem dono não se reescreve.
+  veterinarioId String? @map("veterinario_id")
+
+  /// Assinatura gravada no instante da escrita, não derivada da conta — é o
+  /// que mantém a nota atribuída depois que o veterinário some. Mesma razão
+  /// de `autorNome`/`autorCrmv` em `AcaoClinica`. Congela de propósito: o
+  /// registro clínico diz sob qual credencial foi assinado.
+  veterinarioNome String @map("veterinario_nome")
+  veterinarioCrmv String @map("veterinario_crmv")
+
   petId         String    @map("pet_id")
   googlePlaceId String?   @map("google_place_id")
   diagnostico   String
@@ -419,8 +438,8 @@ model NotaClinica {
   /// histórico clínico preserva o que o veterinário orientou.
   deletedAt     DateTime? @map("deleted_at")
 
-  veterinario Veterinario @relation(fields: [veterinarioId], references: [id], onDelete: Cascade)
-  pet         Pet         @relation(fields: [petId], references: [id], onDelete: Cascade)
+  veterinario Veterinario? @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
+  pet         Pet          @relation(fields: [petId], references: [id], onDelete: Cascade)
 
   @@index([veterinarioId])
   @@index([petId])
