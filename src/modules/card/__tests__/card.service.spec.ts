@@ -106,11 +106,13 @@ describe('CardService', () => {
     });
   });
 
-  describe('issueTokenForPet', () => {
-    it('should upsert carteira_digital with a new uuid token', async () => {
-      prisma.carteiraDigital.upsert.mockResolvedValue({});
+  describe('ensureTokenForPet', () => {
+    it('cria a carteira com um token novo quando o pet ainda não tem uma', async () => {
+      prisma.carteiraDigital.upsert.mockImplementation(
+        (args: { create: { token: string } }) => ({ token: args.create.token }),
+      );
 
-      const token = await service.issueTokenForPet('pet-1');
+      const token = await service.ensureTokenForPet('pet-1');
 
       expect(token).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
@@ -118,17 +120,38 @@ describe('CardService', () => {
       expect(prisma.carteiraDigital.upsert).toHaveBeenCalledWith({
         where: { petId: 'pet-1' },
         create: { petId: 'pet-1', token },
-        update: { token },
+        update: {},
       });
     });
 
-    it('should rotate token on subsequent calls for the same pet', async () => {
+    it('preserva o token existente — o QR impresso não pode mudar sozinho', async () => {
+      prisma.carteiraDigital.upsert.mockResolvedValue({ token: 'tok-antigo' });
+
+      const t1 = await service.ensureTokenForPet('pet-1');
+      const t2 = await service.ensureTokenForPet('pet-1');
+
+      expect(t1).toBe('tok-antigo');
+      expect(t2).toBe('tok-antigo');
+      const [[args]] = prisma.carteiraDigital.upsert.mock.calls as Array<
+        [{ update: Record<string, unknown> }]
+      >;
+      expect(args.update).toEqual({});
+    });
+  });
+
+  describe('rotateTokenForPet', () => {
+    it('grava um token novo a cada chamada', async () => {
       prisma.carteiraDigital.upsert.mockResolvedValue({});
 
-      const t1 = await service.issueTokenForPet('pet-1');
-      const t2 = await service.issueTokenForPet('pet-1');
+      const t1 = await service.rotateTokenForPet('pet-1');
+      const t2 = await service.rotateTokenForPet('pet-1');
 
       expect(t1).not.toBe(t2);
+      expect(prisma.carteiraDigital.upsert).toHaveBeenLastCalledWith({
+        where: { petId: 'pet-1' },
+        create: { petId: 'pet-1', token: t2 },
+        update: { token: t2 },
+      });
     });
   });
 
@@ -499,6 +522,37 @@ describe('CardService', () => {
 
     afterEach(() => {
       jest.useRealTimers();
+    });
+
+    // O tutor em Tóquio às 08:00 do dia 2 já virou o dia; o processo (UTC) ainda
+    // está no dia 1. A dose marcada para o dia 1 não é mais "próxima" para ele.
+    it('conta as próximas doses no fuso do tutor, não no do processo', async () => {
+      jest.setSystemTime(new Date('2026-04-01T23:00:00Z'));
+      tutorService.findById.mockResolvedValue({ id: 'tutor-1' });
+      prisma.pet.findUnique.mockResolvedValue({
+        id: 'pet-1',
+        name: 'Rex',
+        species: Species.DOG,
+        sex: Sex.MALE,
+        tutorId: 'tutor-1',
+        tutor: { id: 'tutor-1', name: 'Alice', timezone: 'Asia/Tokyo' },
+        carteiraDigital: {
+          id: 'card-1',
+          petId: 'pet-1',
+          token: 'tok-abc',
+          qrCodeUrl: null,
+          createdAt: baseDate,
+        },
+        vaccineRecords: [{ nextDoseAt: new Date('2026-04-01T12:00:00Z') }],
+        dewormingRecords: [],
+        medicationRecords: [{ endDate: new Date('2026-04-01T12:00:00Z') }],
+      });
+
+      const result = await service.findByPetIdForTutor('pet-1', 'tutor-1');
+
+      // 01/04 12:00 UTC = 01/04 21:00 em Tóquio; "agora" já é 02/04 08:00 lá.
+      expect(result.upcoming_vaccines_count).toBe(0);
+      expect(result.active_medications_count).toBe(0);
     });
 
     it('should return the authenticated card summary for the owner', async () => {

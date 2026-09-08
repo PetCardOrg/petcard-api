@@ -31,8 +31,25 @@ export class ColeiraService {
     private readonly notificationService: NotificationService,
   ) {}
 
-  /** Emite (ou rotaciona) o token da coleira do pet. */
-  async issueTokenForPet(petId: string): Promise<string> {
+  /**
+   * Devolve o token da coleira, criando um só quando ainda não existe.
+   *
+   * Mesma separação da carteira (ver `CardService.ensureTokenForPet`): o job de
+   * QR pode rodar mais de uma vez para a mesma mensagem, e a tag da coleira é
+   * justamente a que costuma estar impressa e presa no animal — rotacionar num
+   * retry deixaria o achador na página de "não encontrado".
+   */
+  async ensureTokenForPet(petId: string): Promise<string> {
+    const tag = await this.prisma.tagColeira.upsert({
+      where: { petId },
+      create: { petId, token: randomUUID() },
+      update: {},
+    });
+    return tag.token;
+  }
+
+  /** Troca o token da coleira, invalidando a tag anterior. */
+  async rotateTokenForPet(petId: string): Promise<string> {
     const token = randomUUID();
     await this.prisma.tagColeira.upsert({
       where: { petId },

@@ -66,6 +66,37 @@ describe('ColeiraService', () => {
     jest.restoreAllMocks();
   });
 
+  describe('ensureTokenForPet', () => {
+    // A tag da coleira costuma estar impressa e presa no animal: um token
+    // trocado sem o tutor pedir manda o achador para uma página 404.
+    it('devolve o token existente sem trocá-lo', async () => {
+      prisma.tagColeira.upsert.mockResolvedValue({ token: 'tok-antigo' });
+
+      const token = await service.ensureTokenForPet('pet-1');
+
+      expect(token).toBe('tok-antigo');
+      expect(prisma.tagColeira.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ update: {} }),
+      );
+    });
+  });
+
+  describe('rotateTokenForPet', () => {
+    it('grava um token novo a cada chamada', async () => {
+      prisma.tagColeira.upsert.mockResolvedValue({});
+
+      const t1 = await service.rotateTokenForPet('pet-1');
+      const t2 = await service.rotateTokenForPet('pet-1');
+
+      expect(t1).not.toBe(t2);
+      expect(prisma.tagColeira.upsert).toHaveBeenLastCalledWith({
+        where: { petId: 'pet-1' },
+        create: { petId: 'pet-1', token: t2 },
+        update: { token: t2 },
+      });
+    });
+  });
+
   describe('findPublicByToken', () => {
     // A razão de a coleira ter token próprio: se este teste quebrar, um
     // estranho na rua passou a enxergar o prontuário do pet.

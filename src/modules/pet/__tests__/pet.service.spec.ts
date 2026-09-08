@@ -2,6 +2,8 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Sex, Species } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { CardService } from '../../card/card.service';
+import { ColeiraService } from '../../coleira/coleira.service';
 import { QrCodePublisher } from '../../queue/qr-code.publisher';
 import { TutorService } from '../../tutor/tutor.service';
 import { PetService } from '../pet.service';
@@ -21,6 +23,8 @@ describe('PetService', () => {
   };
   let tutorService: { findById: jest.Mock };
   let qrCodePublisher: { publishGenerate: jest.Mock };
+  let cardService: { rotateTokenForPet: jest.Mock };
+  let coleiraService: { rotateTokenForPet: jest.Mock };
 
   const tutor = { id: 'tutor-1' };
   const now = new Date('2025-01-15T12:00:00Z');
@@ -66,6 +70,12 @@ describe('PetService', () => {
     qrCodePublisher = {
       publishGenerate: jest.fn().mockResolvedValue(undefined),
     };
+    cardService = {
+      rotateTokenForPet: jest.fn().mockResolvedValue('tok-novo'),
+    };
+    coleiraService = {
+      rotateTokenForPet: jest.fn().mockResolvedValue('coleira-nova'),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -73,6 +83,8 @@ describe('PetService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: TutorService, useValue: tutorService },
         { provide: QrCodePublisher, useValue: qrCodePublisher },
+        { provide: CardService, useValue: cardService },
+        { provide: ColeiraService, useValue: coleiraService },
       ],
     }).compile();
 
@@ -148,6 +160,15 @@ describe('PetService', () => {
       expect(qrCodePublisher.publishGenerate).toHaveBeenCalledWith('pet-1');
     });
 
+    it('rotaciona os dois tokens antes de enfileirar — a rotação é aqui, não no job', async () => {
+      prisma.pet.findUnique.mockResolvedValue(pet);
+
+      await service.regenerateQrCode('pet-1', 'tutor-1');
+
+      expect(cardService.rotateTokenForPet).toHaveBeenCalledWith('pet-1');
+      expect(coleiraService.rotateTokenForPet).toHaveBeenCalledWith('pet-1');
+    });
+
     it('should throw ForbiddenException when another tutor tries to regenerate', async () => {
       prisma.pet.findUnique.mockResolvedValue({
         ...pet,
@@ -158,6 +179,7 @@ describe('PetService', () => {
         service.regenerateQrCode('pet-1', 'tutor-1'),
       ).rejects.toThrow(ForbiddenException);
       expect(qrCodePublisher.publishGenerate).not.toHaveBeenCalled();
+      expect(cardService.rotateTokenForPet).not.toHaveBeenCalled();
     });
   });
 

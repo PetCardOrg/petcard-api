@@ -37,8 +37,13 @@ export class QrCodeConsumer {
       return;
     }
 
+    // Reexecução é esperada aqui: o job tem retry e o broker pode reentregar a
+    // mensagem depois de um crash entre o trabalho e o ack. Por isso tudo o que
+    // o handler faz é idempotente — o token é lido/criado, nunca trocado, e a
+    // imagem sobe sempre na mesma chave do S3. Rodar duas vezes deixa o mesmo
+    // resultado que rodar uma.
     try {
-      const token = await this.cardService.issueTokenForPet(petId);
+      const token = await this.cardService.ensureTokenForPet(petId);
       const buffer = await this.cardService.generateQrCode(token);
       const url = await this.uploadService.uploadBuffer(
         buffer,
@@ -50,7 +55,7 @@ export class QrCodeConsumer {
       // O QR da coleira nasce junto com o da carteira, com token próprio e
       // apontando para a página do achador. São dois códigos porque são dois
       // públicos: o da carteira leva ao prontuário, o da coleira não.
-      const coleiraToken = await this.coleiraService.issueTokenForPet(petId);
+      const coleiraToken = await this.coleiraService.ensureTokenForPet(petId);
       const coleiraBuffer =
         await this.coleiraService.generateQrCode(coleiraToken);
       const coleiraUrl = await this.uploadService.uploadBuffer(

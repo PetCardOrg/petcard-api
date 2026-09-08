@@ -16,6 +16,7 @@ import {
   Species,
 } from '@petcardorg/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { isFutureOrTodayInTimeZone } from '../../common/time/timezone';
 import { TutorService } from '../tutor/tutor.service';
 
 interface CarteiraDigitalFullResponseDto extends CarteiraDigitalResponseDto {
@@ -26,15 +27,17 @@ interface CarteiraDigitalFullResponseDto extends CarteiraDigitalResponseDto {
   active_medications_count: number;
 }
 
-function isFutureOrToday(date?: Date | null): boolean {
-  if (!date) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return date.getTime() >= today.getTime();
-}
-
-function isMedicationActive(endDate?: Date | null): boolean {
-  return !endDate || isFutureOrToday(endDate);
+/**
+ * "Próxima dose" e "medicação ativa" são contas de calendário, e calendário
+ * depende de fuso: comparar com a meia-noite do processo fazia a carteira de um
+ * tutor em outro fuso errar a contagem na virada do dia. A régua passa a ser o
+ * dia civil do tutor (`Tutor.timezone`).
+ */
+function isMedicationActive(
+  endDate: Date | null | undefined,
+  timeZone: string,
+): boolean {
+  return !endDate || isFutureOrTodayInTimeZone(endDate, timeZone);
 }
 
 @Injectable()
@@ -75,7 +78,28 @@ export class CardService implements OnModuleInit {
     return this.generateBuffer(this.buildPublicUrl(token));
   }
 
-  async issueTokenForPet(petId: string): Promise<string> {
+  /**
+   * Devolve o token da carteira, criando um só quando ainda não existe.
+   *
+   * É o que o job de QR usa. Emitir e rotacionar são caminhos separados de
+   * propósito: o job tem 3 retries e o broker pode reentregar a mensagem, então
+   * uma falha transitória no S3 no meio da geração faria o token ser trocado
+   * de novo a cada tentativa — e o QR já impresso na coleira passaria a apontar
+   * para um token que não existe mais (404 na página do achador). Rotação é
+   * decisão do tutor, e acontece uma vez só, no caminho da requisição
+   * (`POST /pets/:id/qr-code` → `PetService.regenerateQrCode`).
+   */
+  async ensureTokenForPet(petId: string): Promise<string> {
+    const card = await this.prisma.carteiraDigital.upsert({
+      where: { petId },
+      create: { petId, token: randomUUID() },
+      update: {},
+    });
+    return card.token;
+  }
+
+  /** Troca o token da carteira, invalidando o QR anterior. */
+  async rotateTokenForPet(petId: string): Promise<string> {
     const token = randomUUID();
     await this.prisma.carteiraDigital.upsert({
       where: { petId },
@@ -280,6 +304,8 @@ export class CardService implements OnModuleInit {
         update: {},
       }));
 
+    const timeZone = pet.tutor.timezone;
+
     return {
       pet_id: pet.id,
       pet_name: pet.name,
@@ -297,15 +323,15 @@ export class CardService implements OnModuleInit {
       tutor_name: pet.tutor.name,
       vaccines_count: pet.vaccineRecords.length,
       upcoming_vaccines_count: pet.vaccineRecords.filter((record) =>
-        isFutureOrToday(record.nextDoseAt),
+        isFutureOrTodayInTimeZone(record.nextDoseAt, timeZone),
       ).length,
       dewormings_count: pet.dewormingRecords.length,
       upcoming_dewormings_count: pet.dewormingRecords.filter((record) =>
-        isFutureOrToday(record.nextDoseAt),
+        isFutureOrTodayInTimeZone(record.nextDoseAt, timeZone),
       ).length,
       medications_count: pet.medicationRecords.length,
       active_medications_count: pet.medicationRecords.filter((record) =>
-        isMedicationActive(record.endDate),
+        isMedicationActive(record.endDate, timeZone),
       ).length,
       issued_at: card.createdAt,
     };

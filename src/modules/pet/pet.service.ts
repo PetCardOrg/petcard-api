@@ -13,6 +13,8 @@ import {
   UpdatePetDto,
 } from '@petcardorg/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CardService } from '../card/card.service';
+import { ColeiraService } from '../coleira/coleira.service';
 import { QrCodePublisher } from '../queue/qr-code.publisher';
 import { TutorService } from '../tutor/tutor.service';
 
@@ -47,6 +49,8 @@ export class PetService {
     private readonly prisma: PrismaService,
     private readonly tutorService: TutorService,
     private readonly qrCodePublisher: QrCodePublisher,
+    private readonly cardService: CardService,
+    private readonly coleiraService: ColeiraService,
   ) {}
 
   private async enqueueQrCodeGeneration(petId: string): Promise<void> {
@@ -80,8 +84,18 @@ export class PetService {
     return this.findById(pet.id);
   }
 
+  /**
+   * Rotação deliberada do QR, pedida pelo tutor.
+   *
+   * Os tokens são trocados aqui, no caminho da requisição, e não dentro do job:
+   * o job tem retry e reentrega, então rotacionar lá trocava o token de novo a
+   * cada tentativa e invalidava um QR já impresso. O job só desenha e publica a
+   * imagem do token que encontrar (`ensureTokenForPet`).
+   */
   async regenerateQrCode(petId: string, userId: string): Promise<void> {
     await this.assertOwnership(petId, userId);
+    await this.cardService.rotateTokenForPet(petId);
+    await this.coleiraService.rotateTokenForPet(petId);
     await this.enqueueQrCodeGeneration(petId);
   }
 
