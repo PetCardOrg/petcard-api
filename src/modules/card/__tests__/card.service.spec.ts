@@ -524,6 +524,37 @@ describe('CardService', () => {
       jest.useRealTimers();
     });
 
+    // O tutor em Tóquio às 08:00 do dia 2 já virou o dia; o processo (UTC) ainda
+    // está no dia 1. A dose marcada para o dia 1 não é mais "próxima" para ele.
+    it('conta as próximas doses no fuso do tutor, não no do processo', async () => {
+      jest.setSystemTime(new Date('2026-04-01T23:00:00Z'));
+      tutorService.findById.mockResolvedValue({ id: 'tutor-1' });
+      prisma.pet.findUnique.mockResolvedValue({
+        id: 'pet-1',
+        name: 'Rex',
+        species: Species.DOG,
+        sex: Sex.MALE,
+        tutorId: 'tutor-1',
+        tutor: { id: 'tutor-1', name: 'Alice', timezone: 'Asia/Tokyo' },
+        carteiraDigital: {
+          id: 'card-1',
+          petId: 'pet-1',
+          token: 'tok-abc',
+          qrCodeUrl: null,
+          createdAt: baseDate,
+        },
+        vaccineRecords: [{ nextDoseAt: new Date('2026-04-01T12:00:00Z') }],
+        dewormingRecords: [],
+        medicationRecords: [{ endDate: new Date('2026-04-01T12:00:00Z') }],
+      });
+
+      const result = await service.findByPetIdForTutor('pet-1', 'tutor-1');
+
+      // 01/04 12:00 UTC = 01/04 21:00 em Tóquio; "agora" já é 02/04 08:00 lá.
+      expect(result.upcoming_vaccines_count).toBe(0);
+      expect(result.active_medications_count).toBe(0);
+    });
+
     it('should return the authenticated card summary for the owner', async () => {
       tutorService.findById.mockResolvedValue({ id: 'tutor-1' });
       prisma.pet.findUnique.mockResolvedValue({
