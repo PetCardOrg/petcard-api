@@ -11,6 +11,7 @@ import { CardService } from '../../card/card.service';
 import { ColeiraService } from '../../coleira/coleira.service';
 import { QrCodePublisher } from '../../queue/qr-code.publisher';
 import { TutorService } from '../../tutor/tutor.service';
+import { UploadService } from '../../upload/upload.service';
 import { PetController } from '../pet.controller';
 import { PetService } from '../pet.service';
 
@@ -80,6 +81,7 @@ describe('PetController (integração)', () => {
           provide: ColeiraService,
           useValue: { rotateTokenForPet: jest.fn().mockResolvedValue('tag') },
         },
+        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
       ],
     });
   });

@@ -12,6 +12,7 @@ import {
   UpdateVeterinarioDto,
   normalizeEmail,
 } from '@petcardorg/shared';
+import { UploadService } from '../upload/upload.service';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -57,7 +58,10 @@ function toResponse(vet: Veterinario): VeterinarioResponse {
 
 @Injectable()
 export class VeterinarioService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly uploadService: UploadService,
+  ) {}
 
   /** Apoio interno de `update` e `remove` — não há rota que leia outro vet. */
   async findById(id: string): Promise<VeterinarioResponse> {
@@ -104,7 +108,10 @@ export class VeterinarioService {
       data.crmvSituacao = null;
     }
     if (dto.telefone !== undefined) data.telefone = dto.telefone;
-    if (dto.foto_url !== undefined) data.photoUrl = dto.foto_url;
+    if (dto.foto_url !== undefined) {
+      this.uploadService.assertBucketUrl(dto.foto_url);
+      data.photoUrl = dto.foto_url;
+    }
     if (dto.password !== undefined) {
       await this.assertSenhaAtualConfere(atual, dto.senha_atual);
       data.password = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);

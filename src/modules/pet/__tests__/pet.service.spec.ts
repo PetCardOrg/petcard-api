@@ -6,6 +6,7 @@ import { CardService } from '../../card/card.service';
 import { ColeiraService } from '../../coleira/coleira.service';
 import { QrCodePublisher } from '../../queue/qr-code.publisher';
 import { TutorService } from '../../tutor/tutor.service';
+import { UploadService } from '../../upload/upload.service';
 import { PetService } from '../pet.service';
 
 describe('PetService', () => {
@@ -25,6 +26,7 @@ describe('PetService', () => {
   let qrCodePublisher: { publishGenerate: jest.Mock };
   let cardService: { rotateTokenForPet: jest.Mock };
   let coleiraService: { rotateTokenForPet: jest.Mock };
+  let uploadService: { assertBucketUrl: jest.Mock };
 
   const tutor = { id: 'tutor-1' };
   const now = new Date('2025-01-15T12:00:00Z');
@@ -76,6 +78,7 @@ describe('PetService', () => {
     coleiraService = {
       rotateTokenForPet: jest.fn().mockResolvedValue('coleira-nova'),
     };
+    uploadService = { assertBucketUrl: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -85,6 +88,7 @@ describe('PetService', () => {
         { provide: QrCodePublisher, useValue: qrCodePublisher },
         { provide: CardService, useValue: cardService },
         { provide: ColeiraService, useValue: coleiraService },
+        { provide: UploadService, useValue: uploadService },
       ],
     }).compile();
 

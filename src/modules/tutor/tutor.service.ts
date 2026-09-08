@@ -7,6 +7,7 @@ import {
 import { Tutor } from '@prisma/client';
 import { UpdateTutorDto, normalizeEmail } from '@petcardorg/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { UploadService } from '../upload/upload.service';
 
 /** Tutor sem o hash da senha — o que pode sair da API. */
 export type TutorPublico = Omit<
@@ -50,7 +51,10 @@ function semSenha(tutor: Tutor): TutorPublico {
 
 @Injectable()
 export class TutorService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly uploadService: UploadService,
+  ) {}
 
   async findById(id: string): Promise<TutorPublico> {
     return semSenha(await this.buscarOuFalhar(id));
@@ -116,6 +120,9 @@ export class TutorService {
 
     if (trocouDeEmail) {
       await this.assertEmailDisponivel(email, id);
+    }
+    if (data.profile_image_url !== undefined) {
+      this.uploadService.assertBucketUrl(data.profile_image_url);
     }
 
     const tutor = await this.prisma.tutor.update({

@@ -17,6 +17,7 @@ import { CardService } from '../card/card.service';
 import { ColeiraService } from '../coleira/coleira.service';
 import { QrCodePublisher } from '../queue/qr-code.publisher';
 import { TutorService } from '../tutor/tutor.service';
+import { UploadService } from '../upload/upload.service';
 
 type PetWithCard = Pet & { carteiraDigital: CarteiraDigital | null };
 
@@ -51,6 +52,7 @@ export class PetService {
     private readonly qrCodePublisher: QrCodePublisher,
     private readonly cardService: CardService,
     private readonly coleiraService: ColeiraService,
+    private readonly uploadService: UploadService,
   ) {}
 
   private async enqueueQrCodeGeneration(petId: string): Promise<void> {
@@ -66,6 +68,9 @@ export class PetService {
 
   async create(userId: string, dto: PetInput): Promise<PetResponseDto> {
     await this.tutorService.findById(userId);
+    if (dto.photo_url !== undefined) {
+      this.uploadService.assertBucketUrl(dto.photo_url);
+    }
     const pet = await this.prisma.pet.create({
       data: {
         name: dto.name,
@@ -133,6 +138,9 @@ export class PetService {
     dto: Omit<UpdatePetDto, 'tutor_id'>,
   ): Promise<PetResponseDto> {
     await this.assertOwnership(id, userId);
+    if (dto.photo_url !== undefined) {
+      this.uploadService.assertBucketUrl(dto.photo_url);
+    }
     const pet = await this.prisma.pet.update({
       where: { id },
       data: {

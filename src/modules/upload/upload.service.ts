@@ -174,6 +174,35 @@ export class UploadService {
     }
   }
 
+  /**
+   * Garante que uma URL de foto apontada pelo cliente é deste bucket.
+   *
+   * `foto_url`/`profile_image_url`/`photo_url` chegam como texto livre nos
+   * DTOs (só `@IsUrl()`, sem restrição de host — isso depende de env e não
+   * cabe no shared). Sem esta checagem, apontar para uma URL externa a
+   * transforma em pixel de rastreamento: a carteira pública e o dashboard do
+   * vet renderizam a imagem sem autenticação, então quem troca a foto para
+   * uma URL própria descobre quando (e de onde) alguém abriu o QR.
+   */
+  assertBucketUrl(url: string): void {
+    if (!this.bucket || !this.region) {
+      throw new InternalServerErrorException(
+        'S3 storage is not configured on the server',
+      );
+    }
+    let host: string;
+    try {
+      host = new URL(url).host;
+    } catch {
+      throw new BadRequestException('Invalid file URL');
+    }
+    if (host !== `${this.bucket}.s3.${this.region}.amazonaws.com`) {
+      throw new BadRequestException(
+        'Photo URL must point to the project storage bucket',
+      );
+    }
+  }
+
   private extractKeyFromUrl(fileUrl: string): string | null {
     try {
       const url = new URL(fileUrl);
