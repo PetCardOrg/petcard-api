@@ -31,7 +31,8 @@ export class ColeiraController {
     summary: 'Leituras do QR da coleira do pet (visão do tutor dono)',
     description:
       'Histórico de quem encontrou o pet, da leitura mais recente para a mais ' +
-      'antiga. Coordenadas só aparecem quando quem escaneou consentiu.',
+      'antiga (últimas 100). Coordenadas só aparecem quando quem escaneou ' +
+      'consentiu.',
   })
   @ApiOkResponse({ type: PetScanResponseDto, isArray: true })
   @ApiNotFoundResponse({ description: 'Pet não encontrado' })
