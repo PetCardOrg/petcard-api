@@ -11,7 +11,7 @@ describe('ColeiraService', () => {
   let prisma: {
     tagColeira: { upsert: jest.Mock; update: jest.Mock; findUnique: jest.Mock };
     pet: { findFirst: jest.Mock };
-    petScan: { create: jest.Mock; findMany: jest.Mock };
+    petScan: { create: jest.Mock; findMany: jest.Mock; findFirst: jest.Mock };
   };
   let configService: { get: jest.Mock };
   let notificationService: {
@@ -40,7 +40,11 @@ describe('ColeiraService', () => {
         findUnique: jest.fn(),
       },
       pet: { findFirst: jest.fn() },
-      petScan: { create: jest.fn(), findMany: jest.fn() },
+      petScan: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
     };
     configService = {
       get: jest.fn().mockReturnValue('https://card.petcard.app/#/achei'),
@@ -225,6 +229,31 @@ describe('ColeiraService', () => {
       );
       expect(prisma.petScan.create).not.toHaveBeenCalled();
     });
+
+    it('grava a leitura mas não repete o push dentro da janela de dedupe', async () => {
+      prisma.tagColeira.findUnique.mockResolvedValue(petDaTag);
+      prisma.petScan.findFirst.mockResolvedValue({ id: 'scan-anterior' });
+      prisma.petScan.create.mockResolvedValue(scanCriado());
+
+      const result = await service.registrarLeitura('tok-abc', {
+        latitude: -3.73,
+        longitude: -38.52,
+      });
+
+      expect(result.id).toBe('scan-1');
+      expect(prisma.petScan.create).toHaveBeenCalled();
+      expect(notificationService.schedulePush).not.toHaveBeenCalled();
+    });
+
+    it('avisa de novo fora da janela de dedupe', async () => {
+      prisma.tagColeira.findUnique.mockResolvedValue(petDaTag);
+      prisma.petScan.findFirst.mockResolvedValue(null);
+      prisma.petScan.create.mockResolvedValue(scanCriado());
+
+      await service.registrarLeitura('tok-abc', {});
+
+      expect(notificationService.schedulePush).toHaveBeenCalled();
+    });
   });
 
   describe('listScansForTutor', () => {
@@ -235,6 +264,17 @@ describe('ColeiraService', () => {
         service.listScansForTutor('pet-1', 'tutor-2'),
       ).rejects.toThrow(NotFoundException);
       expect(prisma.petScan.findMany).not.toHaveBeenCalled();
+    });
+
+    it('limita a busca em vez de trazer o histórico inteiro', async () => {
+      prisma.pet.findFirst.mockResolvedValue({ id: 'pet-1' });
+      prisma.petScan.findMany.mockResolvedValue([]);
+
+      await service.listScansForTutor('pet-1', 'tutor-1');
+
+      expect(prisma.petScan.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 100 }),
+      );
     });
   });
 

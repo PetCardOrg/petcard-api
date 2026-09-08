@@ -119,10 +119,16 @@ export class CardService implements OnModuleInit {
   /**
    * Carteira pública servida por token do QR, SEM autenticação (api#114).
    * Expõe apenas o subconjunto seguro para verificação de emergência
-   * (identificação do pet/tutor + histórico de vacinas e vermífugos). Dados
-   * clínicos sensíveis — notas clínicas (diagnóstico/prescrição/observações do
-   * vet) e medicações em uso — NÃO são incluídos aqui; ficam restritos aos
+   * (identificação do pet/tutor + histórico de vacinas e vermífugos, sem
+   * texto livre). Dados clínicos sensíveis — notas clínicas
+   * (diagnóstico/prescrição/observações do vet), o `notes` de vacina/vermífugo
+   * e medicações em uso — NÃO são incluídos aqui; ficam restritos aos
    * endpoints autenticados do tutor/veterinário.
+   *
+   * O `notes` de vacina/vermífugo é texto livre do vet — "portador de FIV,
+   * protocolo reduzido" já apareceu em produção — e por ser livre não dá para
+   * filtrar o que é sensível dentro dele. Some da carteira pública inteiro,
+   * mesmo tratamento que a api#114 deu a medicações e notas clínicas.
    *
    * O telefone do tutor é a exceção deliberada ao estreitamento da api#114:
    * sem ele o QR na coleira identifica o pet perdido mas não deixa ninguém
@@ -131,79 +137,16 @@ export class CardService implements OnModuleInit {
   async findPublicByToken(
     token: string,
   ): Promise<CarteiraDigitalPublicResponseDto> {
-    const card = await this.prisma.carteiraDigital.findUnique({
-      where: { token },
-      include: {
-        pet: {
-          include: {
-            tutor: true,
-            vaccineRecords: {
-              where: { deletedAt: null },
-              orderBy: { appliedAt: 'desc' },
-            },
-            dewormingRecords: {
-              where: { deletedAt: null },
-              orderBy: { appliedAt: 'desc' },
-            },
-          },
-        },
-      },
-    });
-
-    if (!card) {
-      throw new NotFoundException('Carteira digital not found');
-    }
-
-    const { pet } = card;
-
-    return {
-      pet_id: pet.id,
-      pet_name: pet.name,
-      species: pet.species as unknown as Species,
-      breed: pet.breed ?? undefined,
-      sex: pet.sex as unknown as Sex,
-      birth_date: pet.birthDate
-        ? pet.birthDate.toISOString().split('T')[0]
-        : undefined,
-      weight: pet.weight ?? undefined,
-      photo_url: pet.photoUrl ?? undefined,
-      qr_code_url: card.qrCodeUrl ?? undefined,
-      tutor_name: pet.tutor.name,
-      tutor_phone: pet.tutor.phone ?? undefined,
-      vaccines: pet.vaccineRecords.map((r) => ({
-        id: r.id,
-        pet_id: r.petId,
-        vaccine_name: r.vaccineName,
-        applied_at: r.appliedAt.toISOString(),
-        next_dose_at: r.nextDoseAt?.toISOString(),
-        veterinarian_name: r.veterinarianName ?? undefined,
-        notes: r.notes ?? undefined,
-        created_at: r.createdAt,
-        updated_at: r.updatedAt,
-      })),
-      dewormings: pet.dewormingRecords.map((r) => ({
-        id: r.id,
-        pet_id: r.petId,
-        product_name: r.productName,
-        applied_at: r.appliedAt.toISOString(),
-        next_dose_at: r.nextDoseAt?.toISOString(),
-        veterinarian_name: r.veterinarianName ?? undefined,
-        notes: r.notes ?? undefined,
-        created_at: r.createdAt,
-        updated_at: r.updatedAt,
-      })),
-      // Medicações omitidas da carteira pública (api#114): revelam condições
-      // de saúde em tratamento. Ficam só nos endpoints autenticados. O campo é
-      // mantido (vazio) por compatibilidade com o DTO/consumidores (web).
-      medications: [],
-      issued_at: card.createdAt,
-    };
+    const card = await this.loadCardByToken(token);
+    return this.toCarteiraResponse(card, { comNotesDeVacinaEVermifugo: false });
   }
 
   /**
    * Carteira vista por veterinário com CRMV verificado que possui o token do
    * QR (api#113). Reaproveita a carteira pública e devolve, por cima, o que a
-   * api#114 tirou dela por ser sensível: medicações e notas clínicas.
+   * api#114 tirou dela por ser sensível: medicações, notas clínicas e o
+   * `notes` de vacina/vermífugo (item 1 da auditoria de rotas públicas —
+   * texto livre do vet fica restrito a quem tem CRMV verificado).
    *
    * O controle de acesso mora nos guards da rota — aqui já se assume que o
    * chamador foi autenticado, tem papel VET e está com o CRMV verificado.
@@ -212,7 +155,10 @@ export class CardService implements OnModuleInit {
     token: string,
     veterinarioId: string,
   ): Promise<CarteiraDigitalClinicaResponseDto> {
-    const publica = await this.findPublicByToken(token);
+    const card = await this.loadCardByToken(token);
+    const publica = this.toCarteiraResponse(card, {
+      comNotesDeVacinaEVermifugo: true,
+    });
 
     const [vet, medications, notas] = await Promise.all([
       this.prisma.veterinario.findUnique({
@@ -333,6 +279,92 @@ export class CardService implements OnModuleInit {
       active_medications_count: pet.medicationRecords.filter((record) =>
         isMedicationActive(record.endDate, timeZone),
       ).length,
+      issued_at: card.createdAt,
+    };
+  }
+
+  /** Busca a carteira + pet + vacinas/vermífugos vivos, comuns à carteira pública e à clínica. */
+  private async loadCardByToken(token: string) {
+    const card = await this.prisma.carteiraDigital.findUnique({
+      where: { token },
+      include: {
+        pet: {
+          include: {
+            tutor: true,
+            vaccineRecords: {
+              where: { deletedAt: null },
+              orderBy: { appliedAt: 'desc' },
+            },
+            dewormingRecords: {
+              where: { deletedAt: null },
+              orderBy: { appliedAt: 'desc' },
+            },
+          },
+        },
+      },
+    });
+
+    if (!card) {
+      throw new NotFoundException('Carteira digital not found');
+    }
+
+    return card;
+  }
+
+  /**
+   * Monta a resposta base, comum à carteira pública e à clínica.
+   *
+   * `comNotesDeVacinaEVermifugo` é `false` na carteira pública (item 1 da
+   * auditoria de rotas públicas) e `true` na clínica: o texto livre do vet só
+   * é seguro para quem tem CRMV verificado.
+   */
+  private toCarteiraResponse(
+    card: Awaited<ReturnType<CardService['loadCardByToken']>>,
+    { comNotesDeVacinaEVermifugo }: { comNotesDeVacinaEVermifugo: boolean },
+  ): CarteiraDigitalPublicResponseDto {
+    const { pet } = card;
+
+    return {
+      pet_id: pet.id,
+      pet_name: pet.name,
+      species: pet.species as unknown as Species,
+      breed: pet.breed ?? undefined,
+      sex: pet.sex as unknown as Sex,
+      birth_date: pet.birthDate
+        ? pet.birthDate.toISOString().split('T')[0]
+        : undefined,
+      weight: pet.weight ?? undefined,
+      photo_url: pet.photoUrl ?? undefined,
+      qr_code_url: card.qrCodeUrl ?? undefined,
+      tutor_name: pet.tutor.name,
+      tutor_phone: pet.tutor.phone ?? undefined,
+      vaccines: pet.vaccineRecords.map((r) => ({
+        id: r.id,
+        pet_id: r.petId,
+        vaccine_name: r.vaccineName,
+        applied_at: r.appliedAt.toISOString(),
+        next_dose_at: r.nextDoseAt?.toISOString(),
+        veterinarian_name: r.veterinarianName ?? undefined,
+        notes: comNotesDeVacinaEVermifugo ? (r.notes ?? undefined) : undefined,
+        created_at: r.createdAt,
+        updated_at: r.updatedAt,
+      })),
+      dewormings: pet.dewormingRecords.map((r) => ({
+        id: r.id,
+        pet_id: r.petId,
+        product_name: r.productName,
+        applied_at: r.appliedAt.toISOString(),
+        next_dose_at: r.nextDoseAt?.toISOString(),
+        veterinarian_name: r.veterinarianName ?? undefined,
+        notes: comNotesDeVacinaEVermifugo ? (r.notes ?? undefined) : undefined,
+        created_at: r.createdAt,
+        updated_at: r.updatedAt,
+      })),
+      // Medicações omitidas da carteira pública (api#114): revelam condições
+      // de saúde em tratamento. Ficam só nos endpoints autenticados. O campo é
+      // mantido (vazio) por compatibilidade com o DTO/consumidores (web); a
+      // clínica (findClinicaByToken) sobrescreve com as de verdade.
+      medications: [],
       issued_at: card.createdAt,
     };
   }

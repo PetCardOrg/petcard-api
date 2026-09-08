@@ -10,6 +10,30 @@ import { PetScanResponseDto } from './dto/pet-scan-response.dto';
 import { TagColeiraResponseDto } from './dto/tag-coleira-response.dto';
 import { RegistrarLeituraDto } from './dto/registrar-leitura.dto';
 
+/**
+ * Janela de dedupe do push por pet (achado 2 da auditoria de rotas
+ * públicas). A rota é `@Public()` e o limite de IP (10 req/min) não impede um
+ * único achador de manter a coleira aberta e gerar uma leitura atrás da
+ * outra — sem dedupe isso vira ~14 mil push por dia para o mesmo tutor.
+ *
+ * A dedupe é só do push: a leitura continua sendo gravada a cada chamada
+ * (perder a localização de um pet perdido é o pior desfecho, ver comentário
+ * do model `PetScan`). Por pet, não por token+IP — o que importa para o
+ * tutor é não ser inundado de avisos do mesmo pet, não quem está lendo.
+ * 15 minutos é tempo de sobra para alguém tentar liberar o GPS sem repetir o
+ * aviso, e curto o bastante para reabrir se o pet for encontrado de novo mais
+ * tarde, por outra pessoa ou em outro lugar.
+ */
+const JANELA_DEDUPE_PUSH_MINUTOS = 15;
+
+/**
+ * Teto do histórico de leituras que a tela do tutor carrega (achado 3 da
+ * auditoria de rotas públicas). Sem a dedupe do achado 2, um único achador
+ * insistente enche a tabela; com ou sem ela, a tela não precisa do histórico
+ * inteiro — as leituras mais recentes já respondem "onde e quando".
+ */
+const LIMITE_LEITURAS_LISTADAS = 100;
+
 function toPetScanResponseDto(scan: PetScan): PetScanResponseDto {
   return {
     id: scan.id,
@@ -154,6 +178,10 @@ export class ColeiraService {
    * A leitura é gravada antes do push, e o push é best-effort. A ordem é a
    * regra: tutor sem device token, FCM desligado ou fila fora do ar não podem
    * apagar a única pista de onde o pet está.
+   *
+   * O push, ao contrário da leitura, é deduplicado por
+   * `JANELA_DEDUPE_PUSH_MINUTOS`: já ter uma leitura recente do mesmo pet
+   * dentro da janela quer dizer que o tutor já foi avisado.
    */
   async registrarLeitura(
     token: string,
@@ -172,6 +200,14 @@ export class ColeiraService {
     const temLocalizacao =
       dto.latitude !== undefined && dto.longitude !== undefined;
 
+    const inicioDaJanela = new Date(
+      Date.now() - JANELA_DEDUPE_PUSH_MINUTOS * 60_000,
+    );
+    const leituraRecente = await this.prisma.petScan.findFirst({
+      where: { petId: pet.id, createdAt: { gte: inicioDaJanela } },
+      select: { id: true },
+    });
+
     const scan = await this.prisma.petScan.create({
       data: {
         petId: pet.id,
@@ -181,34 +217,36 @@ export class ColeiraService {
       },
     });
 
-    try {
-      await this.notificationService.schedulePush({
-        tutorId: pet.tutorId,
-        kind: NotificationKind.PET_SCAN,
-        referenceType: 'PET_SCAN',
-        referenceId: scan.id,
-        title: `${pet.name} foi encontrado`,
-        body: temLocalizacao
-          ? `Alguém leu o QR da coleira e compartilhou onde ${pet.name} está.`
-          : `Alguém leu o QR da coleira de ${pet.name}, mas não compartilhou a localização.`,
-        // O FCM só transporta string no data — número vira payload inválido.
-        data: {
-          type: 'pet_scan',
-          pet_id: pet.id,
-          scan_id: scan.id,
-          ...(temLocalizacao
-            ? {
-                latitude: String(dto.latitude),
-                longitude: String(dto.longitude),
-              }
-            : {}),
-        },
-      });
-    } catch (error) {
-      this.logger.error(
-        `Failed to schedule push notification for pet scan ${scan.id}`,
-        error instanceof Error ? error.stack : error,
-      );
+    if (!leituraRecente) {
+      try {
+        await this.notificationService.schedulePush({
+          tutorId: pet.tutorId,
+          kind: NotificationKind.PET_SCAN,
+          referenceType: 'PET_SCAN',
+          referenceId: scan.id,
+          title: `${pet.name} foi encontrado`,
+          body: temLocalizacao
+            ? `Alguém leu o QR da coleira e compartilhou onde ${pet.name} está.`
+            : `Alguém leu o QR da coleira de ${pet.name}, mas não compartilhou a localização.`,
+          // O FCM só transporta string no data — número vira payload inválido.
+          data: {
+            type: 'pet_scan',
+            pet_id: pet.id,
+            scan_id: scan.id,
+            ...(temLocalizacao
+              ? {
+                  latitude: String(dto.latitude),
+                  longitude: String(dto.longitude),
+                }
+              : {}),
+          },
+        });
+      } catch (error) {
+        this.logger.error(
+          `Failed to schedule push notification for pet scan ${scan.id}`,
+          error instanceof Error ? error.stack : error,
+        );
+      }
     }
 
     return toPetScanResponseDto(scan);
@@ -236,6 +274,7 @@ export class ColeiraService {
     const scans = await this.prisma.petScan.findMany({
       where: { petId },
       orderBy: { createdAt: 'desc' },
+      take: LIMITE_LEITURAS_LISTADAS,
     });
 
     return scans.map(toPetScanResponseDto);

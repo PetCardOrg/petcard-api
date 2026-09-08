@@ -45,7 +45,12 @@ export class CardController {
       'Carteira clínica por token do QR (veterinário com CRMV verificado)',
     description:
       'Mesma carteira do QR, acrescida de medicações e notas clínicas — os ' +
-      'dados que a carteira pública não expõe. Exige CRMV verificado (api#113).',
+      'dados que a carteira pública não expõe. Exige CRMV verificado ' +
+      '(api#113). Não checa se o pet está na lista de atendidos deste ' +
+      'veterinário (`PetAtendido`) — ter o token do QR e o CRMV verificado ' +
+      'já autoriza a leitura; tirar o pet da lista com ' +
+      '`DELETE /veterinarios/me/pets/:petId` não impede reabrir esta rota ' +
+      'com o mesmo token.',
   })
   @ApiOkResponse({ type: CarteiraDigitalClinicaResponseDto })
   @ApiForbiddenResponse({ description: 'CRMV não verificado' })

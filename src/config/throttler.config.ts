@@ -11,7 +11,10 @@ const DEFAULT_LIMIT = 10;
  * limitar — a variável mal preenchida desligaria em silêncio justamente a
  * proteção de força bruta que ela deveria calibrar.
  */
-function inteiroPositivo(valor: string | undefined, padrao: number): number {
+export function inteiroPositivo(
+  valor: string | undefined,
+  padrao: number,
+): number {
   const numero = Number(valor);
   return Number.isInteger(numero) && numero > 0 ? numero : padrao;
 }

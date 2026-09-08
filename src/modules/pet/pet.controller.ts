@@ -90,6 +90,12 @@ export class PetController {
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
     summary: 'Reenfileirar geração do QR Code da carteira (assíncrono)',
+    description:
+      'Troca o token da carteira E o da tag da coleira, invalidando os dois ' +
+      'QRs anteriores — inclusive a tag impressa presa no animal. É a única ' +
+      'forma real de revogar o acesso de um veterinário à carteira clínica: ' +
+      'tirar o pet da lista dele (`DELETE /veterinarios/me/pets/:petId`) não ' +
+      'basta enquanto o token antigo continuar válido.',
   })
   @ApiNotFoundResponse({ description: 'Pet não encontrado' })
   async regenerateQrCode(
