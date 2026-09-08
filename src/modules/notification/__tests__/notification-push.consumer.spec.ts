@@ -1,6 +1,6 @@
 import { RmqContext } from '@nestjs/microservices';
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotificationKind } from '@prisma/client';
+import { NotificationKind, NotificationStatus } from '@prisma/client';
 import type { NotificationPushMessage } from '../../queue/dto/notification-push.message';
 import {
   NOTIFICATION_PUSH_MAX_RETRIES,
@@ -39,6 +39,7 @@ describe('NotificationPushConsumer', () => {
   let consumer: NotificationPushConsumer;
   let fcmClient: { send: jest.Mock };
   let notificationService: {
+    findStatus: jest.Mock;
     markSent: jest.Mock;
     markFailed: jest.Mock;
     deleteByToken: jest.Mock;
@@ -48,6 +49,7 @@ describe('NotificationPushConsumer', () => {
   beforeEach(async () => {
     fcmClient = { send: jest.fn() };
     notificationService = {
+      findStatus: jest.fn().mockResolvedValue(NotificationStatus.PENDING),
       markSent: jest.fn().mockResolvedValue(undefined),
       markFailed: jest.fn().mockResolvedValue(undefined),
       deleteByToken: jest.fn().mockResolvedValue(undefined),
@@ -80,6 +82,33 @@ describe('NotificationPushConsumer', () => {
     expect(channel.ack).toHaveBeenCalledWith(message);
     expect(channel.nack).not.toHaveBeenCalled();
     expect(channel.publish).not.toHaveBeenCalled();
+  });
+
+  // Idempotência (a fila entrega ao menos uma vez): um crash entre o envio ao
+  // FCM e o ack faz o broker reentregar a mesma mensagem. Sem esta checagem o
+  // tutor recebia o push duplicado.
+  it('descarta a reentrega de uma notificação já enviada, sem chamar o FCM', async () => {
+    notificationService.findStatus.mockResolvedValue(NotificationStatus.SENT);
+    const { context, message } = buildContext(channel);
+
+    await consumer.handlePush(baseMessage, context);
+
+    expect(fcmClient.send).not.toHaveBeenCalled();
+    expect(notificationService.markSent).not.toHaveBeenCalled();
+    expect(channel.ack).toHaveBeenCalledWith(message);
+    expect(channel.nack).not.toHaveBeenCalled();
+    expect(channel.publish).not.toHaveBeenCalled();
+  });
+
+  it('descarta a mensagem cuja notificação não existe mais (api#112)', async () => {
+    notificationService.findStatus.mockResolvedValue(null);
+    const { context, message } = buildContext(channel);
+
+    await consumer.handlePush(baseMessage, context);
+
+    expect(fcmClient.send).not.toHaveBeenCalled();
+    expect(channel.ack).toHaveBeenCalledWith(message);
+    expect(channel.nack).not.toHaveBeenCalled();
   });
 
   it('marks SENT (no messageId) and acks when FCM is disabled', async () => {
