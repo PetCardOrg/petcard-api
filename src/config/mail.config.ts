@@ -2,12 +2,41 @@ import { registerAs } from '@nestjs/config';
 
 const DEFAULT_VERIFICATION_TTL_HOURS = 24;
 const DEFAULT_RESET_TTL_MINUTES = 60;
-const DEFAULT_APP_LINK_BASE = 'petcard://';
+const DEFAULT_APP_LINK_BASE = 'http://localhost:3000/auth';
 const DEFAULT_FROM = 'PetCard <no-reply@petcard.app>';
 
 function inteiroPositivo(valor: string | undefined, padrao: number): number {
   const numero = Number(valor);
   return Number.isInteger(numero) && numero > 0 ? numero : padrao;
+}
+
+/**
+ * Base dos links dos e-mails de auth.
+ *
+ * Apontava para `petcard://`, o scheme customizado do app. Scheme customizado
+ * não tem dono: qualquer app instalado pode registrar `petcard` e, no Android,
+ * ser escolhido para abrir o link — junto com o token de redefinição que vai
+ * nele. Sem App Links / Universal Links verificados por domínio, não há como
+ * garantir que o link do e-mail chegue ao PetCard.
+ *
+ * Agora aponta para as páginas que a própria API serve
+ * (`GET /auth/reset-password` e `GET /auth/verify-email`): https, origem
+ * verificada pelo navegador, e o token não passa por app nenhum. Em produção
+ * é obrigatório — o default é um endereço de desenvolvimento, e mandá-lo num
+ * e-mail de verdade é um link morto.
+ */
+function parseAppLinkBase(raw: string | undefined, nodeEnv: string): string {
+  if (raw && raw.trim().length > 0) {
+    return raw.trim();
+  }
+
+  if (nodeEnv === 'production') {
+    throw new Error(
+      'APP_DEEP_LINK_BASE is required in production. Point it at the public API base + /auth (e.g. https://api.petcard.app/auth).',
+    );
+  }
+
+  return DEFAULT_APP_LINK_BASE;
 }
 
 /**
@@ -58,9 +87,12 @@ export const mailConfig = registerAs('mail', () => ({
   // "auth failed" por causa de um espaço colado sem querer.
   smtpPass: process.env.SMTP_PASS?.replace(/\s+/g, ''),
   from: process.env.MAIL_FROM ?? DEFAULT_FROM,
-  // Base dos links dos e-mails. O app mobile registra o scheme `petcard://`;
-  // o link vira `petcard://reset-password?token=...`.
-  appLinkBase: process.env.APP_DEEP_LINK_BASE ?? DEFAULT_APP_LINK_BASE,
+  // Base dos links dos e-mails, apontando para as páginas que a própria API
+  // serve: o link vira `<base>/reset-password?token=...`.
+  appLinkBase: parseAppLinkBase(
+    process.env.APP_DEEP_LINK_BASE,
+    process.env.NODE_ENV ?? 'development',
+  ),
   verificationTtlHours: inteiroPositivo(
     process.env.MAIL_VERIFICATION_TTL_HOURS,
     DEFAULT_VERIFICATION_TTL_HOURS,

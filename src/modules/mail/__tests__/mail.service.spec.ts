@@ -36,7 +36,9 @@ describe('MailService', () => {
   });
 
   it('sem SMTP configurado, registra o link no log e não abre transporte', async () => {
-    const service = await buildService({ 'mail.appLinkBase': 'petcard://' });
+    const service = await buildService({
+      'mail.appLinkBase': 'https://api.petcard.app/auth',
+    });
     const warn = jest
       .spyOn(service['logger'], 'warn')
       .mockImplementation(() => undefined);
@@ -46,7 +48,9 @@ describe('MailService', () => {
     expect(nodemailer.createTransport).not.toHaveBeenCalled();
     expect(sendMail).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('petcard://reset-password?token=tok-123'),
+      expect.stringContaining(
+        'https://api.petcard.app/auth/reset-password?token=tok-123',
+      ),
     );
   });
 
@@ -54,7 +58,7 @@ describe('MailService', () => {
     const service = await buildService({
       'mail.smtpHost': 'smtp.example.com',
       'mail.smtpPort': 587,
-      'mail.appLinkBase': 'petcard://',
+      'mail.appLinkBase': 'https://api.petcard.app/auth',
       'mail.from': 'PetCard <no-reply@petcard.app>',
     });
 
@@ -65,6 +69,26 @@ describe('MailService', () => {
       { to: string; subject: string; html: string },
     ];
     expect(payload.to).toBe('bob@example.com');
-    expect(payload.html).toContain('petcard://verify-email?token=tok-abc');
+    expect(payload.html).toContain(
+      'https://api.petcard.app/auth/verify-email?token=tok-abc',
+    );
+  });
+
+  it('o link nunca sai num scheme customizado', async () => {
+    const service = await buildService({
+      'mail.smtpHost': 'smtp.example.com',
+      'mail.appLinkBase': 'https://api.petcard.app/auth',
+    });
+
+    await service.sendPasswordReset('alice@example.com', 'tok-123');
+
+    // `petcard://` não tem dono: qualquer app pode registrar o scheme e, no
+    // Android, ser escolhido para abrir o link — levando o token junto.
+    const [payload] = sendMail.mock.calls[0] as [
+      { text: string; html: string },
+    ];
+    expect(payload.text).not.toContain('petcard://');
+    expect(payload.html).not.toContain('petcard://');
+    expect(payload.text).toContain('https://api.petcard.app/auth');
   });
 });

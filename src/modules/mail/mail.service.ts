@@ -60,9 +60,21 @@ export class MailService implements OnModuleInit {
     );
   }
 
+  /**
+   * Monta o link do e-mail sobre a base configurada, que aponta para as
+   * páginas servidas pela própria API (`GET /auth/reset-password` e
+   * `GET /auth/verify-email`).
+   *
+   * A base era o scheme do app (`petcard://`), e um scheme customizado não
+   * tem dono: no Android, outro app que registre `petcard` pode ser escolhido
+   * para abrir o link — com o token de redefinição dentro.
+   */
   private buildLink(path: string, token: string): string {
-    const base = this.config.get<string>('mail.appLinkBase', 'petcard://');
-    const separator = base.endsWith('/') || base.endsWith('://') ? '' : '/';
+    const base = this.config.get<string>(
+      'mail.appLinkBase',
+      'http://localhost:3000/auth',
+    );
+    const separator = base.endsWith('/') ? '' : '/';
     return `${base}${separator}${path}?token=${encodeURIComponent(token)}`;
   }
 

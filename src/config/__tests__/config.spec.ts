@@ -24,6 +24,7 @@ const CHAVES = [
   'AUTH_THROTTLE_TTL_SECONDS',
   'JWT_SECRET',
   'SMTP_HOST',
+  'APP_DEEP_LINK_BASE',
 ] as const;
 
 describe('configuração de ambiente', () => {
@@ -178,12 +179,32 @@ describe('configuração de ambiente', () => {
     it('sobe em produção com o bloco SMTP preenchido', () => {
       process.env.NODE_ENV = 'production';
       process.env.SMTP_HOST = ' smtp.petcard.app ';
+      process.env.APP_DEEP_LINK_BASE = 'https://api.petcard.app/auth';
 
       expect(mailConfig().smtpHost).toBe('smtp.petcard.app');
     });
 
     it('não trava o desenvolvimento local sem SMTP (modo de log)', () => {
       expect(mailConfig().smtpHost).toBeUndefined();
+    });
+  });
+
+  describe('base dos links de e-mail', () => {
+    it('recusa subir em produção sem a base declarada', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.SMTP_HOST = 'smtp.petcard.app';
+
+      // O default é um endereço de desenvolvimento: mandá-lo num e-mail de
+      // verdade é um link morto para todo mundo que pedir redefinição.
+      expect(() => mailConfig()).toThrow(
+        /APP_DEEP_LINK_BASE is required in production/,
+      );
+    });
+
+    it('em desenvolvimento aponta para as páginas da própria API', () => {
+      // Nunca mais para `petcard://`: scheme customizado não tem dono e, no
+      // Android, outro app pode ser escolhido para abrir o link do e-mail.
+      expect(mailConfig().appLinkBase).toBe('http://localhost:3000/auth');
     });
   });
 });
