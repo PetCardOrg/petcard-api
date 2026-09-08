@@ -2,6 +2,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma, Veterinario } from '@prisma/client';
 import { BCRYPT_ROUNDS } from '../../common/crypto/password.constants';
@@ -9,12 +10,14 @@ import { PrismaService } from '../../prisma/prisma.service';
 import {
   PetAtendidoResponseDto,
   UpdateVeterinarioDto,
+  normalizeEmail,
 } from '@petcardorg/shared';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const bcrypt = require('bcrypt') as {
   hash(data: string, rounds: number): Promise<string>;
+  compare(data: string, encrypted: string): Promise<boolean>;
 };
 
 export type VeterinarioResponse = Omit<Veterinario, 'password' | 'photoUrl'> & {
@@ -58,11 +61,15 @@ export class VeterinarioService {
 
   /** Apoio interno de `update` e `remove` — não há rota que leia outro vet. */
   async findById(id: string): Promise<VeterinarioResponse> {
+    return toResponse(await this.buscarOuFalhar(id));
+  }
+
+  private async buscarOuFalhar(id: string): Promise<Veterinario> {
     const vet = await this.prisma.veterinario.findUnique({ where: { id } });
     if (!vet) {
       throw new NotFoundException(`Veterinario with id ${id} not found`);
     }
-    return toResponse(vet);
+    return vet;
   }
 
   /**
@@ -71,20 +78,26 @@ export class VeterinarioService {
    * Trocar o CRMV derruba a verificação junto: manter o carimbo antigo
    * deixaria o registro novo — que ninguém conferiu — acessando dado clínico
    * com a credencial que o registro anterior conquistou (api#113).
+   *
+   * Trocar a senha exige apresentar a senha atual, e encerra as sessões
+   * abertas — inclusive a de quem fez a troca, que entra de novo com a senha
+   * nova. Ver `passwordChangedAt` e `JwtStrategy`.
    */
   async update(
     id: string,
     dto: UpdateVeterinarioDto,
   ): Promise<VeterinarioResponse> {
-    const atual = await this.findById(id);
+    const atual = await this.buscarOuFalhar(id);
+    const email =
+      dto.email === undefined ? undefined : normalizeEmail(dto.email);
 
-    if (dto.email || dto.crmv) {
-      await this.assertUniqueFields(dto.email, dto.crmv, id);
+    if (email || dto.crmv) {
+      await this.assertUniqueFields(email, dto.crmv, id);
     }
 
     const data: Record<string, unknown> = {};
     if (dto.nome !== undefined) data.nome = dto.nome;
-    if (dto.email !== undefined) data.email = dto.email;
+    if (email !== undefined) data.email = email;
     if (dto.crmv !== undefined && dto.crmv !== atual.crmv) {
       data.crmv = dto.crmv;
       data.crmvVerifiedAt = null;
@@ -93,7 +106,9 @@ export class VeterinarioService {
     if (dto.telefone !== undefined) data.telefone = dto.telefone;
     if (dto.foto_url !== undefined) data.photoUrl = dto.foto_url;
     if (dto.password !== undefined) {
+      await this.assertSenhaAtualConfere(atual, dto.senha_atual);
       data.password = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
+      data.passwordChangedAt = new Date();
     }
 
     const vet = await this.prisma.veterinario.update({
@@ -102,6 +117,27 @@ export class VeterinarioService {
     });
 
     return toResponse(vet);
+  }
+
+  /**
+   * Prova de que quem troca a senha é o dono da conta, não quem pegou o token.
+   *
+   * O token do veterinário vale 7 dias e a web o guarda em `localStorage`.
+   * Sem esta prova, um token vazado trocava a senha e transformava um acesso
+   * temporário em posse definitiva de uma conta que lê e escreve dado
+   * clínico.
+   */
+  private async assertSenhaAtualConfere(
+    vet: Veterinario,
+    senhaAtual: string | undefined,
+  ): Promise<void> {
+    const confere =
+      senhaAtual !== undefined &&
+      (await bcrypt.compare(senhaAtual, vet.password));
+
+    if (!confere) {
+      throw new UnauthorizedException('Senha atual incorreta.');
+    }
   }
 
   async remove(id: string): Promise<void> {

@@ -115,6 +115,88 @@ describe('TutorController (integração)', () => {
       });
     });
 
+    /**
+     * Trocar o e-mail é trocar a identidade da conta. Sem derrubar a
+     * verificação, bastava confirmar um endereço próprio e apontar depois para
+     * o de outra pessoa para ficar "verificado" nele — o mesmo raciocínio que
+     * já zera a verificação de CRMV quando o veterinário troca de registro.
+     */
+    describe('troca de e-mail', () => {
+      it('zera a verificação ao apontar para outro endereço', async () => {
+        prisma.tutor.findUnique
+          .mockResolvedValueOnce({ ...tutor, emailVerifiedAt: new Date() })
+          .mockResolvedValueOnce(null);
+        prisma.tutor.update.mockResolvedValue({
+          ...tutor,
+          email: 'novo@petcard.com',
+          emailVerifiedAt: null,
+        });
+
+        const res = await request(harness.app.getHttpServer())
+          .patch('/tutors/me')
+          .send({ email: 'novo@petcard.com' })
+          .expect(200);
+
+        expect(res.body.email_verified).toBe(false);
+        expect(prisma.tutor.update).toHaveBeenCalledWith({
+          where: { id: 'tutor-1' },
+          data: { email: 'novo@petcard.com', emailVerifiedAt: null },
+        });
+      });
+
+      it('responde 409 quando o endereço já é de outra conta', async () => {
+        prisma.tutor.findUnique
+          .mockResolvedValueOnce(tutor)
+          .mockResolvedValueOnce({ ...tutor, id: 'tutor-2' });
+
+        // Sem a checagem, a unique do Prisma estourava e o cliente recebia 500
+        // — sem como distinguir "endereço ocupado" de falha do servidor.
+        await request(harness.app.getHttpServer())
+          .patch('/tutors/me')
+          .send({ email: 'ocupado@petcard.com' })
+          .expect(409);
+
+        expect(prisma.tutor.update).not.toHaveBeenCalled();
+      });
+
+      it('não zera a verificação quando o e-mail enviado é o mesmo', async () => {
+        prisma.tutor.findUnique.mockResolvedValue({
+          ...tutor,
+          emailVerifiedAt: new Date(),
+        });
+        prisma.tutor.update.mockResolvedValue(tutor);
+
+        // Salvar o formulário sem mexer no e-mail não pode obrigar o tutor a
+        // confirmar a conta de novo.
+        await request(harness.app.getHttpServer())
+          .patch('/tutors/me')
+          .send({ name: 'Alice B', email: tutor.email })
+          .expect(200);
+
+        const [[chamada]] = prisma.tutor.update.mock.calls as Array<
+          [{ data: Record<string, unknown> }]
+        >;
+        expect(chamada.data).not.toHaveProperty('emailVerifiedAt');
+      });
+
+      it('grava o endereço na forma canônica', async () => {
+        prisma.tutor.findUnique
+          .mockResolvedValueOnce(tutor)
+          .mockResolvedValueOnce(null);
+        prisma.tutor.update.mockResolvedValue(tutor);
+
+        await request(harness.app.getHttpServer())
+          .patch('/tutors/me')
+          .send({ email: 'Nova.Conta@PetCard.com' })
+          .expect(200);
+
+        const [[chamada]] = prisma.tutor.update.mock.calls as Array<
+          [{ data: { email: string } }]
+        >;
+        expect(chamada.data.email).toBe('nova.conta@petcard.com');
+      });
+    });
+
     it('rejeita email inválido (400)', async () => {
       await request(harness.app.getHttpServer())
         .patch('/tutors/me')

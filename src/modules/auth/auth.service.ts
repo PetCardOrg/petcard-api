@@ -13,7 +13,7 @@ import { JwtService } from '@nestjs/jwt';
 import { AuthTokenPurpose, type Tutor } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { OAuth2Client } from 'google-auth-library';
-import { CreateVeterinarioDto } from '@petcardorg/shared';
+import { CreateVeterinarioDto, normalizeEmail } from '@petcardorg/shared';
 import { BCRYPT_ROUNDS } from '../../common/crypto/password.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CrmvVerificationService } from '../veterinario/crmv/crmv-verification.service';
@@ -58,9 +58,8 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto) {
-    const existing = await this.prisma.tutor.findUnique({
-      where: { email: dto.email },
-    });
+    const email = normalizeEmail(dto.email);
+    const existing = await this.prisma.tutor.findUnique({ where: { email } });
 
     if (existing) {
       throw new ConflictException('Email already registered');
@@ -71,7 +70,7 @@ export class AuthService {
     const tutor = await this.prisma.tutor.create({
       data: {
         name: dto.name,
-        email: dto.email,
+        email,
         password: hashedPassword,
       },
     });
@@ -83,7 +82,7 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const tutor = await this.prisma.tutor.findUnique({
-      where: { email: dto.email },
+      where: { email: normalizeEmail(dto.email) },
     });
 
     const passwordValid = await bcrypt.compare(
@@ -123,7 +122,7 @@ export class AuthService {
         audience: clientIds,
       });
       const payload = ticket.getPayload();
-      email = payload?.email?.toLowerCase();
+      email = payload?.email ? normalizeEmail(payload.email) : undefined;
       googleId = payload?.sub;
       name = payload?.name;
       if (!payload?.email_verified) {
@@ -175,7 +174,7 @@ export class AuthService {
    * a rota não pode virar um teste de quais e-mails estão cadastrados.
    */
   async forgotPassword(dto: ForgotPasswordDto): Promise<void> {
-    const email = dto.email.toLowerCase();
+    const email = normalizeEmail(dto.email);
     const tutor = await this.prisma.tutor.findUnique({ where: { email } });
 
     if (!tutor) {
@@ -207,7 +206,14 @@ export class AuthService {
 
     await this.prisma.tutor.update({
       where: { id: tutorId },
-      data: { password: await bcrypt.hash(dto.password, BCRYPT_ROUNDS) },
+      data: {
+        password: await bcrypt.hash(dto.password, BCRYPT_ROUNDS),
+        // Quem redefine a senha está retomando uma conta que pode estar
+        // comprometida. Sem o carimbo, o token de quem invadiu seguia valendo
+        // por até 7 dias depois da troca — a redefinição não expulsava
+        // ninguém. Ver `JwtStrategy`.
+        passwordChangedAt: new Date(),
+      },
     });
   }
 
@@ -246,8 +252,9 @@ export class AuthService {
    * atendimento.
    */
   async registerVeterinario(dto: CreateVeterinarioDto) {
+    const email = normalizeEmail(dto.email);
     const porEmail = await this.prisma.veterinario.findUnique({
-      where: { email: dto.email },
+      where: { email },
     });
     if (porEmail) {
       throw new ConflictException('Email already registered');
@@ -269,7 +276,7 @@ export class AuthService {
     const vet = await this.prisma.veterinario.create({
       data: {
         nome: dto.nome,
-        email: dto.email,
+        email,
         password: hashedPassword,
         crmv: dto.crmv,
         telefone: dto.telefone,
@@ -285,14 +292,19 @@ export class AuthService {
       crmvVerificado = status.verified;
     } catch (error) {
       this.logger.warn(
-        `Cadastro de ${dto.email} concluído sem verificar o CRMV ${dto.crmv}: ${
+        `Cadastro de ${email} concluído sem verificar o CRMV ${dto.crmv}: ${
           error instanceof Error ? error.message : 'erro desconhecido'
         }`,
       );
     }
 
     return {
-      access_token: this.signToken(vet.id, vet.email, Role.VET),
+      access_token: this.signToken(
+        vet.id,
+        vet.email,
+        Role.VET,
+        vet.passwordChangedAt,
+      ),
       user: {
         id: vet.id,
         nome: vet.nome,
@@ -307,7 +319,7 @@ export class AuthService {
 
   async loginVeterinario(dto: LoginDto) {
     const vet = await this.prisma.veterinario.findUnique({
-      where: { email: dto.email },
+      where: { email: normalizeEmail(dto.email) },
     });
 
     const passwordValid = await bcrypt.compare(
@@ -319,7 +331,12 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const token = this.signToken(vet.id, vet.email, Role.VET);
+    const token = this.signToken(
+      vet.id,
+      vet.email,
+      Role.VET,
+      vet.passwordChangedAt,
+    );
 
     return {
       access_token: token,
@@ -375,7 +392,12 @@ export class AuthService {
 
   private buildTutorSession(tutor: Tutor) {
     return {
-      access_token: this.signToken(tutor.id, tutor.email, Role.TUTOR),
+      access_token: this.signToken(
+        tutor.id,
+        tutor.email,
+        Role.TUTOR,
+        tutor.passwordChangedAt,
+      ),
       user: {
         id: tutor.id,
         name: tutor.name,
@@ -388,11 +410,23 @@ export class AuthService {
     };
   }
 
-  private signToken(id: string, email: string, role: Role): string {
+  /**
+   * Assina a sessão carregando o carimbo da última troca de senha da conta.
+   *
+   * É esse carimbo que torna a sessão revogável: a `JwtStrategy` compara o
+   * valor do token com o que está gravado e recusa o que ficou para trás.
+   */
+  private signToken(
+    id: string,
+    email: string,
+    role: Role,
+    passwordChangedAt: Date | null,
+  ): string {
     return this.jwtService.sign({
       sub: id,
       email,
       role,
+      pwd_at: passwordChangedAt?.getTime(),
     });
   }
 }

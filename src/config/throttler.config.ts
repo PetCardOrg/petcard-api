@@ -17,6 +17,17 @@ function inteiroPositivo(valor: string | undefined, padrao: number): number {
 }
 
 /**
+ * Teto fixo das rotas que custam mais que uma tentativa de login.
+ *
+ * O reenvio de verificação queima cota de SMTP e reputação de remetente; a
+ * verificação de CRMV com `force=true` é uma consulta cobrada por chamada. Nas
+ * duas, o orçamento do login (dez por minuto) é generoso demais — e nas duas
+ * repetir é exceção, não uso normal. Fica fora do ambiente de propósito: é um
+ * piso de proteção, não um número a calibrar.
+ */
+export const LIMITE_DE_ROTA_CARA = 3;
+
+/**
  * Rate limit das rotas sem sessão (login e cadastro).
  *
  * Elas eram as únicas superfícies públicas sem limite: dava para varrer senhas

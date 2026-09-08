@@ -1,6 +1,7 @@
 import { appConfig } from '../app.config';
 import { firebaseConfig } from '../firebase.config';
 import { authConfig } from '../auth.config';
+import { mailConfig } from '../mail.config';
 import { throttlerConfig } from '../throttler.config';
 
 /**
@@ -22,6 +23,7 @@ const CHAVES = [
   'AUTH_THROTTLE_LIMIT',
   'AUTH_THROTTLE_TTL_SECONDS',
   'JWT_SECRET',
+  'SMTP_HOST',
 ] as const;
 
 describe('configuração de ambiente', () => {
@@ -152,6 +154,36 @@ describe('configuração de ambiente', () => {
 
     it('não trava o desenvolvimento local sem segredo', () => {
       expect(authConfig().jwtSecret).toBeUndefined();
+    });
+  });
+
+  describe('SMTP', () => {
+    it('recusa subir em produção sem servidor de e-mail', () => {
+      process.env.NODE_ENV = 'production';
+
+      // Sem host, o MailService cai no modo de log: o link de redefinição, com
+      // o token dentro, vai para a saída do processo — CloudWatch, em texto
+      // claro — e nenhum e-mail chega a ninguém. Falha silenciosa dos dois
+      // lados; por isso o boot para aqui.
+      expect(() => mailConfig()).toThrow(/SMTP_HOST is required in production/);
+    });
+
+    it('trata variável em branco como ausente em produção', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.SMTP_HOST = '   ';
+
+      expect(() => mailConfig()).toThrow(/SMTP_HOST is required in production/);
+    });
+
+    it('sobe em produção com o bloco SMTP preenchido', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.SMTP_HOST = ' smtp.petcard.app ';
+
+      expect(mailConfig().smtpHost).toBe('smtp.petcard.app');
+    });
+
+    it('não trava o desenvolvimento local sem SMTP (modo de log)', () => {
+      expect(mailConfig().smtpHost).toBeUndefined();
     });
   });
 });

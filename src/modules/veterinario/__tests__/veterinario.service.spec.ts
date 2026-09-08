@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { VeterinarioService } from '../veterinario.service';
@@ -16,6 +20,9 @@ jest.mock('bcrypt', () => ({
     compare: jest.fn(),
   },
 }));
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const bcrypt = require('bcrypt') as { compare: jest.Mock };
 
 describe('VeterinarioService', () => {
   let service: VeterinarioService;
@@ -36,11 +43,16 @@ describe('VeterinarioService', () => {
     password: 'hashed-password',
     crmv: 'CRMV-CE-12345',
     telefone: '85999999999',
+    passwordChangedAt: null as Date | null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
 
   beforeEach(async () => {
+    // O mock de bcrypt é de módulo e sobrevive entre os testes; sem limpar, as
+    // chamadas de um teste contam no seguinte.
+    jest.clearAllMocks();
+
     prisma = {
       veterinario: {
         create: jest.fn(),
@@ -171,6 +183,116 @@ describe('VeterinarioService', () => {
       });
 
       expect(dadosGravados()).not.toHaveProperty('crmvVerifiedAt');
+    });
+  });
+
+  /**
+   * O token do veterinário vale 7 dias e a web o guarda em `localStorage`.
+   * Sem a senha atual, um token vazado trocava a senha e a conta que lê e
+   * escreve dado clínico passava em definitivo para quem o pegou.
+   */
+  describe('troca de senha', () => {
+    /** O `data` que chegou no Prisma na primeira (e única) gravação. */
+    function dadosGravados(): Record<string, unknown> {
+      const [[argumento]] = prisma.veterinario.update.mock.calls as [
+        [{ data: Record<string, unknown> }],
+      ];
+      return argumento.data;
+    }
+
+    it('recusa a troca quando a senha atual não confere', async () => {
+      prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);
+      bcrypt.compare.mockResolvedValue(false);
+
+      await expect(
+        service.update('vet-1', {
+          password: 'NovaSenha123!',
+          senha_atual: 'chute',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(prisma.veterinario.update).not.toHaveBeenCalled();
+    });
+
+    it('recusa a troca sem senha atual nenhuma', async () => {
+      prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);
+
+      await expect(
+        service.update('vet-1', { password: 'NovaSenha123!' }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(prisma.veterinario.update).not.toHaveBeenCalled();
+    });
+
+    it('confere a senha atual contra o hash guardado, não contra o corpo', async () => {
+      prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+      bcrypt.compare.mockResolvedValue(true);
+
+      await service.update('vet-1', {
+        password: 'NovaSenha123!',
+        senha_atual: 'SenhaAntiga1!',
+      });
+
+      expect(bcrypt.compare).toHaveBeenCalledWith(
+        'SenhaAntiga1!',
+        vetFixture.password,
+      );
+    });
+
+    it('troca a senha e carimba a data, derrubando as sessões abertas', async () => {
+      prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+      bcrypt.compare.mockResolvedValue(true);
+
+      await service.update('vet-1', {
+        password: 'NovaSenha123!',
+        senha_atual: 'SenhaAntiga1!',
+      });
+
+      const data = dadosGravados();
+      expect(data.password).toBe('hashed-password');
+      expect(data.passwordChangedAt).toBeInstanceOf(Date);
+    });
+
+    it('não carimba nem pede senha atual quando a senha não muda', async () => {
+      prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+
+      // Editar o telefone não pode expulsar o veterinário da própria sessão.
+      await service.update('vet-1', { telefone: '85988887777' });
+
+      expect(dadosGravados()).not.toHaveProperty('passwordChangedAt');
+      expect(bcrypt.compare).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('e-mail', () => {
+    it('grava o e-mail na forma canônica', async () => {
+      prisma.veterinario.findUnique
+        .mockResolvedValueOnce(vetFixture)
+        .mockResolvedValueOnce(null);
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+
+      await service.update('vet-1', { email: ' Carlos@Vet.COM ' });
+
+      const [[argumento]] = prisma.veterinario.update.mock.calls as [
+        [{ data: Record<string, unknown> }],
+      ];
+      expect(argumento.data.email).toBe('carlos@vet.com');
+    });
+
+    it('checa a unicidade já com o e-mail normalizado', async () => {
+      // Buscando pela caixa recebida, a colisão com uma conta gravada em
+      // minúsculas passava batida e estourava na unique do Prisma (500).
+      prisma.veterinario.findUnique
+        .mockResolvedValueOnce(vetFixture)
+        .mockResolvedValueOnce({ ...vetFixture, id: 'vet-2' });
+
+      await expect(
+        service.update('vet-1', { email: 'Outro@Vet.com' }),
+      ).rejects.toThrow(ConflictException);
+      expect(prisma.veterinario.findUnique).toHaveBeenLastCalledWith({
+        where: { email: 'outro@vet.com' },
+      });
     });
   });
 

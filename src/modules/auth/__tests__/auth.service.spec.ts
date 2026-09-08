@@ -48,6 +48,7 @@ describe('AuthService', () => {
     profileImageUrl: 'https://cdn.petcard.com/tutor-1.jpg',
     emailVerifiedAt: null as Date | null,
     googleId: null as string | null,
+    passwordChangedAt: null as Date | null,
     role: 'TUTOR',
   };
 
@@ -290,6 +291,108 @@ describe('AuthService', () => {
     });
   });
 
+  /**
+   * O e-mail é a identidade da conta e o usuário não repete a mesma caixa: se
+   * cada variação virar uma chave diferente, a mesma pessoa tem uma conta que
+   * não acha e outra que nasce sozinha.
+   */
+  describe('identidade por e-mail (caixa)', () => {
+    it('grava o e-mail do cadastro na forma canônica', async () => {
+      prisma.tutor.findUnique.mockResolvedValue(null);
+      prisma.tutor.create.mockResolvedValue(tutorFixture);
+      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
+
+      await service.register({
+        name: 'Ana',
+        email: '  Ana.Silva@Example.com ',
+        password: 'Senha123!',
+      });
+
+      const [[chamada]] = prisma.tutor.create.mock.calls as Array<
+        [{ data: { email: string } }]
+      >;
+      expect(chamada.data.email).toBe('ana.silva@example.com');
+    });
+
+    it('encontra a conta no login mesmo com outra caixa', async () => {
+      prisma.tutor.findUnique.mockResolvedValue(tutorFixture);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await service.login({
+        email: 'ALICE@Example.com',
+        password: '123456',
+      });
+
+      expect(prisma.tutor.findUnique).toHaveBeenCalledWith({
+        where: { email: 'alice@example.com' },
+      });
+    });
+
+    it('acha a conta em "esqueci minha senha" cadastrada em caixa mista', async () => {
+      // O cadastro veio como "Ana.Silva@Example.com". A rota responde 202 mesmo
+      // sem achar ninguém, então uma busca que erra a caixa não dá erro
+      // nenhum: o e-mail simplesmente nunca chega.
+      prisma.tutor.findUnique.mockResolvedValue(tutorFixture);
+
+      await service.forgotPassword({ email: 'Ana.Silva@Example.com' });
+
+      expect(prisma.tutor.findUnique).toHaveBeenCalledWith({
+        where: { email: 'ana.silva@example.com' },
+      });
+      expect(mail.sendPasswordReset).toHaveBeenCalled();
+    });
+
+    it('vincula o Google à conta existente em vez de criar uma segunda', async () => {
+      verifyIdToken.mockResolvedValue({
+        getPayload: () => ({
+          sub: 'google-123',
+          email: 'Alice@Example.com',
+          email_verified: true,
+          name: 'Alice G',
+        }),
+      });
+      prisma.tutor.findUnique
+        .mockResolvedValueOnce(null) // por googleId
+        .mockResolvedValueOnce({ ...tutorFixture, googleId: null }); // por email
+      prisma.tutor.update.mockResolvedValue({
+        ...tutorFixture,
+        googleId: 'google-123',
+      });
+
+      await service.googleLogin({ idToken: 'id-token' });
+
+      // Segunda busca é a que casa por e-mail: errando a caixa, ela não acha e
+      // o tutor ganha uma conta paralela, com os pets separados da primeira.
+      expect(prisma.tutor.findUnique).toHaveBeenNthCalledWith(2, {
+        where: { email: 'alice@example.com' },
+      });
+      expect(prisma.tutor.create).not.toHaveBeenCalled();
+    });
+
+    it('encontra o veterinário no login mesmo com outra caixa', async () => {
+      prisma.veterinario.findUnique.mockResolvedValue({
+        id: 'vet-1',
+        nome: 'Dr. Bob',
+        email: 'bob@vet.com',
+        password: 'hashed-password',
+        crmv: 'CRMV-SP-12345',
+        telefone: null,
+        photoUrl: null,
+        passwordChangedAt: null,
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await service.loginVeterinario({
+        email: 'Bob@Vet.com',
+        password: '123456',
+      });
+
+      expect(prisma.veterinario.findUnique).toHaveBeenCalledWith({
+        where: { email: 'bob@vet.com' },
+      });
+    });
+  });
+
   describe('resetPassword', () => {
     it('consome o token e grava a nova senha cifrada', async () => {
       authToken.consume.mockResolvedValue('tutor-1');
@@ -303,8 +406,25 @@ describe('AuthService', () => {
       );
       expect(prisma.tutor.update).toHaveBeenCalledWith({
         where: { id: 'tutor-1' },
-        data: { password: 'novo-hash' },
+        data: {
+          password: 'novo-hash',
+          passwordChangedAt: expect.any(Date) as Date,
+        },
       });
+    });
+
+    it('carimba a troca para derrubar as sessões abertas antes dela', async () => {
+      authToken.consume.mockResolvedValue('tutor-1');
+      (bcrypt.hash as jest.Mock).mockResolvedValue('novo-hash');
+
+      await service.resetPassword({ token: 'raw-token', password: 'Nova123!' });
+
+      const [[chamada]] = prisma.tutor.update.mock.calls as Array<
+        [{ data: { passwordChangedAt?: Date } }]
+      >;
+      // Sem o carimbo, o token de quem invadiu a conta seguiria valendo por
+      // até 7 dias depois de o tutor redefinir a senha.
+      expect(chamada.data.passwordChangedAt).toBeInstanceOf(Date);
     });
 
     it('propaga o erro de token inválido', async () => {
@@ -314,6 +434,37 @@ describe('AuthService', () => {
         service.resetPassword({ token: 'x', password: 'Nova123!' }),
       ).rejects.toThrow(BadRequestException);
       expect(prisma.tutor.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('carimbo de senha no token', () => {
+    it('assina a sessão do tutor com o carimbo da conta', async () => {
+      const trocaDeSenha = new Date('2026-09-01T10:00:00.000Z');
+      prisma.tutor.findUnique.mockResolvedValue({
+        ...tutorFixture,
+        passwordChangedAt: trocaDeSenha,
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await service.login({ email: 'alice@example.com', password: '123456' });
+
+      // Sem o carimbo no claim, a JwtStrategy não tem com o que comparar e a
+      // sessão volta a ser irrevogável.
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ pwd_at: trocaDeSenha.getTime() }),
+      );
+    });
+
+    it('não inventa carimbo para conta que nunca trocou de senha', async () => {
+      prisma.tutor.findUnique.mockResolvedValue(tutorFixture);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await service.login({ email: 'alice@example.com', password: '123456' });
+
+      const [[claims]] = jwtService.sign.mock.calls as Array<
+        [{ pwd_at?: number }]
+      >;
+      expect(claims.pwd_at).toBeUndefined();
     });
   });
 
@@ -543,6 +694,7 @@ describe('AuthService', () => {
       crmv: 'CRMV-SP-12345',
       telefone: '11999990000',
       photoUrl: 'https://cdn.petcard.com/vet-1.jpg',
+      passwordChangedAt: null as Date | null,
     };
 
     it('should return token for valid vet credentials', async () => {

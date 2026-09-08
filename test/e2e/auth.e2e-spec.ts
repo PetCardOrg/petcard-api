@@ -189,13 +189,118 @@ describe('Auth (e2e)', () => {
         .expect(201);
       expect(login.body.user.email_verified).toBe(true);
     });
+
+    it('derruba as sessões abertas antes da redefinição', async () => {
+      const { token, user } = await registerTutor(app, {
+        email: 'invadida@petcard.com',
+      });
+
+      // Token válido enquanto a senha é a mesma.
+      await request(app.getHttpServer())
+        .get('/tutors/me')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      const rawToken = 'token-e2e-revoga';
+      await prisma.authToken.create({
+        data: {
+          tutorId: user.id,
+          purpose: AuthTokenPurpose.PASSWORD_RESET,
+          tokenHash: createHash('sha256').update(rawToken).digest('hex'),
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+
+      await request(app.getHttpServer())
+        .post('/auth/password/reset')
+        .send({ token: rawToken, password: 'NovaSenha1!' })
+        .expect(204);
+
+      // Quem redefine a senha está retomando uma conta comprometida: o token
+      // de quem invadiu não pode sobreviver à troca por mais 7 dias.
+      await request(app.getHttpServer())
+        .get('/tutors/me')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(401);
+    });
+
+    it('o token emitido depois da redefinição continua valendo', async () => {
+      // O outro lado da moeda: revogar demais tranca todo mundo para fora.
+      const { user } = await registerTutor(app, {
+        email: 'segue@petcard.com',
+      });
+
+      const rawToken = 'token-e2e-segue';
+      await prisma.authToken.create({
+        data: {
+          tutorId: user.id,
+          purpose: AuthTokenPurpose.PASSWORD_RESET,
+          tokenHash: createHash('sha256').update(rawToken).digest('hex'),
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+      await request(app.getHttpServer())
+        .post('/auth/password/reset')
+        .send({ token: rawToken, password: 'NovaSenha1!' })
+        .expect(204);
+
+      const login = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'segue@petcard.com', password: 'NovaSenha1!' })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .get('/tutors/me')
+        .set('Authorization', `Bearer ${login.body.access_token as string}`)
+        .expect(200);
+    });
+
+    it('acha a conta cadastrada em caixa mista', async () => {
+      // Cadastro com maiúsculas; recuperação com o mesmo endereço em
+      // minúsculas. Sem forma canônica, a busca não achava ninguém e a rota
+      // respondia 202 em silêncio — o e-mail nunca chegava.
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          name: 'Ana Silva',
+          email: 'Ana.Silva@PetCard.com',
+          password: 'Senha123!',
+        })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/auth/password/forgot')
+        .send({ email: 'ana.silva@petcard.com' })
+        .expect(202);
+
+      const criados = await prisma.authToken.count({
+        where: { purpose: AuthTokenPurpose.PASSWORD_RESET },
+      });
+      expect(criados).toBe(1);
+    });
+
+    it('entra no login com o endereço em qualquer caixa', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          name: 'Ana Silva',
+          email: 'ana.silva@petcard.com',
+          password: 'Senha123!',
+        })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'ANA.SILVA@PetCard.com', password: 'Senha123!' })
+        .expect(201);
+    });
   });
 
   describe('Veterinário', () => {
     const novoVet = {
       nome: 'Dr. Carlos',
       email: 'carlos@vet.com',
-      password: 'senha-forte',
+      password: 'Senha123!',
       crmv: 'CRMV-SP 12345',
     };
 
@@ -281,6 +386,83 @@ describe('Auth (e2e)', () => {
         .get('/auth/veterinario/profile')
         .set('Authorization', `Bearer ${token}`)
         .expect(403);
+    });
+
+    /**
+     * Um token de veterinário vale 7 dias e a web o guarda em `localStorage`.
+     * Se ele bastasse para trocar a senha, um vazamento temporário viraria
+     * posse definitiva de uma conta que lê e escreve dado clínico.
+     */
+    describe('troca de senha do veterinário', () => {
+      it('recusa a troca sem a senha atual (400)', async () => {
+        const { token } = await createAndLoginVet(app, prisma, {
+          password: 'SenhaVet1!',
+        });
+
+        await request(app.getHttpServer())
+          .patch('/veterinarios/me')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ password: 'NovaSenha1!' })
+          .expect(400);
+
+        // A senha antiga continua entrando: nada foi trocado.
+        await request(app.getHttpServer())
+          .post('/auth/veterinario/login')
+          .send({ email: 'vet@petcard.com', password: 'SenhaVet1!' })
+          .expect(201);
+      });
+
+      it('recusa a troca com a senha atual errada (401)', async () => {
+        const { token } = await createAndLoginVet(app, prisma, {
+          password: 'SenhaVet1!',
+        });
+
+        await request(app.getHttpServer())
+          .patch('/veterinarios/me')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ password: 'NovaSenha1!', senha_atual: 'chute' })
+          .expect(401);
+      });
+
+      it('troca a senha com a atual correta e encerra a sessão anterior', async () => {
+        const { token } = await createAndLoginVet(app, prisma, {
+          password: 'SenhaVet1!',
+        });
+
+        await request(app.getHttpServer())
+          .patch('/veterinarios/me')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ password: 'NovaSenha1!', senha_atual: 'SenhaVet1!' })
+          .expect(200);
+
+        await request(app.getHttpServer())
+          .post('/auth/veterinario/login')
+          .send({ email: 'vet@petcard.com', password: 'NovaSenha1!' })
+          .expect(201);
+
+        // A sessão de antes da troca cai junto — inclusive a de quem trocou.
+        await request(app.getHttpServer())
+          .get('/auth/veterinario/profile')
+          .set('Authorization', `Bearer ${token}`)
+          .expect(401);
+      });
+
+      it('editar outro campo não pede senha nem derruba a sessão', async () => {
+        const { token } = await createAndLoginVet(app, prisma, {
+          password: 'SenhaVet1!',
+        });
+
+        await request(app.getHttpServer())
+          .patch('/veterinarios/me')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ telefone: '85988887777' })
+          .expect(200);
+
+        await request(app.getHttpServer())
+          .get('/auth/veterinario/profile')
+          .set('Authorization', `Bearer ${token}`)
+          .expect(200);
+      });
     });
   });
 });

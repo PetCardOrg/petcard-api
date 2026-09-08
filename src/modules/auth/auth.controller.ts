@@ -16,6 +16,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { CreateVeterinarioDto } from '@petcardorg/shared';
+import { LIMITE_DE_ROTA_CARA } from '../../config/throttler.config';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -131,6 +132,15 @@ export class AuthController {
   @Post('email/resend')
   @Auth(Role.TUTOR)
   @HttpCode(202)
+  // Única rota de e-mail que ficou sem limite. Ter sessão não é salvo-conduto:
+  // um laço aqui dispara e-mail atrás de e-mail para a caixa do tutor, gasta a
+  // cota do provedor SMTP e queima a reputação do remetente — que é
+  // compartilhada com o e-mail de redefinição de senha. Teto baixo porque
+  // reenviar confirmação é ação de exceção, não de repetição.
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ auth: { limit: LIMITE_DE_ROTA_CARA } })
+  @SkipThrottle({ 'public-card': true })
+  @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({ summary: 'Reenviar o e-mail de verificação ao tutor logado' })
   async resendVerification(@CurrentUser() user: JwtPayload) {
     await this.authService.resendVerification(user.sub);

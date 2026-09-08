@@ -11,15 +11,45 @@ function inteiroPositivo(valor: string | undefined, padrao: number): number {
 }
 
 /**
+ * Em produção, faltar `SMTP_HOST` não é uma configuração incompleta — é uma
+ * falha de segurança silenciosa.
+ *
+ * Sem host, o `MailService` cai no modo de log e escreve o link de
+ * redefinição, com o token dentro, na saída do processo: no CloudWatch, em
+ * texto claro, para quem tiver acesso aos logs. Ao mesmo tempo, nenhum e-mail
+ * chega ao usuário, então ninguém percebe. Mesma escolha do `JWT_SECRET` e do
+ * `CORS_ORIGINS`: em produção, faltar = não sobe.
+ */
+function parseSmtpHost(
+  raw: string | undefined,
+  nodeEnv: string,
+): string | undefined {
+  if (raw && raw.trim().length > 0) {
+    return raw.trim();
+  }
+
+  if (nodeEnv === 'production') {
+    throw new Error(
+      'SMTP_HOST is required in production. Without it the reset link is written to the logs and no email is ever sent.',
+    );
+  }
+
+  return undefined;
+}
+
+/**
  * Envio de e-mail transacional (verificação de conta e recuperação de senha).
  *
  * Sem `SMTP_HOST` o `MailService` cai no modo de log: o link vai para o
  * console em vez de um servidor SMTP. É o suficiente para desenvolvimento e
- * para a demo dos UCs — nenhuma conta paga é necessária. Em produção, definir
- * o bloco SMTP_* faz o envio real.
+ * para a demo dos UCs — nenhuma conta paga é necessária. Em produção o bloco
+ * SMTP_* é obrigatório e o boot falha sem ele.
  */
 export const mailConfig = registerAs('mail', () => ({
-  smtpHost: process.env.SMTP_HOST,
+  smtpHost: parseSmtpHost(
+    process.env.SMTP_HOST,
+    process.env.NODE_ENV ?? 'development',
+  ),
   smtpPort: inteiroPositivo(process.env.SMTP_PORT, 587),
   smtpSecure: process.env.SMTP_SECURE === 'true',
   smtpUser: process.env.SMTP_USER,

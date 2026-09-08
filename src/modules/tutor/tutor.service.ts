@@ -1,10 +1,11 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { Tutor } from '@prisma/client';
-import { UpdateTutorDto } from '@petcardorg/shared';
+import { UpdateTutorDto, normalizeEmail } from '@petcardorg/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /** Tutor sem o hash da senha — o que pode sair da API. */
@@ -52,11 +53,7 @@ export class TutorService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findById(id: string): Promise<TutorPublico> {
-    const tutor = await this.prisma.tutor.findUnique({ where: { id } });
-    if (!tutor) {
-      throw new NotFoundException(`Tutor with id ${id} not found`);
-    }
-    return semSenha(tutor);
+    return semSenha(await this.buscarOuFalhar(id));
   }
 
   /**
@@ -103,8 +100,24 @@ export class TutorService {
     return this.prisma.tutor.findUnique({ where: { email } });
   }
 
+  /**
+   * Atualiza o cadastro do tutor.
+   *
+   * Trocar o e-mail derruba a verificação junto, pelo mesmo motivo que trocar
+   * o CRMV derruba a do veterinário: o endereço novo não foi confirmado por
+   * ninguém. Sem isso, bastava verificar um endereço próprio e trocar depois
+   * para o de outra pessoa para ficar "verificado" nele.
+   */
   async updateById(id: string, data: UpdateTutorDto): Promise<TutorPublico> {
-    await this.findById(id);
+    const atual = await this.buscarOuFalhar(id);
+    const email =
+      data.email === undefined ? undefined : normalizeEmail(data.email);
+    const trocouDeEmail = email !== undefined && email !== atual.email;
+
+    if (trocouDeEmail) {
+      await this.assertEmailDisponivel(email, id);
+    }
+
     const tutor = await this.prisma.tutor.update({
       where: { id },
       // Campos listados um a um: espalhar o DTO no `data` do Prisma deixa a
@@ -112,11 +125,36 @@ export class TutorService {
       // gravação silenciosa aqui.
       data: {
         name: data.name,
-        email: data.email,
+        email,
         phone: data.phone,
         profileImageUrl: data.profile_image_url,
+        ...(trocouDeEmail ? { emailVerifiedAt: null } : {}),
       },
     });
     return semSenha(tutor);
+  }
+
+  /**
+   * O e-mail é unique no banco. Sem esta checagem, apontar para um endereço
+   * já cadastrado estourava a constraint do Prisma e virava 500 — quando o
+   * caso é uma colisão previsível, que o cliente precisa distinguir para
+   * pedir outro endereço.
+   */
+  private async assertEmailDisponivel(
+    email: string,
+    excludeId: string,
+  ): Promise<void> {
+    const existente = await this.prisma.tutor.findUnique({ where: { email } });
+    if (existente && existente.id !== excludeId) {
+      throw new ConflictException('Email already registered');
+    }
+  }
+
+  private async buscarOuFalhar(id: string): Promise<Tutor> {
+    const tutor = await this.prisma.tutor.findUnique({ where: { id } });
+    if (!tutor) {
+      throw new NotFoundException(`Tutor with id ${id} not found`);
+    }
+    return tutor;
   }
 }

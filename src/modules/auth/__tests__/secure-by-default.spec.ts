@@ -7,6 +7,7 @@ import type { App } from 'supertest/types';
 import request from 'supertest';
 import { authConfig } from '../../../config/auth.config';
 import { ConfigModule } from '@nestjs/config';
+import { PrismaService } from '../../../prisma/prisma.service';
 import { Auth } from '../decorators/auth.decorator';
 import { Public } from '../decorators/public.decorator';
 import { Role } from '../enums/role.enum';
@@ -47,8 +48,19 @@ describe('RBAC secure-by-default (guards globais)', () => {
   let tutorToken: string;
   let vetToken: string;
 
+  // A JwtStrategy confere a conta a cada request (carimbo de troca de senha).
+  // Aqui as contas existem e nunca trocaram de senha — o foco do spec é o RBAC.
+  const prisma = {
+    tutor: { findUnique: jest.fn() },
+    veterinario: { findUnique: jest.fn() },
+  };
+
   beforeAll(async () => {
     process.env.JWT_SECRET = SECRET;
+    prisma.tutor.findUnique.mockResolvedValue({ passwordChangedAt: null });
+    prisma.veterinario.findUnique.mockResolvedValue({
+      passwordChangedAt: null,
+    });
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [
@@ -59,6 +71,7 @@ describe('RBAC secure-by-default (guards globais)', () => {
       controllers: [SecureTestController],
       providers: [
         JwtStrategy,
+        { provide: PrismaService, useValue: prisma },
         { provide: APP_GUARD, useClass: JwtAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
       ],
