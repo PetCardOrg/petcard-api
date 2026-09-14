@@ -1,0 +1,54 @@
+name: CD Staging
+
+# Só dispara depois que o workflow de CI passar na develop — builda e publica
+# uma imagem que já rodou lint/test/e2e não é redundância, é a garantia de
+# que staging nunca recebe algo que não passou no CI (PC-092).
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [develop]
+    types: [completed]
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+
+      - name: Build e publica a imagem
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          docker build \
+            --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
+            -t "$ECR_REPOSITORY:$IMAGE_TAG" \
+            -t "$ECR_REPOSITORY:staging" \
+            .
+          docker push "$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$ECR_REPOSITORY:staging"
+
+      # auto_deployments_enabled=true no App Runner já dispara sozinho ao
+      # detectar a nova imagem na tag "staging" — chamar start-deployment
+      # explicitamente evita depender só do polling interno da AWS.
+      - name: Dispara o deploy no App Runner
+        run: |
+          aws apprunner start-deployment \
+            --service-arn "${{ vars.APPRUNNER_SERVICE_ARN }}"

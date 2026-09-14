@@ -63,3 +63,15 @@ jobs:
             git commit -m "chore: atualizar badge de cobertura [skip ci]"
             git push origin HEAD:develop
           fi
+
+  docker-build:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build da imagem (sem publicar)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker build --secret id=node_auth_token,env=NODE_AUTH_TOKEN -t petcard-api:ci .
