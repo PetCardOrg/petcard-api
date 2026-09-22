@@ -2,11 +2,10 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RabbitMqTopologyService } from '../rabbitmq-topology.service';
-import {
-  CALENDAR_SYNC_DLX,
-  NOTIFICATION_PUSH_DLX,
-  QR_CODE_DLX,
-} from '../queue.constants';
+
+const QR_CODE_DLX = 'qr-code.dlx';
+const NOTIFICATION_PUSH_DLX = 'notification.push.dlx';
+const CALENDAR_SYNC_DLX = 'calendar.sync.dlx';
 
 const mockChannel = {
   assertExchange: jest.fn(),
@@ -30,8 +29,11 @@ const config = {
       ({
         'rabbitmq.url': 'amqp://localhost:5672',
         'rabbitmq.qrCodeDlq': 'qr-code.dlq',
+        'rabbitmq.qrCodeDlx': QR_CODE_DLX,
         'rabbitmq.notificationPushDlq': 'notification.push.dlq',
+        'rabbitmq.notificationPushDlx': NOTIFICATION_PUSH_DLX,
         'rabbitmq.calendarSyncDlq': 'calendar.sync.dlq',
+        'rabbitmq.calendarSyncDlx': CALENDAR_SYNC_DLX,
       }) as Record<string, string>
     )[key],
 } as unknown as ConfigService;
