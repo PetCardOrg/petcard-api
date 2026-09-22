@@ -8,11 +8,8 @@ import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import {
   CALENDAR_SYNC_DLQ_ROUTING_KEY,
-  CALENDAR_SYNC_DLX,
   NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
-  NOTIFICATION_PUSH_DLX,
   QR_CODE_DLQ_ROUTING_KEY,
-  QR_CODE_DLX,
 } from './modules/queue/queue.constants';
 
 /** Tamanho máximo de um corpo JSON aceito. Uploads vão por multipart. */
@@ -87,7 +84,7 @@ async function bootstrap() {
       queueOptions: {
         durable: true,
         arguments: {
-          'x-dead-letter-exchange': QR_CODE_DLX,
+          'x-dead-letter-exchange': config.get<string>('rabbitmq.qrCodeDlx')!,
           'x-dead-letter-routing-key': QR_CODE_DLQ_ROUTING_KEY,
         },
       },
@@ -104,7 +101,9 @@ async function bootstrap() {
       queueOptions: {
         durable: true,
         arguments: {
-          'x-dead-letter-exchange': NOTIFICATION_PUSH_DLX,
+          'x-dead-letter-exchange': config.get<string>(
+            'rabbitmq.notificationPushDlx',
+          )!,
           'x-dead-letter-routing-key': NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
         },
       },
@@ -121,7 +120,9 @@ async function bootstrap() {
       queueOptions: {
         durable: true,
         arguments: {
-          'x-dead-letter-exchange': CALENDAR_SYNC_DLX,
+          'x-dead-letter-exchange': config.get<string>(
+            'rabbitmq.calendarSyncDlx',
+          )!,
           'x-dead-letter-routing-key': CALENDAR_SYNC_DLQ_ROUTING_KEY,
         },
       },

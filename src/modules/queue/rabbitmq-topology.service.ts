@@ -3,11 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import * as amqp from 'amqplib';
 import {
   CALENDAR_SYNC_DLQ_ROUTING_KEY,
-  CALENDAR_SYNC_DLX,
   NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
-  NOTIFICATION_PUSH_DLX,
   QR_CODE_DLQ_ROUTING_KEY,
-  QR_CODE_DLX,
 } from './queue.constants';
 
 @Injectable()
@@ -19,48 +16,55 @@ export class RabbitMqTopologyService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     const url = this.config.get<string>('rabbitmq.url')!;
     const qrCodeDlq = this.config.get<string>('rabbitmq.qrCodeDlq')!;
+    const qrCodeDlx = this.config.get<string>('rabbitmq.qrCodeDlx')!;
     const notificationPushDlq = this.config.get<string>(
       'rabbitmq.notificationPushDlq',
     )!;
+    const notificationPushDlx = this.config.get<string>(
+      'rabbitmq.notificationPushDlx',
+    )!;
     const calendarSyncDlq = this.config.get<string>(
       'rabbitmq.calendarSyncDlq',
+    )!;
+    const calendarSyncDlx = this.config.get<string>(
+      'rabbitmq.calendarSyncDlx',
     )!;
 
     const connection = await amqp.connect(url);
     try {
       const channel = await connection.createChannel();
 
-      await channel.assertExchange(QR_CODE_DLX, 'direct', { durable: true });
+      await channel.assertExchange(qrCodeDlx, 'direct', { durable: true });
       await channel.assertQueue(qrCodeDlq, { durable: true });
-      await channel.bindQueue(qrCodeDlq, QR_CODE_DLX, QR_CODE_DLQ_ROUTING_KEY);
+      await channel.bindQueue(qrCodeDlq, qrCodeDlx, QR_CODE_DLQ_ROUTING_KEY);
       this.logger.log(
-        `DLX/DLQ ready (exchange=${QR_CODE_DLX}, queue=${qrCodeDlq})`,
+        `DLX/DLQ ready (exchange=${qrCodeDlx}, queue=${qrCodeDlq})`,
       );
 
-      await channel.assertExchange(NOTIFICATION_PUSH_DLX, 'direct', {
+      await channel.assertExchange(notificationPushDlx, 'direct', {
         durable: true,
       });
       await channel.assertQueue(notificationPushDlq, { durable: true });
       await channel.bindQueue(
         notificationPushDlq,
-        NOTIFICATION_PUSH_DLX,
+        notificationPushDlx,
         NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
       );
       this.logger.log(
-        `DLX/DLQ ready (exchange=${NOTIFICATION_PUSH_DLX}, queue=${notificationPushDlq})`,
+        `DLX/DLQ ready (exchange=${notificationPushDlx}, queue=${notificationPushDlq})`,
       );
 
-      await channel.assertExchange(CALENDAR_SYNC_DLX, 'direct', {
+      await channel.assertExchange(calendarSyncDlx, 'direct', {
         durable: true,
       });
       await channel.assertQueue(calendarSyncDlq, { durable: true });
       await channel.bindQueue(
         calendarSyncDlq,
-        CALENDAR_SYNC_DLX,
+        calendarSyncDlx,
         CALENDAR_SYNC_DLQ_ROUTING_KEY,
       );
       this.logger.log(
-        `DLX/DLQ ready (exchange=${CALENDAR_SYNC_DLX}, queue=${calendarSyncDlq})`,
+        `DLX/DLQ ready (exchange=${calendarSyncDlx}, queue=${calendarSyncDlq})`,
       );
 
       await channel.close();
