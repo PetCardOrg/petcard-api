@@ -1,0 +1,26 @@
+name: CD Produção
+
+# PC-093 (api#43): dispara só em push na main, e só chama o Render depois
+# de aprovação manual no GitHub Environment "production" (required
+# reviewers configurados no painel do repo, não neste arquivo — ver ADR-011).
+# workflow_dispatch existe só para validar o pipeline (gate de aprovação +
+# chamada do Deploy Hook) sem depender de um push real na main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://petcard-api.onrender.com
+    steps:
+      - name: Disparar deploy no Render
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_PROD }}" ]; then
+            echo "RENDER_DEPLOY_HOOK_PROD não configurado no Environment production." >&2
+            exit 1
+          fi
+          curl --fail --silent --show-error -X POST "${{ secrets.RENDER_DEPLOY_HOOK_PROD }}"
