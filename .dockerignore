@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+.git
+.github
+.husky
+.env
+.env.example
+*.md
+test
+docker/docker-compose.yml

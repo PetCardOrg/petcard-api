@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Appointment } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PetService } from '../pet/pet.service';
 import { CalendarSyncPublisher } from '../queue/calendar-sync.publisher';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
@@ -48,12 +49,17 @@ export class AppointmentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly calendarSyncPublisher: CalendarSyncPublisher,
+    private readonly petService: PetService,
   ) {}
 
   async create(
     userId: string,
     dto: CreateAppointmentDto,
   ): Promise<AppointmentResponse> {
+    if (dto.pet_id) {
+      await this.petService.assertOwnership(dto.pet_id, userId);
+    }
+
     const appointment = await this.prisma.appointment.create({
       data: {
         tutorId: userId,
@@ -108,6 +114,9 @@ export class AppointmentService {
     dto: UpdateAppointmentDto,
   ): Promise<AppointmentResponse> {
     await this.findAndAssertOwnership(id, userId);
+    if (dto.pet_id) {
+      await this.petService.assertOwnership(dto.pet_id, userId);
+    }
 
     const appointment = await this.prisma.appointment.update({
       where: { id },
@@ -119,6 +128,10 @@ export class AppointmentService {
         location: dto.location,
         petId: dto.pet_id,
         syncStatus: 'PENDING_UPDATE',
+        // Reagendar libera um novo lembrete para o horário novo (api#111) —
+        // sem isto o cron nunca mais avisaria, porque já tinha notificado
+        // para o horário antigo.
+        lastNotifiedAt: dto.scheduled_at ? null : undefined,
       },
       include: { pet: { select: { name: true } } },
     });

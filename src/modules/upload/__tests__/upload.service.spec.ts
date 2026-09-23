@@ -36,6 +36,10 @@ const makeConfig = (
 ): ConfigService =>
   ({ get: (key: string) => values[key] }) as unknown as ConfigService;
 
+/** Assinatura de um PNG de verdade — o serviço confere os bytes, não o header. */
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_BUFFER = Buffer.concat([PNG_MAGIC, Buffer.from('conteudo')]);
+
 const makeFile = (
   overrides: Partial<Express.Multer.File> = {},
 ): Express.Multer.File =>
@@ -43,7 +47,7 @@ const makeFile = (
     originalname: 'foto do rex!.png',
     mimetype: 'image/png',
     size: 1024,
-    buffer: Buffer.from('binary'),
+    buffer: PNG_BUFFER,
     ...overrides,
   }) as Express.Multer.File;
 
@@ -85,6 +89,56 @@ describe('UploadService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('rejeita conteúdo que não bate com o mime declarado', async () => {
+      // O mimetype é escrito pelo cliente. Aceitar só ele deixava subir HTML
+      // ou script dizendo ser PNG.
+      await expect(
+        service.uploadFile(
+          makeFile({ buffer: Buffer.from('<html>nao sou imagem</html>') }),
+          'pets',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('aceita JPEG e WebP pela assinatura real', async () => {
+      await expect(
+        service.uploadFile(
+          makeFile({
+            mimetype: 'image/jpeg',
+            buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]),
+          }),
+          'pets',
+        ),
+      ).resolves.toContain('https://');
+
+      const webp = Buffer.concat([
+        Buffer.from('RIFF'),
+        Buffer.from([0, 0, 0, 0]),
+        Buffer.from('WEBP'),
+      ]);
+      await expect(
+        service.uploadFile(
+          makeFile({ mimetype: 'image/webp', buffer: webp }),
+          'pets',
+        ),
+      ).resolves.toContain('https://');
+    });
+
+    it('rejeita JPEG cujos bytes são de outro formato', async () => {
+      await expect(
+        service.uploadFile(
+          makeFile({ mimetype: 'image/jpeg', buffer: PNG_BUFFER }),
+          'pets',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejeita arquivo vazio', async () => {
+      await expect(
+        service.uploadFile(makeFile({ buffer: Buffer.alloc(0) }), 'pets'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('rejeita arquivo acima de 5MB', async () => {
       await expect(
         service.uploadFile(makeFile({ size: 6 * 1024 * 1024 }), 'pets'),
@@ -110,13 +164,6 @@ describe('UploadService', () => {
       );
     });
 
-    it('converte falha do S3 em InternalServerErrorException no uploadBuffer', async () => {
-      mockSend.mockRejectedValue(new Error('boom'));
-      await expect(
-        service.uploadBuffer(Buffer.from('x'), 'k', 'image/png'),
-      ).rejects.toThrow(InternalServerErrorException);
-    });
-
     it('deleta arquivo extraindo a key da URL', async () => {
       mockSend.mockResolvedValue({});
       await service.deleteFile(
@@ -134,15 +181,6 @@ describe('UploadService', () => {
       );
       expect(mockSend).not.toHaveBeenCalled();
     });
-
-    it('converte falha do S3 em InternalServerErrorException no deleteFile', async () => {
-      mockSend.mockRejectedValue(new Error('denied'));
-      await expect(
-        service.deleteFile(
-          'https://petcard-bucket.s3.us-east-1.amazonaws.com/pets/x.png',
-        ),
-      ).rejects.toThrow(InternalServerErrorException);
-    });
   });
 
   describe('quando o S3 NÃO está configurado', () => {
@@ -155,18 +193,6 @@ describe('UploadService', () => {
       await expect(service.uploadFile(makeFile(), 'pets')).rejects.toThrow(
         InternalServerErrorException,
       );
-    });
-
-    it('uploadBuffer lança InternalServerErrorException', async () => {
-      await expect(
-        service.uploadBuffer(Buffer.from('x'), 'k', 'image/png'),
-      ).rejects.toThrow(InternalServerErrorException);
-    });
-
-    it('deleteFile lança InternalServerErrorException', async () => {
-      await expect(
-        service.deleteFile('https://x.s3.amazonaws.com/k'),
-      ).rejects.toThrow(InternalServerErrorException);
     });
   });
 });

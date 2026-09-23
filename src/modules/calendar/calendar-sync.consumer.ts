@@ -9,6 +9,7 @@ import {
   CALENDAR_SYNC_RETRY_HEADER,
 } from '../queue/queue.constants';
 import { GoogleCalendarService } from './google-calendar.service';
+import { extractGoogleStatus, isAlreadyGoneError } from './google-api-error';
 
 @Controller()
 export class CalendarSyncConsumer {
@@ -61,16 +62,20 @@ export class CalendarSyncConsumer {
       channel.ack(message);
     } catch (error) {
       // Refresh token revoked — only the tutor can fix this by reconnecting.
+      // Descarta o token morto para que /calendar/status pare de dizer que está
+      // conectado: é assim que o banner do app vira "conectar" e o tutor
+      // descobre que os agendamentos deixaram de ir para a agenda.
       if (this.isPermanentAuthError(error)) {
         this.logger.warn(
-          `Calendar OAuth revoked for appointment ${data.appointment_id}; ack without retry`,
+          `Calendar OAuth revoked for appointment ${data.appointment_id}; dropping stored token`,
         );
+        await this.calendarService.disconnect(data.tutor_id);
         channel.ack(message);
         return;
       }
 
       // Event already gone on the Google side — UPDATE/DELETE are idempotent here.
-      if (data.action !== 'CREATE' && this.isNotFoundError(error)) {
+      if (data.action !== 'CREATE' && isAlreadyGoneError(error)) {
         this.logger.warn(
           `Calendar event missing for appointment ${data.appointment_id} (${data.action}); treating as success`,
         );
@@ -121,25 +126,13 @@ export class CalendarSyncConsumer {
   }
 
   private isPermanentAuthError(error: unknown): boolean {
-    if (this.extractStatus(error) === 401) return true;
+    if (extractGoogleStatus(error) === 401) return true;
     if (!(error instanceof Error)) return false;
     const message = error.message.toLowerCase();
     return (
       message.includes('invalid_grant') ||
       message.includes('token has been expired or revoked')
     );
-  }
-
-  private isNotFoundError(error: unknown): boolean {
-    return this.extractStatus(error) === 404;
-  }
-
-  private extractStatus(error: unknown): number | undefined {
-    if (typeof error !== 'object' || error === null) return undefined;
-    const err = error as { code?: unknown; response?: { status?: unknown } };
-    if (typeof err.code === 'number') return err.code;
-    const status = err.response?.status;
-    return typeof status === 'number' ? status : undefined;
   }
 
   private getRetryCount(message: ConsumeMessage): number {

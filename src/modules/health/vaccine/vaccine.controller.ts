@@ -10,22 +10,33 @@ import {
   Post,
 } from '@nestjs/common';
 import {
+  ApiCreatedResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
+import {
   CreateVaccineRecordDto,
   UpdateVaccineRecordDto,
   VaccineRecordResponseDto,
 } from '@petcardorg/shared';
-import { Auth } from '../../auth/decorators/auth.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { AuthCrmvVerificado } from '../../veterinario/crmv/auth-crmv.decorator';
 import { Role } from '../../auth/enums/role.enum';
 import type { JwtPayload } from '../../auth/strategies/jwt.strategy';
 import { VaccineService } from './vaccine.service';
 
+@ApiTags('vaccines')
 @Controller()
 export class VaccineController {
   constructor(private readonly vaccineService: VaccineService) {}
 
   @Post('pets/:petId/vaccines')
-  @Auth(Role.TUTOR, Role.VET)
+  @AuthCrmvVerificado(Role.TUTOR, Role.VET)
+  @ApiOperation({ summary: 'Registrar vacina no prontuário do pet' })
+  @ApiCreatedResponse({ type: VaccineRecordResponseDto })
+  @ApiNotFoundResponse({ description: 'Pet não encontrado' })
   async create(
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
@@ -36,7 +47,10 @@ export class VaccineController {
   }
 
   @Get('pets/:petId/vaccines')
-  @Auth(Role.TUTOR, Role.VET)
+  @AuthCrmvVerificado(Role.TUTOR, Role.VET)
+  @ApiOperation({ summary: 'Listar vacinas do pet' })
+  @ApiOkResponse({ type: VaccineRecordResponseDto, isArray: true })
+  @ApiNotFoundResponse({ description: 'Pet não encontrado' })
   async findAll(
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
@@ -46,7 +60,10 @@ export class VaccineController {
   }
 
   @Patch('vaccines/:id')
-  @Auth(Role.TUTOR, Role.VET)
+  @AuthCrmvVerificado(Role.TUTOR, Role.VET)
+  @ApiOperation({ summary: 'Atualizar registro de vacina' })
+  @ApiOkResponse({ type: VaccineRecordResponseDto })
+  @ApiNotFoundResponse({ description: 'Registro não encontrado' })
   async update(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
@@ -57,12 +74,15 @@ export class VaccineController {
   }
 
   @Delete('vaccines/:id')
-  @Auth(Role.TUTOR)
+  @AuthCrmvVerificado(Role.TUTOR, Role.VET)
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remover registro de vacina' })
+  @ApiNotFoundResponse({ description: 'Registro não encontrado' })
   async remove(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<void> {
-    return this.vaccineService.remove(id, user.sub);
+    const isVet = user.role === Role.VET;
+    return this.vaccineService.remove(id, user.sub, isVet);
   }
 }

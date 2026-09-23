@@ -2,6 +2,10 @@
 import { Logger } from '@nestjs/common';
 import request from 'supertest';
 import {
+  acaoClinicaProvider,
+  comTransacao,
+} from '../../../../test/utils/acao-clinica';
+import {
   createControllerTestApp,
   ControllerHarness,
   TUTOR,
@@ -10,6 +14,7 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { NotificationService } from '../../notification/notification.service';
 import { VetNoteController } from '../vet-note.controller';
+import { CrmvVerificationService } from '../../veterinario/crmv/crmv-verification.service';
 import { VetNoteService } from '../vet-note.service';
 
 describe('VetNoteController (integração)', () => {
@@ -20,9 +25,11 @@ describe('VetNoteController (integração)', () => {
     notaClinica: {
       create: jest.Mock;
       findMany: jest.Mock;
-      findUnique: jest.Mock;
+      findFirst: jest.Mock;
+      update: jest.Mock;
       delete: jest.Mock;
     };
+    petAtendido: { findUnique: jest.Mock };
   };
   let notifications: { schedulePush: jest.Mock };
 
@@ -37,7 +44,8 @@ describe('VetNoteController (integração)', () => {
     googlePlaceId: null,
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
-    veterinario: { nome: 'Dra. Vet', crmv: 'CRMV-123' },
+    veterinarioNome: 'Dra. Vet',
+    veterinarioCrmv: 'CRMV-123',
   };
 
   beforeAll(async () => {
@@ -48,18 +56,30 @@ describe('VetNoteController (integração)', () => {
       notaClinica: {
         create: jest.fn(),
         findMany: jest.fn(),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
         delete: jest.fn(),
       },
+      petAtendido: { findUnique: jest.fn() },
     };
     notifications = { schedulePush: jest.fn().mockResolvedValue(undefined) };
+
+    comTransacao(prisma);
 
     harness = await createControllerTestApp({
       controllers: [VetNoteController],
       providers: [
+        acaoClinicaProvider().provider,
         VetNoteService,
         { provide: PrismaService, useValue: prisma },
         { provide: NotificationService, useValue: notifications },
+        {
+          // O guard real roda; só a consulta de verificação é mockada.
+          provide: CrmvVerificationService,
+          useValue: {
+            getStatus: jest.fn(),
+          },
+        },
       ],
     });
   });
@@ -68,11 +88,17 @@ describe('VetNoteController (integração)', () => {
     await harness.app.close();
   });
 
+  let crmvVerification: { getStatus: jest.Mock };
+
   beforeEach(() => {
     jest.clearAllMocks();
     harness.setUser(VET);
     prisma.pet.findUnique.mockResolvedValue(pet);
     prisma.veterinario.findUnique.mockResolvedValue({ id: 'vet-1' });
+    // Vínculo vet-pet presente por padrão; os casos de bloqueio zeram.
+    prisma.petAtendido.findUnique.mockResolvedValue({ id: 'vinculo-1' });
+    crmvVerification = harness.app.get(CrmvVerificationService);
+    crmvVerification.getStatus.mockResolvedValue({ verified: true });
   });
 
   describe('POST /pets/:petId/clinical-notes', () => {
@@ -97,6 +123,19 @@ describe('VetNoteController (integração)', () => {
         .post('/pets/pet-1/clinical-notes')
         .send({ diagnostico: 'Otite' })
         .expect(201);
+    });
+
+    it('barra o VET que não atende o pet (403)', async () => {
+      // Escrever no prontuário exige o vínculo, não só o papel VET: sem a
+      // leitura do QR Code o pet não está na lista dele.
+      prisma.petAtendido.findUnique.mockResolvedValue(null);
+
+      await request(harness.app.getHttpServer())
+        .post('/pets/pet-1/clinical-notes')
+        .send({ diagnostico: 'Otite' })
+        .expect(403);
+
+      expect(prisma.notaClinica.create).not.toHaveBeenCalled();
     });
 
     it('proíbe TUTOR de criar nota (403)', async () => {
@@ -138,12 +177,22 @@ describe('VetNoteController (integração)', () => {
         .get('/pets/pet-1/clinical-notes')
         .expect(403);
     });
+
+    it('proíbe VET que não atende o pet (403)', async () => {
+      prisma.petAtendido.findUnique.mockResolvedValue(null);
+
+      await request(harness.app.getHttpServer())
+        .get('/pets/pet-1/clinical-notes')
+        .expect(403);
+
+      expect(prisma.notaClinica.findMany).not.toHaveBeenCalled();
+    });
   });
 
   describe('GET /clinical-notes/:id', () => {
     it('retorna a nota para o dono do pet (200)', async () => {
       harness.setUser(TUTOR);
-      prisma.notaClinica.findUnique.mockResolvedValue({
+      prisma.notaClinica.findFirst.mockResolvedValue({
         ...nota,
         pet: { tutorId: 'tutor-1' },
       });
@@ -156,26 +205,40 @@ describe('VetNoteController (integração)', () => {
     });
 
     it('retorna 404 para nota inexistente', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue(null);
+      prisma.notaClinica.findFirst.mockResolvedValue(null);
 
       await request(harness.app.getHttpServer())
         .get('/clinical-notes/missing')
         .expect(404);
     });
+
+    it('barra o VET com CRMV não verificado (403, api#audit-2)', async () => {
+      // A listagem por pet (@AuthCrmvVerificado) já barrava; esta rota usava
+      // @Auth simples e furava a regra do api#113 para busca por id.
+      crmvVerification.getStatus.mockResolvedValue({ verified: false });
+
+      await request(harness.app.getHttpServer())
+        .get('/clinical-notes/nota-1')
+        .expect(403);
+
+      expect(prisma.notaClinica.findFirst).not.toHaveBeenCalled();
+    });
   });
 
   describe('DELETE /clinical-notes/:id', () => {
     it('o autor (VET) remove a própria nota (204)', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue(nota);
-      prisma.notaClinica.delete.mockResolvedValue(nota);
+      prisma.notaClinica.findFirst.mockResolvedValue(nota);
+      prisma.notaClinica.update.mockResolvedValue(nota);
 
       await request(harness.app.getHttpServer())
         .delete('/clinical-notes/nota-1')
         .expect(204);
+
+      expect(prisma.notaClinica.delete).not.toHaveBeenCalled();
     });
 
     it('proíbe VET de apagar nota de outro vet (403)', async () => {
-      prisma.notaClinica.findUnique.mockResolvedValue({
+      prisma.notaClinica.findFirst.mockResolvedValue({
         ...nota,
         veterinarioId: 'outro-vet',
       });
@@ -193,6 +256,18 @@ describe('VetNoteController (integração)', () => {
       await request(harness.app.getHttpServer())
         .delete('/clinical-notes/nota-1')
         .expect(403);
+    });
+
+    it('barra o VET com CRMV não verificado (403, api#audit-2)', async () => {
+      // Mesmo furo do GET por id: DELETE usava @Auth(VET) puro, sem exigir
+      // CRMV em dia (TTL de 180 dias vencido ou zerado por troca de registro).
+      crmvVerification.getStatus.mockResolvedValue({ verified: false });
+
+      await request(harness.app.getHttpServer())
+        .delete('/clinical-notes/nota-1')
+        .expect(403);
+
+      expect(prisma.notaClinica.delete).not.toHaveBeenCalled();
     });
   });
 });

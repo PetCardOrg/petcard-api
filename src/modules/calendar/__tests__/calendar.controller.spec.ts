@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+import { BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import request from 'supertest';
 import {
@@ -14,6 +15,7 @@ describe('CalendarController (integração)', () => {
   let harness: ControllerHarness;
   let calendar: {
     getAuthUrl: jest.Mock;
+    resolveState: jest.Mock;
     handleCallback: jest.Mock;
     isConnected: jest.Mock;
     disconnect: jest.Mock;
@@ -24,6 +26,7 @@ describe('CalendarController (integração)', () => {
   beforeAll(async () => {
     calendar = {
       getAuthUrl: jest.fn(),
+      resolveState: jest.fn().mockReturnValue('tutor-1'),
       handleCallback: jest.fn().mockResolvedValue(undefined),
       isConnected: jest.fn(),
       disconnect: jest.fn().mockResolvedValue(undefined),
@@ -89,11 +92,69 @@ describe('CalendarController (integração)', () => {
       harness.setUser(null); // callback não tem @Auth
 
       const res = await request(harness.app.getHttpServer())
-        .get('/calendar/callback?code=abc&state=tutor-1')
+        .get('/calendar/callback?code=abc&state=state-assinado')
         .expect(200);
 
       expect(res.text).toContain('conectado com sucesso');
+      expect(calendar.resolveState).toHaveBeenCalledWith('state-assinado');
       expect(calendar.handleCallback).toHaveBeenCalledWith('abc', 'tutor-1');
+    });
+
+    it('recusa state que não passa na verificação (400)', async () => {
+      // O state deixou de ser o id do tutor em texto puro: sem assinatura
+      // válida o callback não troca o code nem toca no banco.
+      harness.setUser(null);
+      calendar.resolveState.mockImplementationOnce(() => {
+        throw new BadRequestException('Parâmetro state inválido.');
+      });
+
+      const res = await request(harness.app.getHttpServer())
+        .get('/calendar/callback?code=abc&state=forjado')
+        .expect(400);
+
+      expect(res.text).toContain('Link inválido');
+      expect(calendar.handleCallback).not.toHaveBeenCalled();
+    });
+
+    it('responde 400 em página quando o usuário nega o consentimento', async () => {
+      harness.setUser(null);
+
+      const res = await request(harness.app.getHttpServer())
+        .get('/calendar/callback?error=access_denied&state=tutor-1')
+        .expect(400);
+
+      expect(res.text).toContain('Autorização não concluída');
+      expect(calendar.handleCallback).not.toHaveBeenCalled();
+    });
+
+    it('responde 400 em página quando faltam code ou state', async () => {
+      harness.setUser(null);
+
+      const res = await request(harness.app.getHttpServer())
+        .get('/calendar/callback?code=abc')
+        .expect(400);
+
+      expect(res.text).toContain('Link inválido');
+      expect(calendar.handleCallback).not.toHaveBeenCalled();
+    });
+
+    it('converte falha do serviço em página de erro genérica', async () => {
+      // A mensagem do erro fica no log. A página é pública e a mensagem
+      // carrega detalhe de configuração do servidor.
+      harness.setUser(null);
+      calendar.handleCallback.mockRejectedValue(
+        new Error(
+          'ENCRYPTION_KEY é obrigatória para cifrar/decifrar tokens OAuth.',
+        ),
+      );
+
+      const res = await request(harness.app.getHttpServer())
+        .get('/calendar/callback?code=abc&state=state-assinado')
+        .expect(500);
+
+      expect(res.text).toContain('Não foi possível conectar');
+      expect(res.text).not.toContain('ENCRYPTION_KEY');
+      expect(res.text).not.toContain('at GoogleCalendarService');
     });
   });
 

@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { CardModule } from '../card/card.module';
+import { ColeiraModule } from '../coleira/coleira.module';
 import { UploadModule } from '../upload/upload.module';
 import { CalendarSyncPublisher } from './calendar-sync.publisher';
 import { NotificationPushPublisher } from './notification-push.publisher';
@@ -10,13 +11,10 @@ import { QrCodePublisher } from './qr-code.publisher';
 import {
   CALENDAR_SYNC_CLIENT,
   CALENDAR_SYNC_DLQ_ROUTING_KEY,
-  CALENDAR_SYNC_DLX,
   NOTIFICATION_PUSH_CLIENT,
   NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
-  NOTIFICATION_PUSH_DLX,
   QR_CODE_CLIENT,
   QR_CODE_DLQ_ROUTING_KEY,
-  QR_CODE_DLX,
 } from './queue.constants';
 import { RabbitMqTopologyService } from './rabbitmq-topology.service';
 
@@ -24,6 +22,7 @@ import { RabbitMqTopologyService } from './rabbitmq-topology.service';
 @Module({
   imports: [
     CardModule,
+    ColeiraModule,
     UploadModule,
     ClientsModule.registerAsync([
       {
@@ -38,7 +37,8 @@ import { RabbitMqTopologyService } from './rabbitmq-topology.service';
             queueOptions: {
               durable: true,
               arguments: {
-                'x-dead-letter-exchange': QR_CODE_DLX,
+                'x-dead-letter-exchange':
+                  config.get<string>('rabbitmq.qrCodeDlx')!,
                 'x-dead-letter-routing-key': QR_CODE_DLQ_ROUTING_KEY,
               },
             },
@@ -58,7 +58,9 @@ import { RabbitMqTopologyService } from './rabbitmq-topology.service';
             queueOptions: {
               durable: true,
               arguments: {
-                'x-dead-letter-exchange': NOTIFICATION_PUSH_DLX,
+                'x-dead-letter-exchange': config.get<string>(
+                  'rabbitmq.notificationPushDlx',
+                )!,
                 'x-dead-letter-routing-key': NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
               },
             },
@@ -78,7 +80,9 @@ import { RabbitMqTopologyService } from './rabbitmq-topology.service';
             queueOptions: {
               durable: true,
               arguments: {
-                'x-dead-letter-exchange': CALENDAR_SYNC_DLX,
+                'x-dead-letter-exchange': config.get<string>(
+                  'rabbitmq.calendarSyncDlx',
+                )!,
                 'x-dead-letter-routing-key': CALENDAR_SYNC_DLQ_ROUTING_KEY,
               },
             },

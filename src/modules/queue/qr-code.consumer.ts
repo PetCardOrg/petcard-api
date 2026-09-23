@@ -3,6 +3,7 @@ import { Ctx, MessagePattern, Payload } from '@nestjs/microservices';
 import type { RmqContext } from '@nestjs/microservices';
 import type { Channel, ConsumeMessage } from 'amqplib';
 import { CardService } from '../card/card.service';
+import { ColeiraService } from '../coleira/coleira.service';
 import { UploadService } from '../upload/upload.service';
 import type { QrCodeGenerateMessage } from './dto/qr-code-generate.message';
 import {
@@ -17,6 +18,7 @@ export class QrCodeConsumer {
 
   constructor(
     private readonly cardService: CardService,
+    private readonly coleiraService: ColeiraService,
     private readonly uploadService: UploadService,
   ) {}
 
@@ -35,8 +37,13 @@ export class QrCodeConsumer {
       return;
     }
 
+    // Reexecução é esperada aqui: o job tem retry e o broker pode reentregar a
+    // mensagem depois de um crash entre o trabalho e o ack. Por isso tudo o que
+    // o handler faz é idempotente — o token é lido/criado, nunca trocado, e a
+    // imagem sobe sempre na mesma chave do S3. Rodar duas vezes deixa o mesmo
+    // resultado que rodar uma.
     try {
-      const token = await this.cardService.issueTokenForPet(petId);
+      const token = await this.cardService.ensureTokenForPet(petId);
       const buffer = await this.cardService.generateQrCode(token);
       const url = await this.uploadService.uploadBuffer(
         buffer,
@@ -44,6 +51,19 @@ export class QrCodeConsumer {
         'image/png',
       );
       await this.cardService.setCardQrCodeUrl(petId, url);
+
+      // O QR da coleira nasce junto com o da carteira, com token próprio e
+      // apontando para a página do achador. São dois códigos porque são dois
+      // públicos: o da carteira leva ao prontuário, o da coleira não.
+      const coleiraToken = await this.coleiraService.ensureTokenForPet(petId);
+      const coleiraBuffer =
+        await this.coleiraService.generateQrCode(coleiraToken);
+      const coleiraUrl = await this.uploadService.uploadBuffer(
+        coleiraBuffer,
+        `qr-codes/coleira-${petId}.png`,
+        'image/png',
+      );
+      await this.coleiraService.setQrCodeUrl(petId, coleiraUrl);
       this.logger.log(`QR Code generated for pet ${petId}`);
       channel.ack(originalMessage);
     } catch (error) {

@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   Min,
   MinLength,
 } from 'class-validator';
@@ -22,6 +23,7 @@ export class CreateAppointmentDto {
 
   @IsInt()
   @Min(15)
+  @Max(480)
   @IsOptional()
   duration_minutes?: number;
 

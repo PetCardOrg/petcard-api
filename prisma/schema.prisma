@@ -37,10 +37,24 @@ enum DevicePlatform {
   ANDROID
 }
 
+enum AcaoClinicaTipo {
+  CRIACAO
+  EDICAO
+  EXCLUSAO
+}
+
+enum EntidadeClinica {
+  NOTA_CLINICA
+  VACINA
+  VERMIFUGO
+  MEDICACAO
+}
+
 enum NotificationKind {
   DOSE_REMINDER
   APPOINTMENT_REMINDER
   CLINICAL_NOTE
+  PET_SCAN
 }
 
 enum NotificationStatus {
@@ -49,25 +63,57 @@ enum NotificationStatus {
   FAILED
 }
 
+enum AuthTokenPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
 model Tutor {
-  id              String   @id @default(uuid())
-  name            String
-  email           String   @unique
-  password        String
-  phone           String?
-  profileImageUrl String?  @map("profile_image_url")
-  role            Role     @default(TUTOR)
-  timezone        String   @default("America/Fortaleza")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id                String    @id @default(uuid())
+  name              String
+  email             String    @unique
+  // Nulo para conta criada só via Google — nunca teve senha. O login por
+  // e-mail/senha trata isso caindo no dummy hash, sem vazar a diferença.
+  password          String?
+  googleId          String?   @unique @map("google_id")
+  emailVerifiedAt   DateTime? @map("email_verified_at")
+  /// Momento da última troca de senha. Todo JWT carrega este carimbo; a
+  /// JwtStrategy recusa o token cujo carimbo não bate mais com o da conta,
+  /// que é como uma redefinição derruba as sessões abertas antes dela.
+  /// Nulo = a senha nunca mudou desde o cadastro.
+  passwordChangedAt DateTime? @map("password_changed_at")
+  phone             String?
+  profileImageUrl   String?   @map("profile_image_url")
+  timezone          String    @default("America/Fortaleza")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   pets             Pet[]
   appointments     Appointment[]
   notifications    Notification[]
   deviceTokens     DeviceToken[]
   googleOAuthToken GoogleOAuthToken?
+  authTokens       AuthToken[]
 
   @@map("tutor")
+}
+
+/// Token de uso único para verificação de e-mail e recuperação de senha.
+/// Guardamos só o SHA-256 (`tokenHash`); o valor em claro só existe no link
+/// enviado por e-mail.
+model AuthToken {
+  id        String           @id @default(uuid())
+  tutorId   String           @map("tutor_id")
+  purpose   AuthTokenPurpose
+  tokenHash String           @unique @map("token_hash")
+  expiresAt DateTime         @map("expires_at")
+  usedAt    DateTime?        @map("used_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  tutor Tutor @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+  @@index([tutorId, purpose])
+  @@map("auth_token")
 }
 
 model GoogleOAuthToken {
@@ -112,15 +158,66 @@ model Pet {
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
-  tutor             Tutor              @relation(fields: [tutorId], references: [id])
+  tutor             Tutor              @relation(fields: [tutorId], references: [id], onDelete: Cascade)
   vaccineRecords    VaccineRecord[]
   dewormingRecords  DewormingRecord[]
   medicationRecords MedicationRecord[]
   carteiraDigital   CarteiraDigital?
+  acoesClinicas     AcaoClinica[]
   appointments      Appointment[]
   notasClinicas     NotaClinica[]
+  veterinarios      PetAtendido[]
+  scans             PetScan[]
+  tagColeira        TagColeira?
 
+  // A home do app lista os pets do tutor logado; sem este índice a consulta é
+  // seq scan na tabela inteira de pets do sistema.
+  @@index([tutorId])
   @@map("pet")
+}
+
+/// Leitura do QR da coleira por quem encontrou o pet.
+///
+/// Guardado, e não só notificado: num pet perdido, perder a localização
+/// porque o push falhou (tutor sem device token, FCM fora) é o pior desfecho
+/// possível. O tutor consulta o histórico no app mesmo que nenhuma
+/// notificação chegue.
+///
+/// Quem escaneou não é identificado — só a coordenada que ela concordou em
+/// compartilhar, e nem essa é obrigatória: o aviso de "seu pet foi
+/// encontrado" vale por si só.
+model PetScan {
+  id             String   @id @default(uuid())
+  petId          String   @map("pet_id")
+  latitude       Float?
+  longitude      Float?
+  /// Raio de precisão em metros informado pelo navegador de quem escaneou.
+  accuracyMeters Float?   @map("accuracy_meters")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId, createdAt])
+  @@map("pet_scan")
+}
+
+/// QR da coleira: o código que um estranho lê ao encontrar o pet na rua.
+///
+/// Token próprio, separado do da CarteiraDigital, porque os dois públicos não
+/// são o mesmo. A carteira é do tutor e do veterinário e carrega histórico
+/// clínico; a coleira é de quem achou o animal e não deve expor nada disso.
+/// Separados, revogar um não derruba o outro e o achador nunca alcança o
+/// prontuário.
+model TagColeira {
+  id        String   @id @default(uuid())
+  petId     String   @unique @map("pet_id")
+  token     String   @unique
+  qrCodeUrl String?  @map("qr_code_url")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@map("tag_coleira")
 }
 
 model CarteiraDigital {
@@ -142,13 +239,22 @@ model VaccineRecord {
   appliedAt        DateTime  @map("applied_at")
   nextDoseAt       DateTime? @map("next_dose_at")
   lastNotifiedAt   DateTime? @map("last_notified_at")
+  /// Preenchido quando quem registra é um veterinário do PetCard.
+  veterinarioId    String?   @map("veterinario_id")
+  /// Texto livre: registros antigos e profissionais fora do PetCard.
   veterinarianName String?   @map("veterinarian_name")
   notes            String?
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
 
-  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+  pet         Pet          @relation(fields: [petId], references: [id], onDelete: Cascade)
+  veterinario Veterinario? @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
 
+  // Todo caminho de prontuário — carteira, listagem, histórico — filtra por
+  // pet, não por veterinário.
+  @@index([petId])
+  @@index([veterinarioId])
   @@map("vaccine_record")
 }
 
@@ -159,31 +265,50 @@ model DewormingRecord {
   appliedAt        DateTime  @map("applied_at")
   nextDoseAt       DateTime? @map("next_dose_at")
   lastNotifiedAt   DateTime? @map("last_notified_at")
+  /// Preenchido quando quem registra é um veterinário do PetCard.
+  veterinarioId    String?   @map("veterinario_id")
+  /// Texto livre: registros antigos e profissionais fora do PetCard.
   veterinarianName String?   @map("veterinarian_name")
   notes            String?
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
 
-  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+  pet         Pet          @relation(fields: [petId], references: [id], onDelete: Cascade)
+  veterinario Veterinario? @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
 
+  // Todo caminho de prontuário — carteira, listagem, histórico — filtra por
+  // pet, não por veterinário.
+  @@index([petId])
+  @@index([veterinarioId])
   @@map("deworming_record")
 }
 
 model MedicationRecord {
-  id             String    @id @default(uuid())
-  petId          String    @map("pet_id")
-  medicationName String    @map("medication_name")
-  dosage         String
-  frequency      String
-  startDate      DateTime  @map("start_date")
-  endDate        DateTime? @map("end_date")
-  lastNotifiedAt DateTime? @map("last_notified_at")
-  notes          String?
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  id               String    @id @default(uuid())
+  petId            String    @map("pet_id")
+  medicationName   String    @map("medication_name")
+  dosage           String
+  frequency        String
+  startDate        DateTime  @map("start_date")
+  endDate          DateTime? @map("end_date")
+  lastNotifiedAt   DateTime? @map("last_notified_at")
+  /// Preenchido quando quem prescreve é um veterinário do PetCard.
+  veterinarioId    String?   @map("veterinario_id")
+  /// Texto livre: prescrições antigas e profissionais fora do PetCard.
+  veterinarianName String?   @map("veterinarian_name")
+  notes            String?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
 
-  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+  pet         Pet          @relation(fields: [petId], references: [id], onDelete: Cascade)
+  veterinario Veterinario? @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
 
+  // Todo caminho de prontuário — carteira, listagem, histórico — filtra por
+  // pet, não por veterinário.
+  @@index([petId])
+  @@index([veterinarioId])
   @@map("medication_record")
 }
 
@@ -201,6 +326,9 @@ model Appointment {
   syncStatus      AppointmentSyncStatus @default(PENDING_CREATE) @map("sync_status")
   syncError       String?               @map("sync_error")
   lastSyncedAt    DateTime?             @map("last_synced_at")
+  /// Lembrete já enviado para o horário atual (api#111). Reagendar zera este
+  /// campo para permitir um novo aviso.
+  lastNotifiedAt  DateTime?             @map("last_notified_at")
   createdAt       DateTime              @default(now()) @map("created_at")
   updatedAt       DateTime              @updatedAt @map("updated_at")
 
@@ -229,7 +357,10 @@ model Notification {
   createdAt     DateTime           @default(now()) @map("created_at")
 
   tutor       Tutor        @relation(fields: [tutorId], references: [id], onDelete: Cascade)
-  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  // Cascade (não SetNull): excluir o agendamento leva junto as notificações
+  // vinculadas a ele (api#112) — uma notificação de consulta que não existe
+  // mais não tem por que continuar na caixa do tutor.
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
   @@index([tutorId, createdAt])
   @@index([referenceType, referenceId])
@@ -237,36 +368,123 @@ model Notification {
 }
 
 model Veterinario {
-  id        String   @id @default(uuid())
-  nome      String
-  email     String   @unique
-  password  String
-  crmv      String   @unique
-  telefone  String?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id       String  @id @default(uuid())
+  nome     String
+  email    String  @unique
+  password String
+  crmv     String  @unique
+  telefone String?
+  photoUrl String? @map("photo_url")
+
+  /// Mesmo carimbo do tutor: trocar a senha invalida os tokens emitidos antes.
+  passwordChangedAt DateTime? @map("password_changed_at")
+
+  /// Verificação do CRMV numa base externa (api#113). Nulo = não verificado.
+  crmvVerifiedAt DateTime? @map("crmv_verified_at")
+  /// Situação devolvida pela consulta (ex.: "Ativo"), para auditoria.
+  crmvSituacao   String?   @map("crmv_situacao")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   notasClinicas NotaClinica[]
+  vacinas       VaccineRecord[]
+  vermifugos    DewormingRecord[]
+  medicacoes    MedicationRecord[]
+  petsAtendidos PetAtendido[]
 
   @@map("veterinario")
 }
 
-model NotaClinica {
-  id            String   @id @default(uuid())
-  veterinarioId String   @map("veterinario_id")
-  petId         String   @map("pet_id")
-  googlePlaceId String?  @map("google_place_id")
-  diagnostico   String
-  prescricao    String?
-  observacoes   String?
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+/// Vínculo explícito entre veterinário e pet.
+///
+/// O dashboard do veterinário era derivado dos registros clínicos vivos, então
+/// apagar o próprio registro fazia o pet sumir da lista — e, sem scanner na
+/// web, não havia como trazer um pet novo. O pet entra aqui quando o
+/// veterinário abre a carteira pelo token do QR e só sai quando ele remove.
+model PetAtendido {
+  id             String   @id @default(uuid())
+  veterinarioId  String   @map("veterinario_id")
+  petId          String   @map("pet_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  /// Último atendimento: acesso pelo QR ou ação clínica sobre o pet.
+  ultimoAcessoEm DateTime @default(now()) @map("ultimo_acesso_em")
 
   veterinario Veterinario @relation(fields: [veterinarioId], references: [id], onDelete: Cascade)
   pet         Pet         @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@unique([veterinarioId, petId])
+  @@index([veterinarioId, ultimoAcessoEm])
+  @@map("pet_atendido")
+}
+
+/// Nota clínica: diagnóstico, prescrição e observações assinados por um
+/// veterinário dentro do prontuário de um pet de outra pessoa.
+///
+/// A nota sobrevive à exclusão da conta de quem a escreveu (ADR-009). Antes
+/// a FK cascateava, e encerrar a conta apagava o diagnóstico da carteira de
+/// pets de outros tutores — enquanto a `AcaoClinica`, que não tem FK,
+/// continuava afirmando que a nota existia.
+model NotaClinica {
+  id String @id @default(uuid())
+
+  /// Nulo quando a conta do autor foi excluída. É também o que autoriza
+  /// editar e apagar: sem FK, a comparação de autoria reprova e a nota órfã
+  /// fica imutável — assinatura sem dono não se reescreve.
+  veterinarioId String? @map("veterinario_id")
+
+  /// Assinatura gravada no instante da escrita, não derivada da conta — é o
+  /// que mantém a nota atribuída depois que o veterinário some. Mesma razão
+  /// de `autorNome`/`autorCrmv` em `AcaoClinica`. Congela de propósito: o
+  /// registro clínico diz sob qual credencial foi assinado.
+  veterinarioNome String @map("veterinario_nome")
+  veterinarioCrmv String @map("veterinario_crmv")
+
+  petId         String    @map("pet_id")
+  googlePlaceId String?   @map("google_place_id")
+  diagnostico   String
+  prescricao    String?
+  observacoes   String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  /// Exclusão lógica (api#117): o registro sai da visualização mas o
+  /// histórico clínico preserva o que o veterinário orientou.
+  deletedAt     DateTime? @map("deleted_at")
+
+  veterinario Veterinario? @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
+  pet         Pet          @relation(fields: [petId], references: [id], onDelete: Cascade)
 
   @@index([veterinarioId])
   @@index([petId])
   @@index([googlePlaceId])
   @@map("nota_clinica")
+}
+
+/// Trilha de auditoria das ações sobre registros clínicos (api#117).
+///
+/// Nenhuma FK para autor ou entidade: a trilha é um log append-only e precisa
+/// sobreviver à exclusão de quem a originou. Nome e CRMV ficam gravados aqui,
+/// não por referência — uma evidência que some junto com a conta do
+/// veterinário não serve como evidência.
+model AcaoClinica {
+  id         String          @id @default(uuid())
+  petId      String          @map("pet_id")
+  tipo       AcaoClinicaTipo
+  entidade   EntidadeClinica
+  entidadeId String          @map("entidade_id")
+
+  autorTipo Role    @map("autor_tipo")
+  autorId   String  @map("autor_id")
+  autorNome String  @map("autor_nome")
+  autorCrmv String? @map("autor_crmv")
+
+  /// O que mudou, para EDICAO e EXCLUSAO. Snapshot, não diferencial.
+  detalhes Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId, createdAt])
+  @@index([entidade, entidadeId])
+  @@map("acao_clinica")
 }

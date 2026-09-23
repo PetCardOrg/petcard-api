@@ -1,6 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import request from 'supertest';
 import {
+  acaoClinicaProvider,
+  comTransacao,
+} from '../../../../../test/utils/acao-clinica';
+import {
   createControllerTestApp,
   ControllerHarness,
   TUTOR,
@@ -8,8 +12,12 @@ import {
 } from '../../../../../test/utils/controller-harness';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { QrCodePublisher } from '../../../queue/qr-code.publisher';
+import { CardService } from '../../../card/card.service';
+import { ColeiraService } from '../../../coleira/coleira.service';
 import { PetService } from '../../../pet/pet.service';
 import { TutorService } from '../../../tutor/tutor.service';
+import { UploadService } from '../../../upload/upload.service';
+import { CrmvVerificationService } from '../../../veterinario/crmv/crmv-verification.service';
 import { DewormingController } from '../deworming.controller';
 import { DewormingService } from '../deworming.service';
 
@@ -17,19 +25,23 @@ describe('DewormingController (integração)', () => {
   let harness: ControllerHarness;
   let prisma: {
     pet: { findUnique: jest.Mock };
+    veterinario: { findUnique: jest.Mock };
     dewormingRecord: {
       create: jest.Mock;
       findMany: jest.Mock;
-      findUnique: jest.Mock;
+      findFirst: jest.Mock;
       update: jest.Mock;
       delete: jest.Mock;
     };
+    petAtendido: { findUnique: jest.Mock };
   };
 
   const pet = { id: 'pet-1', tutorId: 'tutor-1' };
   const record = {
     id: 'dew-1',
     petId: 'pet-1',
+    veterinarioId: null,
+    deletedAt: null,
     productName: 'Drontal',
     appliedAt: new Date('2026-02-01'),
     nextDoseAt: null,
@@ -42,25 +54,43 @@ describe('DewormingController (integração)', () => {
   beforeAll(async () => {
     prisma = {
       pet: { findUnique: jest.fn() },
+      // O create assina o registro com o nome do vet logado (web#34).
+      veterinario: {
+        findUnique: jest.fn().mockResolvedValue({ nome: 'Dra. Camila' }),
+      },
       dewormingRecord: {
         create: jest.fn(),
         findMany: jest.fn(),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
       },
+      petAtendido: { findUnique: jest.fn() },
     };
+
+    comTransacao(prisma);
 
     harness = await createControllerTestApp({
       controllers: [DewormingController],
       providers: [
+        acaoClinicaProvider().provider,
         DewormingService,
         PetService,
         TutorService,
+        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
         { provide: PrismaService, useValue: prisma },
         {
           provide: QrCodePublisher,
           useValue: { publishGenerate: jest.fn() },
+        },
+        { provide: CardService, useValue: { rotateTokenForPet: jest.fn() } },
+        { provide: ColeiraService, useValue: { rotateTokenForPet: jest.fn() } },
+        {
+          // O guard real roda; só a consulta de verificação é mockada.
+          provide: CrmvVerificationService,
+          useValue: {
+            getStatus: jest.fn().mockResolvedValue({ verified: true }),
+          },
         },
       ],
     });
@@ -74,6 +104,8 @@ describe('DewormingController (integração)', () => {
     jest.clearAllMocks();
     harness.setUser(TUTOR);
     prisma.pet.findUnique.mockResolvedValue(pet);
+    // Vínculo vet-pet presente por padrão; os casos de bloqueio zeram.
+    prisma.petAtendido.findUnique.mockResolvedValue({ id: 'vinculo-1' });
   });
 
   it('POST cria registro para o dono (201)', async () => {
@@ -92,7 +124,7 @@ describe('DewormingController (integração)', () => {
     expect(res.body.product_name).toBe('Drontal');
   });
 
-  it('POST permite VET registrar em qualquer pet (201)', async () => {
+  it('POST permite ao VET que atende o pet registrar (201)', async () => {
     harness.setUser(VET);
     prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'outro' });
     prisma.dewormingRecord.create.mockResolvedValue(record);
@@ -105,6 +137,25 @@ describe('DewormingController (integração)', () => {
         applied_at: '2026-02-01',
       })
       .expect(201);
+  });
+
+  it('POST barra o VET que não atende o pet (403)', async () => {
+    // O papel VET, sozinho, não abre o prontuário: sem a leitura do QR Code
+    // o pet não está na lista dele.
+    harness.setUser(VET);
+    prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'outro' });
+    prisma.petAtendido.findUnique.mockResolvedValue(null);
+
+    await request(harness.app.getHttpServer())
+      .post('/pets/pet-1/dewormings')
+      .send({
+        pet_id: '11111111-1111-4111-8111-111111111111',
+        product_name: 'Drontal',
+        applied_at: '2026-02-01',
+      })
+      .expect(403);
+
+    expect(prisma.dewormingRecord.create).not.toHaveBeenCalled();
   });
 
   it('POST rejeita payload inválido (400)', async () => {
@@ -127,7 +178,7 @@ describe('DewormingController (integração)', () => {
   });
 
   it('PATCH atualiza o registro (200)', async () => {
-    prisma.dewormingRecord.findUnique.mockResolvedValue(record);
+    prisma.dewormingRecord.findFirst.mockResolvedValue(record);
     prisma.dewormingRecord.update.mockResolvedValue({
       ...record,
       productName: 'Drontal Plus',
@@ -142,7 +193,7 @@ describe('DewormingController (integração)', () => {
   });
 
   it('DELETE remove o registro do dono (204)', async () => {
-    prisma.dewormingRecord.findUnique.mockResolvedValue(record);
+    prisma.dewormingRecord.findFirst.mockResolvedValue(record);
     prisma.dewormingRecord.delete.mockResolvedValue(record);
 
     await request(harness.app.getHttpServer())
@@ -150,11 +201,26 @@ describe('DewormingController (integração)', () => {
       .expect(204);
   });
 
-  it('DELETE é proibido para VET (403)', async () => {
+  it('DELETE é proibido ao VET sobre registro do tutor (403)', async () => {
+    // O que o tutor declarou não é do veterinário para apagar (web#34).
     harness.setUser(VET);
+    prisma.dewormingRecord.findFirst.mockResolvedValue(record);
 
     await request(harness.app.getHttpServer())
       .delete('/dewormings/dew-1')
       .expect(403);
+
+    expect(prisma.dewormingRecord.update).not.toHaveBeenCalled();
+  });
+
+  it('DELETE permite ao VET remover a própria prescrição (204)', async () => {
+    harness.setUser(VET);
+    const prescricao = { ...record, veterinarioId: 'vet-1' };
+    prisma.dewormingRecord.findFirst.mockResolvedValue(prescricao);
+    prisma.dewormingRecord.update.mockResolvedValue(prescricao);
+
+    await request(harness.app.getHttpServer())
+      .delete('/dewormings/dew-1')
+      .expect(204);
   });
 });

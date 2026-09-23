@@ -4,20 +4,44 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Post,
   Query,
   Res,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  ApiExcludeEndpoint,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
+import { randomBytes } from 'node:crypto';
 import type { Response } from 'express';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { GoogleCalendarService } from './google-calendar.service';
 
+const HTML_ESCAPES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+};
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => HTML_ESCAPES[char]);
+}
+
+@ApiTags('calendar')
 @Controller('calendar')
 export class CalendarController {
+  private readonly logger = new Logger(CalendarController.name);
+
   constructor(
     private readonly googleCalendarService: GoogleCalendarService,
     private readonly configService: ConfigService,
@@ -25,6 +49,9 @@ export class CalendarController {
 
   @Get('connect')
   @Auth(Role.TUTOR)
+  @ApiOperation({
+    summary: 'Obter URL de autorização OAuth do Google Calendar',
+  })
   connect(@CurrentUser() user: JwtPayload) {
     const url = this.googleCalendarService.getAuthUrl(user.sub);
     if (!url) {
@@ -37,23 +64,138 @@ export class CalendarController {
   }
 
   @Get('callback')
+  @Public()
+  @ApiOperation({
+    summary: 'Callback OAuth do Google (redirecionamento do consentimento)',
+  })
+  @ApiQuery({ name: 'code', description: 'Código de autorização do Google' })
+  @ApiQuery({
+    name: 'state',
+    description: 'State assinado emitido em GET /calendar/connect',
+  })
+  @ApiQuery({
+    name: 'error',
+    required: false,
+    description: 'Preenchido pelo Google quando o consentimento é negado',
+  })
   async callback(
     @Query('code') code: string,
-    @Query('state') tutorId: string,
+    @Query('state') state: string,
+    @Query('error') error: string,
     @Res() res: Response,
   ) {
-    await this.googleCalendarService.handleCallback(code, tutorId);
-    res.send(
-      '<html><body><h2>Google Calendar conectado com sucesso!</h2><p>Pode fechar esta janela e voltar ao app.</p></body></html>',
-    );
+    // Esta rota é o retorno do navegador: qualquer falha precisa virar página,
+    // não um 500 com stack trace na cara do usuário.
+    if (error) {
+      this.logger.warn(`Consentimento negado no Google Calendar: ${error}`);
+      res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          this.renderCallbackPage(
+            false,
+            'Autorização não concluída',
+            'Você não autorizou o acesso ao Google Agenda. Volte ao app e tente de novo se quiser conectar.',
+          ),
+        );
+      return;
+    }
+
+    if (!code || !state) {
+      this.logger.warn(
+        `Callback do Google Calendar sem parâmetros (code=${!!code}, state=${!!state})`,
+      );
+      res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          this.renderCallbackPage(
+            false,
+            'Link inválido',
+            'Este endereço não veio de uma autorização válida do Google. Inicie a conexão pelo app.',
+          ),
+        );
+      return;
+    }
+
+    let tutorId: string;
+    try {
+      tutorId = this.googleCalendarService.resolveState(state);
+    } catch {
+      this.logger.warn('Callback do Google Calendar com state inválido.');
+      res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          this.renderCallbackPage(
+            false,
+            'Link inválido',
+            'Este endereço não veio de uma autorização válida do Google, ou expirou. Inicie a conexão pelo app.',
+          ),
+        );
+      return;
+    }
+
+    try {
+      await this.googleCalendarService.handleCallback(code, tutorId);
+      res.send(
+        this.renderCallbackPage(
+          true,
+          'Google Calendar conectado com sucesso!',
+          'Pode fechar esta janela e voltar ao app.',
+        ),
+      );
+    } catch (err) {
+      this.logger.error(
+        `Falha ao concluir o callback do Google Calendar (tutor ${tutorId})`,
+        err instanceof Error ? err.stack : err,
+      );
+      // A mensagem do erro fica no log, não na página: ela carrega detalhe
+      // interno (configuração, resposta do Google) para uma rota pública.
+      res
+        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .send(
+          this.renderCallbackPage(
+            false,
+            'Não foi possível conectar',
+            'Erro inesperado ao conectar o Google Agenda. Tente novamente pelo app.',
+          ),
+        );
+    }
+  }
+
+  private renderCallbackPage(
+    ok: boolean,
+    title: string,
+    message: string,
+  ): string {
+    const accent = ok ? '#06A77D' : '#E63946';
+    return `<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>PetCard - Google Calendar</title>
+<style>
+  body { font-family: system-ui; max-width: 480px; margin: 40px auto; padding: 0 20px; background: #F6FBFE; color: #14313F; }
+  .card { background: #fff; border: 1px solid #D8EEF6; border-left: 4px solid ${accent}; border-radius: 12px; padding: 24px; }
+  h2 { color: ${accent}; margin-top: 0; }
+</style></head><body>
+<div class="card"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p></div>
+</body></html>`;
   }
 
   @Get('dev-connect')
+  @Public()
+  @ApiExcludeEndpoint()
   devConnect(@Res() res: Response) {
     if (this.configService.get('NODE_ENV') !== 'development') {
       res.status(404).send('Not found');
       return;
     }
+
+    // A CSP global é `script-src 'self'`, que bloqueia o <script> inline e o
+    // `onclick` desta página; afrouxada por resposta com nonce, como no
+    // AuthWebController.
+    const nonce = randomBytes(16).toString('base64');
+    res.setHeader(
+      'Content-Security-Policy',
+      `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; ` +
+        `connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
+    );
 
     res.send(`<!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="utf-8"><title>PetCard - Calendar Dev Connect</title>
@@ -73,10 +215,11 @@ export class CalendarController {
   <p><strong>1.</strong> Faca login com sua conta do PetCard:</p>
   <input id="email" type="email" placeholder="Email" />
   <input id="password" type="password" placeholder="Senha" />
-  <button onclick="login()">Entrar</button>
+  <button id="login-btn">Entrar</button>
 </div>
 <div id="status" class="step"></div>
-<script>
+<script nonce="${nonce}">
+document.getElementById('login-btn').addEventListener('click', login);
 async function login() {
   const email = document.getElementById('email').value;
   const password = document.getElementById('password').value;
@@ -110,6 +253,7 @@ async function login() {
 
   @Get('status')
   @Auth(Role.TUTOR)
+  @ApiOperation({ summary: 'Status da conexão com o Google Calendar' })
   async status(@CurrentUser() user: JwtPayload) {
     const connected = await this.googleCalendarService.isConnected(user.sub);
     return { connected };
@@ -118,12 +262,18 @@ async function login() {
   @Delete('disconnect')
   @Auth(Role.TUTOR)
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Desconectar Google Calendar (remove tokens do tutor)',
+  })
   async disconnect(@CurrentUser() user: JwtPayload) {
     await this.googleCalendarService.disconnect(user.sub);
   }
 
   @Post('sync')
   @Auth(Role.TUTOR)
+  @ApiOperation({
+    summary: 'Sincronizar compromissos pendentes com o Google Calendar',
+  })
   async sync(@CurrentUser() user: JwtPayload) {
     const count = await this.googleCalendarService.syncAllPending(user.sub);
     return { synced: count };

@@ -73,4 +73,21 @@ describe('EncryptionService', () => {
     const service = await buildService('abcd');
     expect(() => service.encrypt('x')).toThrow('64 caracteres');
   });
+
+  describe('assertConfigured', () => {
+    it('passa quando a chave é válida', async () => {
+      const service = await buildService(TEST_KEY);
+      expect(() => service.assertConfigured()).not.toThrow();
+    });
+
+    it('acusa chave ausente sem precisar cifrar nada', async () => {
+      const service = await buildService(undefined);
+      expect(() => service.assertConfigured()).toThrow('ENCRYPTION_KEY');
+    });
+
+    it('acusa chave de tamanho inválido', async () => {
+      const service = await buildService('abcd');
+      expect(() => service.assertConfigured()).toThrow('64 caracteres');
+    });
+  });
 });

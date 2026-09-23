@@ -12,9 +12,13 @@ import {
   Species,
   UpdatePetDto,
 } from '@petcardorg/shared';
+import { temVinculoComPet } from '../../common/authorization/pet-atendido';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CardService } from '../card/card.service';
+import { ColeiraService } from '../coleira/coleira.service';
 import { QrCodePublisher } from '../queue/qr-code.publisher';
 import { TutorService } from '../tutor/tutor.service';
+import { UploadService } from '../upload/upload.service';
 
 type PetWithCard = Pet & { carteiraDigital: CarteiraDigital | null };
 
@@ -47,6 +51,9 @@ export class PetService {
     private readonly prisma: PrismaService,
     private readonly tutorService: TutorService,
     private readonly qrCodePublisher: QrCodePublisher,
+    private readonly cardService: CardService,
+    private readonly coleiraService: ColeiraService,
+    private readonly uploadService: UploadService,
   ) {}
 
   private async enqueueQrCodeGeneration(petId: string): Promise<void> {
@@ -62,6 +69,9 @@ export class PetService {
 
   async create(userId: string, dto: PetInput): Promise<PetResponseDto> {
     await this.tutorService.findById(userId);
+    if (dto.photo_url !== undefined) {
+      this.uploadService.assertBucketUrl(dto.photo_url);
+    }
     const pet = await this.prisma.pet.create({
       data: {
         name: dto.name,
@@ -80,8 +90,18 @@ export class PetService {
     return this.findById(pet.id);
   }
 
+  /**
+   * Rotação deliberada do QR, pedida pelo tutor.
+   *
+   * Os tokens são trocados aqui, no caminho da requisição, e não dentro do job:
+   * o job tem retry e reentrega, então rotacionar lá trocava o token de novo a
+   * cada tentativa e invalidava um QR já impresso. O job só desenha e publica a
+   * imagem do token que encontrar (`ensureTokenForPet`).
+   */
   async regenerateQrCode(petId: string, userId: string): Promise<void> {
     await this.assertOwnership(petId, userId);
+    await this.cardService.rotateTokenForPet(petId);
+    await this.coleiraService.rotateTokenForPet(petId);
     await this.enqueueQrCodeGeneration(petId);
   }
 
@@ -105,7 +125,9 @@ export class PetService {
     if (!pet) {
       throw new NotFoundException(`Pet with id ${id} not found`);
     }
-    if (!isVet && pet.tutorId !== userId) {
+    if (isVet) {
+      await this.assertVinculoVet(id, userId);
+    } else if (pet.tutorId !== userId) {
       throw new ForbiddenException('You do not own this pet');
     }
     return toResponseDto(pet);
@@ -117,6 +139,9 @@ export class PetService {
     dto: Omit<UpdatePetDto, 'tutor_id'>,
   ): Promise<PetResponseDto> {
     await this.assertOwnership(id, userId);
+    if (dto.photo_url !== undefined) {
+      this.uploadService.assertBucketUrl(dto.photo_url);
+    }
     const pet = await this.prisma.pet.update({
       where: { id },
       data: {
@@ -157,6 +182,15 @@ export class PetService {
     return pet;
   }
 
+  /**
+   * Acesso ao pet por tutor dono ou por veterinário que o atende.
+   *
+   * O papel VET sozinho não abre a ficha de ninguém: sem o vínculo, bastava
+   * conhecer o id de um pet para ler e escrever no prontuário de qualquer
+   * animal da base. O vínculo nasce da leitura do QR Code
+   * (`POST /veterinarios/me/pets`), que é a autorização de fato do atendimento
+   * — quem leu o código esteve com o pet na frente.
+   */
   async assertAccess(
     petId: string,
     userId: string,
@@ -167,8 +201,21 @@ export class PetService {
       if (!pet) {
         throw new NotFoundException(`Pet with id ${petId} not found`);
       }
+      await this.assertVinculoVet(petId, userId);
       return pet;
     }
     return this.assertOwnership(petId, userId);
+  }
+
+  /** Exige que o pet esteja na lista de atendidos do veterinário. */
+  private async assertVinculoVet(
+    petId: string,
+    veterinarioId: string,
+  ): Promise<void> {
+    if (!(await temVinculoComPet(this.prisma, veterinarioId, petId))) {
+      throw new ForbiddenException(
+        'Pet fora da sua lista de atendidos. Leia o QR Code da carteira para iniciar o atendimento.',
+      );
+    }
   }
 }

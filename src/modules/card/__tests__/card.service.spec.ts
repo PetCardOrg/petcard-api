@@ -2,6 +2,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as QRCode from 'qrcode';
@@ -22,7 +23,11 @@ describe('CardService', () => {
     };
     pet: {
       findUnique: jest.Mock;
+      findFirst: jest.Mock;
     };
+    veterinario: { findUnique: jest.Mock };
+    medicationRecord: { findMany: jest.Mock };
+    notaClinica: { findMany: jest.Mock };
   };
   let configService: { get: jest.Mock };
   let tutorService: { findById: jest.Mock };
@@ -37,7 +42,11 @@ describe('CardService', () => {
       },
       pet: {
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
       },
+      veterinario: { findUnique: jest.fn() },
+      medicationRecord: { findMany: jest.fn().mockResolvedValue([]) },
+      notaClinica: { findMany: jest.fn().mockResolvedValue([]) },
     };
     configService = {
       get: jest.fn().mockReturnValue('https://card.petcard.app'),
@@ -97,11 +106,13 @@ describe('CardService', () => {
     });
   });
 
-  describe('issueTokenForPet', () => {
-    it('should upsert carteira_digital with a new uuid token', async () => {
-      prisma.carteiraDigital.upsert.mockResolvedValue({});
+  describe('ensureTokenForPet', () => {
+    it('cria a carteira com um token novo quando o pet ainda não tem uma', async () => {
+      prisma.carteiraDigital.upsert.mockImplementation(
+        (args: { create: { token: string } }) => ({ token: args.create.token }),
+      );
 
-      const token = await service.issueTokenForPet('pet-1');
+      const token = await service.ensureTokenForPet('pet-1');
 
       expect(token).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
@@ -109,17 +120,38 @@ describe('CardService', () => {
       expect(prisma.carteiraDigital.upsert).toHaveBeenCalledWith({
         where: { petId: 'pet-1' },
         create: { petId: 'pet-1', token },
-        update: { token },
+        update: {},
       });
     });
 
-    it('should rotate token on subsequent calls for the same pet', async () => {
+    it('preserva o token existente — o QR impresso não pode mudar sozinho', async () => {
+      prisma.carteiraDigital.upsert.mockResolvedValue({ token: 'tok-antigo' });
+
+      const t1 = await service.ensureTokenForPet('pet-1');
+      const t2 = await service.ensureTokenForPet('pet-1');
+
+      expect(t1).toBe('tok-antigo');
+      expect(t2).toBe('tok-antigo');
+      const [[args]] = prisma.carteiraDigital.upsert.mock.calls as Array<
+        [{ update: Record<string, unknown> }]
+      >;
+      expect(args.update).toEqual({});
+    });
+  });
+
+  describe('rotateTokenForPet', () => {
+    it('grava um token novo a cada chamada', async () => {
       prisma.carteiraDigital.upsert.mockResolvedValue({});
 
-      const t1 = await service.issueTokenForPet('pet-1');
-      const t2 = await service.issueTokenForPet('pet-1');
+      const t1 = await service.rotateTokenForPet('pet-1');
+      const t2 = await service.rotateTokenForPet('pet-1');
 
       expect(t1).not.toBe(t2);
+      expect(prisma.carteiraDigital.upsert).toHaveBeenLastCalledWith({
+        where: { petId: 'pet-1' },
+        create: { petId: 'pet-1', token: t2 },
+        update: { token: t2 },
+      });
     });
   });
 
@@ -155,7 +187,7 @@ describe('CardService', () => {
           birthDate: new Date('2022-03-10'),
           weight: 12.5,
           photoUrl: 'https://s3/pet.png',
-          tutor: { name: 'Alice' },
+          tutor: { name: 'Alice', phone: '+55 85 99999-0000' },
           vaccineRecords: [
             {
               id: 'v1',
@@ -193,6 +225,7 @@ describe('CardService', () => {
         birth_date: '2022-03-10',
         weight: 12.5,
         tutor_name: 'Alice',
+        tutor_phone: '+55 85 99999-0000',
         qr_code_url: 'https://s3/qr.png',
       });
       expect(result.vaccines).toHaveLength(1);
@@ -200,6 +233,228 @@ describe('CardService', () => {
         id: 'v1',
         vaccine_name: 'V8',
       });
+      // api#114: a carteira pública não expõe medicações nem notas clínicas.
+      expect(result.medications).toEqual([]);
+      expect(
+        (result as Record<string, unknown>).clinical_notes,
+      ).toBeUndefined();
+    });
+
+    it('omite o telefone quando o tutor não cadastrou', async () => {
+      // O campo é opcional no cadastro: sem ele a carteira não pode inventar
+      // um contato nem mostrar "null" para quem achou o pet.
+      prisma.carteiraDigital.findUnique.mockResolvedValue(
+        makeCard({
+          pet: { ...makeCard().pet, tutor: { name: 'Alice', phone: null } },
+        }),
+      );
+
+      const result = await service.findPublicByToken('tok-abc');
+
+      expect(result.tutor_name).toBe('Alice');
+      expect(result.tutor_phone).toBeUndefined();
+    });
+
+    it('não expõe o notes de vacina/vermífugo — texto livre pode revelar condição de saúde', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue(
+        makeCard({
+          pet: {
+            ...makeCard().pet,
+            vaccineRecords: [
+              {
+                id: 'v1',
+                petId: 'pet-1',
+                vaccineName: 'V8',
+                appliedAt: baseDate,
+                nextDoseAt: null,
+                veterinarianName: 'Dra. Camila',
+                notes: 'portador de FIV, protocolo reduzido',
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+            dewormingRecords: [
+              {
+                id: 'd1',
+                petId: 'pet-1',
+                productName: 'Drontal',
+                appliedAt: baseDate,
+                nextDoseAt: null,
+                veterinarianName: 'Dra. Camila',
+                notes: 'reação alérgica na última dose',
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+          },
+        }),
+      );
+
+      const result = await service.findPublicByToken('tok-abc');
+
+      // O resto do registro continua público — só o texto livre soma.
+      expect(result.vaccines[0]).toMatchObject({ vaccine_name: 'V8' });
+      expect(result.vaccines[0].notes).toBeUndefined();
+      expect(result.dewormings[0]).toMatchObject({ product_name: 'Drontal' });
+      expect(result.dewormings[0].notes).toBeUndefined();
+    });
+
+    it('should map vaccine/deworming optional fields and withhold sensitive clinical data (api#114)', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue(
+        makeCard({
+          pet: {
+            ...makeCard().pet,
+            vaccineRecords: [
+              {
+                id: 'v1',
+                petId: 'pet-1',
+                vaccineName: 'V8',
+                appliedAt: baseDate,
+                nextDoseAt: new Date('2026-05-01T10:00:00Z'),
+                veterinarianName: 'Dra. Camila',
+                notes: 'reforço anual',
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+            dewormingRecords: [
+              {
+                id: 'd1',
+                petId: 'pet-1',
+                productName: 'Drontal',
+                appliedAt: baseDate,
+                nextDoseAt: new Date('2026-07-01T10:00:00Z'),
+                veterinarianName: 'Dra. Camila',
+                notes: 'dose única',
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+            medicationRecords: [
+              {
+                id: 'm1',
+                petId: 'pet-1',
+                medicationName: 'Apoquel',
+                dosage: '16mg',
+                frequency: '1x ao dia',
+                startDate: baseDate,
+                endDate: new Date('2026-04-15T10:00:00Z'),
+                notes: 'com alimento',
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+            notasClinicas: [
+              {
+                id: 'n1',
+                petId: 'pet-1',
+                veterinarioId: 'vet-1',
+                veterinarioNome: 'Camila Ferreira',
+                veterinarioCrmv: 'CRMV-SP 12345',
+                googlePlaceId: 'place-123',
+                diagnostico: 'Dermatite',
+                prescricao: 'Apoquel 16mg',
+                observacoes: 'retorno em 15 dias',
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+          },
+        }),
+      );
+
+      const result = await service.findPublicByToken('tok-abc');
+
+      expect(result.vaccines[0]).toMatchObject({
+        next_dose_at: '2026-05-01T10:00:00.000Z',
+        veterinarian_name: 'Dra. Camila',
+      });
+      expect(result.dewormings[0]).toMatchObject({
+        product_name: 'Drontal',
+        next_dose_at: '2026-07-01T10:00:00.000Z',
+        veterinarian_name: 'Dra. Camila',
+      });
+      // api#114: mesmo com medicações e notas clínicas presentes no banco, a
+      // carteira pública NÃO as expõe — ficam restritas aos endpoints
+      // autenticados do tutor/veterinário. O notes de vacina/vermífugo segue
+      // a mesma regra (achado 1 da auditoria de rotas públicas).
+      expect(result.vaccines[0].notes).toBeUndefined();
+      expect(result.dewormings[0].notes).toBeUndefined();
+      expect(result.medications).toEqual([]);
+      expect(
+        (result as Record<string, unknown>).clinical_notes,
+      ).toBeUndefined();
+    });
+
+    it('should map absent optional fields to undefined', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue(
+        makeCard({
+          qrCodeUrl: null,
+          pet: {
+            ...makeCard().pet,
+            breed: null,
+            birthDate: null,
+            weight: null,
+            photoUrl: null,
+            dewormingRecords: [
+              {
+                id: 'd1',
+                petId: 'pet-1',
+                productName: 'Drontal',
+                appliedAt: baseDate,
+                nextDoseAt: null,
+                veterinarianName: null,
+                notes: null,
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+            medicationRecords: [
+              {
+                id: 'm1',
+                petId: 'pet-1',
+                medicationName: 'Apoquel',
+                dosage: '16mg',
+                frequency: '1x ao dia',
+                startDate: baseDate,
+                endDate: null,
+                notes: null,
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+            notasClinicas: [
+              {
+                id: 'n1',
+                petId: 'pet-1',
+                veterinarioId: 'vet-1',
+                veterinarioNome: 'Camila Ferreira',
+                veterinarioCrmv: 'CRMV-SP 12345',
+                googlePlaceId: null,
+                diagnostico: 'Dermatite',
+                prescricao: null,
+                observacoes: null,
+                createdAt: baseDate,
+                updatedAt: baseDate,
+              },
+            ],
+          },
+        }),
+      );
+
+      const result = await service.findPublicByToken('tok-abc');
+
+      expect(result.breed).toBeUndefined();
+      expect(result.birth_date).toBeUndefined();
+      expect(result.weight).toBeUndefined();
+      expect(result.photo_url).toBeUndefined();
+      expect(result.qr_code_url).toBeUndefined();
+      expect(result.dewormings[0]).toMatchObject({
+        next_dose_at: undefined,
+        veterinarian_name: undefined,
+        notes: undefined,
+      });
+      expect(result.medications).toEqual([]);
     });
 
     it('should throw NotFoundException for invalid token', async () => {
@@ -208,6 +463,139 @@ describe('CardService', () => {
       await expect(service.findPublicByToken('bad')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('findClinicaByToken (api#113)', () => {
+    const baseDate = new Date('2026-04-01T10:00:00Z');
+
+    beforeEach(() => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue({
+        id: 'card-1',
+        petId: 'pet-1',
+        token: 'tok-abc',
+        qrCodeUrl: null,
+        createdAt: baseDate,
+        pet: {
+          id: 'pet-1',
+          name: 'Rex',
+          species: Species.DOG,
+          breed: null,
+          sex: Sex.MALE,
+          birthDate: null,
+          weight: null,
+          photoUrl: null,
+          tutor: { name: 'Alice' },
+          vaccineRecords: [],
+          dewormingRecords: [],
+        },
+      });
+      prisma.veterinario.findUnique.mockResolvedValue({
+        crmv: 'CRMV-SP 12345',
+      });
+    });
+
+    it('devolve o que a carteira pública esconde: medicações e notas', async () => {
+      prisma.medicationRecord.findMany.mockResolvedValue([
+        {
+          id: 'm1',
+          petId: 'pet-1',
+          medicationName: 'Dipirona',
+          dosage: '10mg',
+          frequency: '8h',
+          startDate: baseDate,
+          endDate: null,
+          notes: null,
+          createdAt: baseDate,
+          updatedAt: baseDate,
+        },
+      ]);
+      prisma.notaClinica.findMany.mockResolvedValue([
+        {
+          id: 'n1',
+          petId: 'pet-1',
+          veterinarioId: 'vet-9',
+          googlePlaceId: null,
+          diagnostico: 'Otite',
+          prescricao: 'Gotas',
+          observacoes: null,
+          createdAt: baseDate,
+          updatedAt: baseDate,
+          veterinarioNome: 'Dra. Camila',
+          veterinarioCrmv: 'CRMV-SP 999',
+        },
+      ]);
+
+      const result = await service.findClinicaByToken('tok-abc', 'vet-1');
+
+      expect(result.medications).toHaveLength(1);
+      expect(result.medications[0].medication_name).toBe('Dipirona');
+      expect(result.clinical_notes).toHaveLength(1);
+      expect(result.clinical_notes[0]).toMatchObject({
+        diagnostico: 'Otite',
+        veterinario_crmv: 'CRMV-SP 999',
+      });
+    });
+
+    it('mantém o notes de vacina/vermífugo — o vet com CRMV verificado pode ler', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue({
+        id: 'card-1',
+        petId: 'pet-1',
+        token: 'tok-abc',
+        qrCodeUrl: null,
+        createdAt: baseDate,
+        pet: {
+          id: 'pet-1',
+          name: 'Rex',
+          species: Species.DOG,
+          breed: null,
+          sex: Sex.MALE,
+          birthDate: null,
+          weight: null,
+          photoUrl: null,
+          tutor: { name: 'Alice' },
+          vaccineRecords: [
+            {
+              id: 'v1',
+              petId: 'pet-1',
+              vaccineName: 'V8',
+              appliedAt: baseDate,
+              nextDoseAt: null,
+              veterinarianName: null,
+              notes: 'portador de FIV, protocolo reduzido',
+              createdAt: baseDate,
+              updatedAt: baseDate,
+            },
+          ],
+          dewormingRecords: [],
+        },
+      });
+
+      const result = await service.findClinicaByToken('tok-abc', 'vet-1');
+
+      expect(result.vaccines[0].notes).toBe(
+        'portador de FIV, protocolo reduzido',
+      );
+    });
+
+    it('registra o CRMV de quem acessou', async () => {
+      const result = await service.findClinicaByToken('tok-abc', 'vet-1');
+
+      expect(result.accessed_by_crmv).toBe('CRMV-SP 12345');
+    });
+
+    it('mantém os dados da carteira pública', async () => {
+      const result = await service.findClinicaByToken('tok-abc', 'vet-1');
+
+      expect(result).toMatchObject({ pet_id: 'pet-1', pet_name: 'Rex' });
+    });
+
+    it('propaga 404 quando o token não existe', async () => {
+      prisma.carteiraDigital.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.findClinicaByToken('inexistente', 'vet-1'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -220,6 +608,37 @@ describe('CardService', () => {
 
     afterEach(() => {
       jest.useRealTimers();
+    });
+
+    // O tutor em Tóquio às 08:00 do dia 2 já virou o dia; o processo (UTC) ainda
+    // está no dia 1. A dose marcada para o dia 1 não é mais "próxima" para ele.
+    it('conta as próximas doses no fuso do tutor, não no do processo', async () => {
+      jest.setSystemTime(new Date('2026-04-01T23:00:00Z'));
+      tutorService.findById.mockResolvedValue({ id: 'tutor-1' });
+      prisma.pet.findUnique.mockResolvedValue({
+        id: 'pet-1',
+        name: 'Rex',
+        species: Species.DOG,
+        sex: Sex.MALE,
+        tutorId: 'tutor-1',
+        tutor: { id: 'tutor-1', name: 'Alice', timezone: 'Asia/Tokyo' },
+        carteiraDigital: {
+          id: 'card-1',
+          petId: 'pet-1',
+          token: 'tok-abc',
+          qrCodeUrl: null,
+          createdAt: baseDate,
+        },
+        vaccineRecords: [{ nextDoseAt: new Date('2026-04-01T12:00:00Z') }],
+        dewormingRecords: [],
+        medicationRecords: [{ endDate: new Date('2026-04-01T12:00:00Z') }],
+      });
+
+      const result = await service.findByPetIdForTutor('pet-1', 'tutor-1');
+
+      // 01/04 12:00 UTC = 01/04 21:00 em Tóquio; "agora" já é 02/04 08:00 lá.
+      expect(result.upcoming_vaccines_count).toBe(0);
+      expect(result.active_medications_count).toBe(0);
     });
 
     it('should return the authenticated card summary for the owner', async () => {
@@ -262,20 +681,18 @@ describe('CardService', () => {
         include: {
           tutor: true,
           carteiraDigital: true,
+          // Registro excluído não conta nos totais da carteira (api#117).
           vaccineRecords: {
-            select: {
-              nextDoseAt: true,
-            },
+            where: { deletedAt: null },
+            select: { nextDoseAt: true },
           },
           dewormingRecords: {
-            select: {
-              nextDoseAt: true,
-            },
+            where: { deletedAt: null },
+            select: { nextDoseAt: true },
           },
           medicationRecords: {
-            select: {
-              endDate: true,
-            },
+            where: { deletedAt: null },
+            select: { endDate: true },
           },
         },
       });
@@ -347,6 +764,34 @@ describe('CardService', () => {
       expect(result.issued_at).toBe(baseDate);
       expect(result.qr_code_url).toBeUndefined();
       expect(result.public_url).toBe('https://card.petcard.app/tok-abc');
+    });
+
+    it('avisa no boot quando a base do link público não tem hash', () => {
+      const aviso = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      // O padrão do repo: base sem "#" costuma ser o dotenv comendo o valor a
+      // partir dele, e o link resultante cai no "não encontrado" do HashRouter.
+      configService.get.mockReturnValue('https://card.petcard.app');
+
+      service.onModuleInit();
+
+      expect(aviso).toHaveBeenCalledWith(
+        expect.stringContaining('PUBLIC_CARD_BASE_URL'),
+      );
+      aviso.mockRestore();
+    });
+
+    it('não avisa quando a base traz o hash', () => {
+      const aviso = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      configService.get.mockReturnValue('https://card.petcard.app/#');
+
+      service.onModuleInit();
+
+      expect(aviso).not.toHaveBeenCalled();
+      aviso.mockRestore();
     });
 
     it('should throw NotFoundException when the pet does not exist', async () => {

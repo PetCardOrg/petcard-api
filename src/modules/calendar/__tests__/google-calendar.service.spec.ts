@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
-import { Logger } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { EncryptionService } from '../../../common/crypto/encryption.service';
@@ -40,6 +40,7 @@ const makeConfig = (configured = true): ConfigService =>
           'googleCalendar.clientId': configured ? 'client-id' : '',
           'googleCalendar.clientSecret': configured ? 'secret' : '',
           'googleCalendar.redirectUri': 'http://localhost/callback',
+          'auth.jwtSecret': 'segredo-de-teste',
         }) as Record<string, string>
       )[key],
   }) as unknown as ConfigService;
@@ -60,7 +61,11 @@ describe('GoogleCalendarService', () => {
     };
     tutor: { findUnique: jest.Mock };
   };
-  let encryption: { encrypt: jest.Mock; decrypt: jest.Mock };
+  let encryption: {
+    encrypt: jest.Mock;
+    decrypt: jest.Mock;
+    assertConfigured: jest.Mock;
+  };
 
   const tokenRow = {
     tutorId: 'tutor-1',
@@ -103,6 +108,7 @@ describe('GoogleCalendarService', () => {
     encryption = {
       encrypt: jest.fn((v: string) => `enc(${v})`),
       decrypt: jest.fn((v: string) => `dec(${v})`),
+      assertConfigured: jest.fn(),
     };
     mockOAuth2Instance.generateAuthUrl.mockReturnValue(
       'https://accounts.google.com/o/oauth2/auth?xyz',
@@ -115,7 +121,7 @@ describe('GoogleCalendarService', () => {
   });
 
   describe('getAuthUrl', () => {
-    it('gera a URL de consentimento offline com o tutorId no state', () => {
+    it('gera a URL de consentimento offline com o state assinado', () => {
       const url = service.getAuthUrl('tutor-1');
 
       expect(url).toBe('https://accounts.google.com/o/oauth2/auth?xyz');
@@ -123,7 +129,9 @@ describe('GoogleCalendarService', () => {
         access_type: 'offline',
         scope: SCOPES,
         prompt: 'consent',
-        state: 'tutor-1',
+        state: expect.stringMatching(
+          /^tutor-1\.[\w-]+\.\d+\.[\w-]+$/,
+        ) as string,
       });
     });
 
@@ -136,6 +144,50 @@ describe('GoogleCalendarService', () => {
 
       expect(unconfigured.getAuthUrl('tutor-1')).toBeNull();
       expect(mockOAuth2Instance.generateAuthUrl).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resolveState', () => {
+    /** Extrai o state que o getAuthUrl acabou de emitir. */
+    const emitirState = (tutorId: string): string => {
+      service.getAuthUrl(tutorId);
+      const call = mockOAuth2Instance.generateAuthUrl.mock.calls.at(-1) as [
+        { state: string },
+      ];
+      return call[0].state;
+    };
+
+    it('devolve o tutor de origem do state que ele mesmo assinou', () => {
+      expect(service.resolveState(emitirState('tutor-1'))).toBe('tutor-1');
+    });
+
+    it('recusa state forjado com outro tutor', () => {
+      // O ataque que a assinatura fecha: chamar o callback com o id da vítima
+      // e um code do atacante, pendurando a agenda dele na conta dela.
+      const state = emitirState('tutor-1');
+      const [, nonce, exp, sig] = state.split('.');
+      const forjado = ['tutor-vitima', nonce, exp, sig].join('.');
+
+      expect(() => service.resolveState(forjado)).toThrow(BadRequestException);
+    });
+
+    it('recusa state sem assinatura', () => {
+      expect(() => service.resolveState('tutor-1')).toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('recusa state expirado', () => {
+      const state = emitirState('tutor-1');
+      const [tutorId, nonce] = state.split('.');
+      const vencido = `${tutorId}.${nonce}.${Date.now() - 1000}`;
+      // Assinatura correta para um prazo já vencido não vale.
+      const service2 = service as unknown as {
+        stateSignature: (p: string) => string;
+      };
+      const assinado = `${vencido}.${service2.stateSignature(vencido)}`;
+
+      expect(() => service.resolveState(assinado)).toThrow(BadRequestException);
     });
   });
 
@@ -163,7 +215,48 @@ describe('GoogleCalendarService', () => {
       expect(arg.update.expiresAt).toBeInstanceOf(Date);
     });
 
+    it('dispara o catch-up dos pendentes após conectar', async () => {
+      // Sem botão de sincronizar no app, reconectar é o momento de recuperar
+      // o que ficou para trás enquanto o token estava revogado.
+      const catchUp = jest
+        .spyOn(service, 'syncAllPending')
+        .mockResolvedValue(0);
+      mockOAuth2Instance.getToken.mockResolvedValue({
+        tokens: {
+          access_token: 'at-raw',
+          refresh_token: 'rt-raw',
+          expiry_date: 1_800_000_000_000,
+        },
+      });
+
+      await service.handleCallback('auth-code', 'tutor-1');
+
+      expect(catchUp).toHaveBeenCalledWith('tutor-1');
+    });
+
+    it('conclui a conexão mesmo se o catch-up falhar', async () => {
+      jest
+        .spyOn(service, 'syncAllPending')
+        .mockRejectedValue(new Error('google fora do ar'));
+      mockOAuth2Instance.getToken.mockResolvedValue({
+        tokens: {
+          access_token: 'at-raw',
+          refresh_token: 'rt-raw',
+          expiry_date: 1_800_000_000_000,
+        },
+      });
+
+      await expect(
+        service.handleCallback('auth-code', 'tutor-1'),
+      ).resolves.toBeUndefined();
+      expect(prisma.googleOAuthToken.upsert).toHaveBeenCalled();
+    });
+
     it('não re-cifra refresh token ausente no update', async () => {
+      // Reconexão: o Google só manda refresh_token no primeiro consentimento.
+      prisma.googleOAuthToken.findUnique.mockResolvedValue({
+        refreshToken: 'enc(rt-antigo)',
+      });
       mockOAuth2Instance.getToken.mockResolvedValue({
         tokens: {
           access_token: 'at-raw',
@@ -176,6 +269,77 @@ describe('GoogleCalendarService', () => {
 
       const arg = prisma.googleOAuthToken.upsert.mock.calls[0][0];
       expect(arg.update.refreshToken).toBeUndefined();
+      // O create precisa de um valor: reaproveita o que já estava salvo.
+      expect(arg.create.refreshToken).toBe('enc(rt-antigo)');
+    });
+
+    it('falha com orientação quando não há refresh token novo nem salvo', async () => {
+      prisma.googleOAuthToken.findUnique.mockResolvedValue(null);
+      mockOAuth2Instance.getToken.mockResolvedValue({
+        tokens: {
+          access_token: 'at-raw',
+          refresh_token: undefined,
+          expiry_date: 1_800_000_000_000,
+        },
+      });
+
+      await expect(
+        service.handleCallback('auth-code', 'tutor-1'),
+      ).rejects.toThrow(/refresh token/i);
+      expect(prisma.googleOAuthToken.upsert).not.toHaveBeenCalled();
+    });
+
+    it('falha quando o Google não devolve access token', async () => {
+      mockOAuth2Instance.getToken.mockResolvedValue({
+        tokens: { access_token: undefined, refresh_token: 'rt-raw' },
+      });
+
+      await expect(
+        service.handleCallback('auth-code', 'tutor-1'),
+      ).rejects.toThrow(/access token/i);
+      expect(prisma.googleOAuthToken.upsert).not.toHaveBeenCalled();
+    });
+
+    it('assume validade padrão quando o Google omite expiry_date', async () => {
+      mockOAuth2Instance.getToken.mockResolvedValue({
+        tokens: {
+          access_token: 'at-raw',
+          refresh_token: 'rt-raw',
+          expiry_date: undefined,
+        },
+      });
+
+      await service.handleCallback('auth-code', 'tutor-1');
+
+      const arg = prisma.googleOAuthToken.upsert.mock.calls[0][0];
+      const expiresAt = arg.create.expiresAt as Date;
+      expect(expiresAt).toBeInstanceOf(Date);
+      expect(Number.isNaN(expiresAt.getTime())).toBe(false);
+      expect(expiresAt.getTime()).toBeGreaterThan(Date.now());
+    });
+
+    it('valida a chave de criptografia antes de gastar o código do Google', async () => {
+      encryption.assertConfigured.mockImplementation(() => {
+        throw new Error('ENCRYPTION_KEY é obrigatória');
+      });
+
+      await expect(
+        service.handleCallback('auth-code', 'tutor-1'),
+      ).rejects.toThrow(/ENCRYPTION_KEY/);
+      expect(mockOAuth2Instance.getToken).not.toHaveBeenCalled();
+    });
+
+    it('recusa o callback quando a integração não está configurada', async () => {
+      const unconfigured = new GoogleCalendarService(
+        makeConfig(false),
+        prisma as unknown as PrismaService,
+        encryption as unknown as EncryptionService,
+      );
+
+      await expect(
+        unconfigured.handleCallback('auth-code', 'tutor-1'),
+      ).rejects.toThrow(/não está configurada/i);
+      expect(mockOAuth2Instance.getToken).not.toHaveBeenCalled();
     });
   });
 
@@ -365,6 +529,20 @@ describe('GoogleCalendarService', () => {
         'boom',
       );
     });
+
+    it.each([
+      ['410 (evento já apagado)', 410, 'Resource has been deleted'],
+      ['404 (evento inexistente)', 404, 'Not Found'],
+    ])('trata %s como sucesso — apagar é idempotente', async (_, code, msg) => {
+      prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
+      mockCalendarEvents.delete.mockRejectedValue(
+        Object.assign(new Error(msg), { code }),
+      );
+
+      await expect(
+        service.deleteEvent('tutor-1', 'evt-1'),
+      ).resolves.toBeUndefined();
+    });
   });
 
   describe('syncAppointment', () => {
@@ -423,6 +601,17 @@ describe('GoogleCalendarService', () => {
   });
 
   describe('syncAllPending', () => {
+    /** Agendamento como o `findMany` do lote o entrega: já completo. */
+    const pendingAppointment = (id: string) => ({
+      id,
+      title: 'Consulta',
+      description: null,
+      scheduledAt: eventInput.startTime,
+      durationMinutes: 30,
+      location: null,
+      googleEventId: null,
+    });
+
     it('retorna 0 e não busca pendências quando não está conectado', async () => {
       prisma.googleOAuthToken.findUnique.mockResolvedValue(null);
 
@@ -435,19 +624,9 @@ describe('GoogleCalendarService', () => {
     it('sincroniza todas as pendências e retorna a contagem', async () => {
       prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
       prisma.appointment.findMany.mockResolvedValue([
-        { id: 'appt-1' },
-        { id: 'appt-2' },
+        pendingAppointment('appt-1'),
+        pendingAppointment('appt-2'),
       ]);
-      // syncAppointment busca cada appointment; sem googleEventId → createEvent
-      prisma.appointment.findUnique.mockResolvedValue({
-        title: 'Consulta',
-        description: null,
-        scheduledAt: eventInput.startTime,
-        durationMinutes: 30,
-        location: null,
-        googleEventId: null,
-        pet: { name: 'Rex' },
-      });
       prisma.tutor.findUnique.mockResolvedValue(null);
       mockCalendarEvents.insert.mockResolvedValue({
         data: { id: 'evt-1', etag: 'etag-1' },
@@ -459,27 +638,68 @@ describe('GoogleCalendarService', () => {
       expect(mockCalendarEvents.insert).toHaveBeenCalledTimes(2);
     });
 
-    it('continua o lote quando uma sincronização falha', async () => {
+    it('não refaz por item o findUnique do agendamento nem a busca do fuso', async () => {
       prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
       prisma.appointment.findMany.mockResolvedValue([
-        { id: 'appt-1' },
-        { id: 'appt-2' },
+        pendingAppointment('appt-1'),
+        pendingAppointment('appt-2'),
+        pendingAppointment('appt-3'),
       ]);
-      prisma.appointment.findUnique.mockResolvedValue({
-        title: 'Consulta',
-        description: null,
-        scheduledAt: eventInput.startTime,
-        durationMinutes: 30,
-        location: null,
-        googleEventId: null,
-        pet: { name: 'Rex' },
+      prisma.tutor.findUnique.mockResolvedValue({
+        timezone: 'America/Sao_Paulo',
       });
+      mockCalendarEvents.insert.mockResolvedValue({
+        data: { id: 'evt-1', etag: 'etag-1' },
+      });
+
+      await service.syncAllPending('tutor-1');
+
+      // O findMany já trouxe os agendamentos, e o fuso é o mesmo para a leva.
+      expect(prisma.appointment.findUnique).not.toHaveBeenCalled();
+      expect(prisma.tutor.findUnique).toHaveBeenCalledTimes(1);
+      expect(mockCalendarEvents.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestBody: expect.objectContaining({
+            start: expect.objectContaining({
+              timeZone: 'America/Sao_Paulo',
+            }) as unknown,
+          }) as unknown,
+        }),
+      );
+    });
+
+    // O contador devolvia `pending.length`: com o token do Google revogado,
+    // toda chamada falhava e o POST /calendar/sync ainda respondia
+    // {synced: N} — o app dizia ao tutor que sincronizou sem criar evento.
+    it('conta só o que realmente foi para a agenda', async () => {
+      prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
+      prisma.appointment.findMany.mockResolvedValue([
+        pendingAppointment('appt-1'),
+        pendingAppointment('appt-2'),
+      ]);
       prisma.tutor.findUnique.mockResolvedValue(null);
-      mockCalendarEvents.insert.mockRejectedValue(new Error('falha'));
+      mockCalendarEvents.insert.mockRejectedValue(new Error('invalid_grant'));
 
       const count = await service.syncAllPending('tutor-1');
 
-      expect(count).toBe(2);
+      expect(count).toBe(0);
+      expect(mockCalendarEvents.insert).toHaveBeenCalledTimes(2);
+    });
+
+    it('continua o lote quando uma sincronização falha e conta as que deram certo', async () => {
+      prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
+      prisma.appointment.findMany.mockResolvedValue([
+        pendingAppointment('appt-1'),
+        pendingAppointment('appt-2'),
+      ]);
+      prisma.tutor.findUnique.mockResolvedValue(null);
+      mockCalendarEvents.insert
+        .mockRejectedValueOnce(new Error('falha'))
+        .mockResolvedValue({ data: { id: 'evt-2', etag: 'etag-2' } });
+
+      const count = await service.syncAllPending('tutor-1');
+
+      expect(count).toBe(1);
       expect(mockCalendarEvents.insert).toHaveBeenCalledTimes(2);
     });
   });

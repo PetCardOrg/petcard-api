@@ -1,4 +1,4 @@
-import { PrismaClient, Role, Species, Sex } from '@prisma/client';
+import { PrismaClient, Species, Sex } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -10,19 +10,32 @@ const tutors = [
     name: 'Ana Carolina Silva',
     email: 'ana.silva@example.com',
     phone: '+5511987654321',
-    role: Role.TUTOR,
   },
   {
     name: 'Bruno Henrique Costa',
     email: 'bruno.costa@example.com',
     phone: '+5521991234567',
-    role: Role.TUTOR,
+  },
+];
+
+/**
+ * Veterinários vivem em tabela própria, com CRMV e login separado
+ * (`POST /auth/veterinario/login`) — não são tutores com papel VET.
+ */
+const veterinarios = [
+  {
+    nome: 'Dra. Camila Ferreira',
+    email: 'camila.ferreira@vet.example.com',
+    crmv: 'CRMV-SP 12345',
+    telefone: '+5531988887777',
   },
   {
-    name: 'Dra. Camila Ferreira',
-    email: 'camila.ferreira@vet.example.com',
-    phone: '+5531988887777',
-    role: Role.VET,
+    // CRMV reservado que o validador stub recusa: permite demonstrar o
+    // bloqueio de acesso clínico sem depender da consulta externa (api#113).
+    nome: 'Dr. Marcos Andrade',
+    email: 'marcos.andrade@vet.example.com',
+    crmv: 'CRMV-SP 00000',
+    telefone: '+5531977776666',
   },
 ];
 
@@ -187,6 +200,7 @@ type MedicationSeed = {
   frequency: string;
   startDate: Date;
   endDate?: Date;
+  veterinarianName?: string;
   notes?: string;
 };
 
@@ -198,6 +212,7 @@ const medications: MedicationSeed[] = [
     frequency: '12/12h',
     startDate: new Date('2025-12-01'),
     endDate: new Date('2025-12-10'),
+    veterinarianName: 'Dra. Camila Ferreira',
     notes: 'Tratamento de infecção de pele',
   },
   {
@@ -207,6 +222,7 @@ const medications: MedicationSeed[] = [
     frequency: '1x ao dia',
     startDate: new Date('2026-01-15'),
     endDate: new Date('2026-01-20'),
+    veterinarianName: 'Dr. Paulo Ribeiro',
     notes: 'Anti-inflamatório pós cirurgia',
   },
   {
@@ -228,6 +244,11 @@ const medications: MedicationSeed[] = [
   },
 ];
 
+interface RegistroDoVet {
+  veterinarioId: string | null;
+  petId: string;
+}
+
 async function main() {
   console.log('🌱 Iniciando seed do banco de dados...');
 
@@ -240,13 +261,31 @@ async function main() {
         update: {
           name: tutor.name,
           phone: tutor.phone,
-          role: tutor.role,
+          emailVerifiedAt: new Date(),
         },
-        create: { ...tutor, password: hashedPassword },
+        // Contas de demo já nascem verificadas — a verificação de e-mail é
+        // "soft" (não bloqueia login), mas assim o roteiro dos UCs não vê o
+        // aviso de "confirme seu e-mail".
+        create: {
+          ...tutor,
+          password: hashedPassword,
+          emailVerifiedAt: new Date(),
+        },
       });
     }
     console.log(
       `✅ ${tutors.length} tutores criados/atualizados (senha: ${SEED_PASSWORD})`,
+    );
+
+    for (const vet of veterinarios) {
+      await tx.veterinario.upsert({
+        where: { email: vet.email },
+        update: { nome: vet.nome, crmv: vet.crmv, telefone: vet.telefone },
+        create: { ...vet, password: hashedPassword },
+      });
+    }
+    console.log(
+      `✅ ${veterinarios.length} veterinários criados/atualizados (senha: ${SEED_PASSWORD})`,
     );
 
     const tutorByEmail = new Map<string, string>();
@@ -285,6 +324,22 @@ async function main() {
       petByName.set(p.name, p.id);
     }
 
+    /**
+     * Liga o registro ao veterinário do PetCard quando o nome corresponde a
+     * uma conta existente.
+     *
+     * Sem isso, os registros do seed ficam com `veterinarioId` nulo e a regra
+     * de autoria (web#34) os trata como declarados pelo tutor: a Dra. Camila
+     * via o próprio nome no registro e mesmo assim não podia editá-lo.
+     *
+     * "Dr. Paulo Ribeiro" não tem conta de propósito — é o caso do
+     * profissional de fora, que continua valendo como texto livre.
+     */
+    const vetIdByNome = new Map<string, string>();
+    for (const vet of await tx.veterinario.findMany()) {
+      vetIdByNome.set(vet.nome, vet.id);
+    }
+
     // Idempotência: limpar e recriar registros de saúde (evita duplicar)
     await tx.vaccineRecord.deleteMany();
     await tx.dewormingRecord.deleteMany();
@@ -300,6 +355,9 @@ async function main() {
           appliedAt: v.appliedAt,
           nextDoseAt: v.nextDoseAt,
           veterinarianName: v.veterinarianName,
+          veterinarioId: v.veterinarianName
+            ? (vetIdByNome.get(v.veterinarianName) ?? null)
+            : null,
           notes: v.notes,
         },
       });
@@ -316,6 +374,9 @@ async function main() {
           appliedAt: d.appliedAt,
           nextDoseAt: d.nextDoseAt,
           veterinarianName: d.veterinarianName,
+          veterinarioId: d.veterinarianName
+            ? (vetIdByNome.get(d.veterinarianName) ?? null)
+            : null,
           notes: d.notes,
         },
       });
@@ -333,11 +394,50 @@ async function main() {
           frequency: m.frequency,
           startDate: m.startDate,
           endDate: m.endDate,
+          veterinarianName: m.veterinarianName,
+          veterinarioId: m.veterinarianName
+            ? (vetIdByNome.get(m.veterinarianName) ?? null)
+            : null,
           notes: m.notes,
         },
       });
     }
     console.log(`✅ ${medications.length} registros de medicação criados`);
+
+    /**
+     * Vincula ao veterinário os pets em que ele registrou algo.
+     *
+     * O dashboard do vet lê do vínculo, não dos registros. O seed grava
+     * direto pelo Prisma, sem passar pelos serviços que criam o vínculo, então
+     * sem isto a Dra. Camila abriria a demo com o dashboard vazio.
+     */
+    const vinculos = new Map<
+      string,
+      { veterinarioId: string; petId: string }
+    >();
+    for (const modelo of [
+      tx.vaccineRecord,
+      tx.dewormingRecord,
+      tx.medicationRecord,
+      tx.notaClinica,
+    ]) {
+      const registros = await (
+        modelo as { findMany: (args: unknown) => Promise<RegistroDoVet[]> }
+      ).findMany({ select: { veterinarioId: true, petId: true } });
+      for (const r of registros) {
+        if (!r.veterinarioId) continue;
+        vinculos.set(`${r.veterinarioId}:${r.petId}`, {
+          veterinarioId: r.veterinarioId,
+          petId: r.petId,
+        });
+      }
+    }
+
+    await tx.petAtendido.deleteMany();
+    for (const vinculo of vinculos.values()) {
+      await tx.petAtendido.create({ data: vinculo });
+    }
+    console.log(`✅ ${vinculos.size} vínculos veterinário↔pet criados`);
   });
 
   console.log('🌱 Seed concluído com sucesso!');

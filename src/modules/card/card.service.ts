@@ -1,7 +1,9 @@
 import {
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
@@ -9,29 +11,13 @@ import * as QRCode from 'qrcode';
 import {
   CarteiraDigitalResponseDto,
   CarteiraDigitalPublicResponseDto,
+  CarteiraDigitalClinicaResponseDto,
   Sex,
   Species,
 } from '@petcardorg/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { isFutureOrTodayInTimeZone } from '../../common/time/timezone';
 import { TutorService } from '../tutor/tutor.service';
-
-interface ClinicalNotePublicDto {
-  id: string;
-  pet_id: string;
-  veterinario_id: string;
-  veterinario_nome: string;
-  veterinario_crmv: string;
-  google_place_id?: string;
-  diagnostico: string;
-  prescricao?: string;
-  observacoes?: string;
-  created_at: Date;
-  updated_at: Date;
-}
-
-interface CarteiraDigitalPublicWithNotesDto extends CarteiraDigitalPublicResponseDto {
-  clinical_notes: ClinicalNotePublicDto[];
-}
 
 interface CarteiraDigitalFullResponseDto extends CarteiraDigitalResponseDto {
   weight?: number;
@@ -41,30 +27,79 @@ interface CarteiraDigitalFullResponseDto extends CarteiraDigitalResponseDto {
   active_medications_count: number;
 }
 
-function isFutureOrToday(date?: Date | null): boolean {
-  if (!date) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return date.getTime() >= today.getTime();
-}
-
-function isMedicationActive(endDate?: Date | null): boolean {
-  return !endDate || isFutureOrToday(endDate);
+/**
+ * "Próxima dose" e "medicação ativa" são contas de calendário, e calendário
+ * depende de fuso: comparar com a meia-noite do processo fazia a carteira de um
+ * tutor em outro fuso errar a contagem na virada do dia. A régua passa a ser o
+ * dia civil do tutor (`Tutor.timezone`).
+ */
+function isMedicationActive(
+  endDate: Date | null | undefined,
+  timeZone: string,
+): boolean {
+  return !endDate || isFutureOrTodayInTimeZone(endDate, timeZone);
 }
 
 @Injectable()
-export class CardService {
+export class CardService implements OnModuleInit {
+  private readonly logger = new Logger(CardService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly tutorService: TutorService,
   ) {}
 
+  /**
+   * Confere a base do link público antes que ela vire QR Code gravado.
+   *
+   * O erro é silencioso: o dotenv trata `#` sem aspas como início de
+   * comentário e trunca o valor justamente onde importa. O web usa HashRouter,
+   * então o link sem `#` depende do host devolver o `index.html` para um
+   * caminho qualquer — em hospedagem estática isso é 404 antes de o JS rodar,
+   * e o resgate do `normalizePublicCardLocation` nem chega a acontecer.
+   *
+   * O QR carrega o endereço dentro da imagem, então valor errado sobrevive à
+   * correção da variável — só some ao regerar o código.
+   */
+  onModuleInit(): void {
+    const baseUrl = this.publicBaseUrl();
+
+    if (!baseUrl.includes('#')) {
+      this.logger.warn(
+        `PUBLIC_CARD_BASE_URL sem "#" ("${baseUrl}"): o web usa HashRouter e o ` +
+          'link público não vai resolver. Se o valor tem "#" no .env, envolva ' +
+          'em aspas — sem elas o dotenv corta tudo a partir do "#".',
+      );
+    }
+  }
+
   async generateQrCode(token: string): Promise<Buffer> {
     return this.generateBuffer(this.buildPublicUrl(token));
   }
 
-  async issueTokenForPet(petId: string): Promise<string> {
+  /**
+   * Devolve o token da carteira, criando um só quando ainda não existe.
+   *
+   * É o que o job de QR usa. Emitir e rotacionar são caminhos separados de
+   * propósito: o job tem 3 retries e o broker pode reentregar a mensagem, então
+   * uma falha transitória no S3 no meio da geração faria o token ser trocado
+   * de novo a cada tentativa — e o QR já impresso na coleira passaria a apontar
+   * para um token que não existe mais (404 na página do achador). Rotação é
+   * decisão do tutor, e acontece uma vez só, no caminho da requisição
+   * (`POST /pets/:id/qr-code` → `PetService.regenerateQrCode`).
+   */
+  async ensureTokenForPet(petId: string): Promise<string> {
+    const card = await this.prisma.carteiraDigital.upsert({
+      where: { petId },
+      create: { petId, token: randomUUID() },
+      update: {},
+    });
+    return card.token;
+  }
+
+  /** Troca o token da carteira, invalidando o QR anterior. */
+  async rotateTokenForPet(petId: string): Promise<string> {
     const token = randomUUID();
     await this.prisma.carteiraDigital.upsert({
       where: { petId },
@@ -81,69 +116,68 @@ export class CardService {
     });
   }
 
+  /**
+   * Carteira pública servida por token do QR, SEM autenticação (api#114).
+   * Expõe apenas o subconjunto seguro para verificação de emergência
+   * (identificação do pet/tutor + histórico de vacinas e vermífugos, sem
+   * texto livre). Dados clínicos sensíveis — notas clínicas
+   * (diagnóstico/prescrição/observações do vet), o `notes` de vacina/vermífugo
+   * e medicações em uso — NÃO são incluídos aqui; ficam restritos aos
+   * endpoints autenticados do tutor/veterinário.
+   *
+   * O `notes` de vacina/vermífugo é texto livre do vet — "portador de FIV,
+   * protocolo reduzido" já apareceu em produção — e por ser livre não dá para
+   * filtrar o que é sensível dentro dele. Some da carteira pública inteiro,
+   * mesmo tratamento que a api#114 deu a medicações e notas clínicas.
+   *
+   * O telefone do tutor é a exceção deliberada ao estreitamento da api#114:
+   * sem ele o QR na coleira identifica o pet perdido mas não deixa ninguém
+   * avisar o dono. Sai só quando o tutor preencheu o campo.
+   */
   async findPublicByToken(
     token: string,
-  ): Promise<CarteiraDigitalPublicWithNotesDto> {
-    const card = await this.prisma.carteiraDigital.findUnique({
-      where: { token },
-      include: {
-        pet: {
-          include: {
-            tutor: true,
-            vaccineRecords: { orderBy: { appliedAt: 'desc' } },
-            dewormingRecords: { orderBy: { appliedAt: 'desc' } },
-            medicationRecords: { orderBy: { startDate: 'desc' } },
-            notasClinicas: {
-              orderBy: { createdAt: 'desc' },
-              include: { veterinario: { select: { nome: true, crmv: true } } },
-            },
-          },
-        },
-      },
+  ): Promise<CarteiraDigitalPublicResponseDto> {
+    const card = await this.loadCardByToken(token);
+    return this.toCarteiraResponse(card, { comNotesDeVacinaEVermifugo: false });
+  }
+
+  /**
+   * Carteira vista por veterinário com CRMV verificado que possui o token do
+   * QR (api#113). Reaproveita a carteira pública e devolve, por cima, o que a
+   * api#114 tirou dela por ser sensível: medicações, notas clínicas e o
+   * `notes` de vacina/vermífugo (item 1 da auditoria de rotas públicas —
+   * texto livre do vet fica restrito a quem tem CRMV verificado).
+   *
+   * O controle de acesso mora nos guards da rota — aqui já se assume que o
+   * chamador foi autenticado, tem papel VET e está com o CRMV verificado.
+   */
+  async findClinicaByToken(
+    token: string,
+    veterinarioId: string,
+  ): Promise<CarteiraDigitalClinicaResponseDto> {
+    const card = await this.loadCardByToken(token);
+    const publica = this.toCarteiraResponse(card, {
+      comNotesDeVacinaEVermifugo: true,
     });
 
-    if (!card) {
-      throw new NotFoundException('Carteira digital not found');
-    }
-
-    const { pet } = card;
+    const [vet, medications, notas] = await Promise.all([
+      this.prisma.veterinario.findUnique({
+        where: { id: veterinarioId },
+        select: { crmv: true },
+      }),
+      this.prisma.medicationRecord.findMany({
+        where: { petId: publica.pet_id, deletedAt: null },
+        orderBy: { startDate: 'desc' },
+      }),
+      this.prisma.notaClinica.findMany({
+        where: { petId: publica.pet_id, deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
 
     return {
-      pet_id: pet.id,
-      pet_name: pet.name,
-      species: pet.species as unknown as Species,
-      breed: pet.breed ?? undefined,
-      sex: pet.sex as unknown as Sex,
-      birth_date: pet.birthDate
-        ? pet.birthDate.toISOString().split('T')[0]
-        : undefined,
-      weight: pet.weight ?? undefined,
-      photo_url: pet.photoUrl ?? undefined,
-      qr_code_url: card.qrCodeUrl ?? undefined,
-      tutor_name: pet.tutor.name,
-      vaccines: pet.vaccineRecords.map((r) => ({
-        id: r.id,
-        pet_id: r.petId,
-        vaccine_name: r.vaccineName,
-        applied_at: r.appliedAt.toISOString(),
-        next_dose_at: r.nextDoseAt?.toISOString(),
-        veterinarian_name: r.veterinarianName ?? undefined,
-        notes: r.notes ?? undefined,
-        created_at: r.createdAt,
-        updated_at: r.updatedAt,
-      })),
-      dewormings: pet.dewormingRecords.map((r) => ({
-        id: r.id,
-        pet_id: r.petId,
-        product_name: r.productName,
-        applied_at: r.appliedAt.toISOString(),
-        next_dose_at: r.nextDoseAt?.toISOString(),
-        veterinarian_name: r.veterinarianName ?? undefined,
-        notes: r.notes ?? undefined,
-        created_at: r.createdAt,
-        updated_at: r.updatedAt,
-      })),
-      medications: pet.medicationRecords.map((r) => ({
+      ...publica,
+      medications: medications.map((r) => ({
         id: r.id,
         pet_id: r.petId,
         medication_name: r.medicationName,
@@ -155,12 +189,15 @@ export class CardService {
         created_at: r.createdAt,
         updated_at: r.updatedAt,
       })),
-      clinical_notes: pet.notasClinicas.map((n) => ({
+      // Assinatura lida da própria nota: a carteira continua mostrando quem
+      // diagnosticou mesmo depois que a conta daquele veterinário sumiu
+      // (ADR-009). Só `veterinario_id` fica ausente nesse caso.
+      clinical_notes: notas.map((n) => ({
         id: n.id,
         pet_id: n.petId,
-        veterinario_id: n.veterinarioId,
-        veterinario_nome: n.veterinario.nome,
-        veterinario_crmv: n.veterinario.crmv,
+        veterinario_id: n.veterinarioId ?? undefined,
+        veterinario_nome: n.veterinarioNome,
+        veterinario_crmv: n.veterinarioCrmv,
         google_place_id: n.googlePlaceId ?? undefined,
         diagnostico: n.diagnostico,
         prescricao: n.prescricao ?? undefined,
@@ -168,7 +205,7 @@ export class CardService {
         created_at: n.createdAt,
         updated_at: n.updatedAt,
       })),
-      issued_at: card.createdAt,
+      accessed_by_crmv: vet?.crmv ?? '',
     };
   }
 
@@ -183,19 +220,16 @@ export class CardService {
         tutor: true,
         carteiraDigital: true,
         vaccineRecords: {
-          select: {
-            nextDoseAt: true,
-          },
+          where: { deletedAt: null },
+          select: { nextDoseAt: true },
         },
         dewormingRecords: {
-          select: {
-            nextDoseAt: true,
-          },
+          where: { deletedAt: null },
+          select: { nextDoseAt: true },
         },
         medicationRecords: {
-          select: {
-            endDate: true,
-          },
+          where: { deletedAt: null },
+          select: { endDate: true },
         },
       },
     });
@@ -216,6 +250,8 @@ export class CardService {
         update: {},
       }));
 
+    const timeZone = pet.tutor.timezone;
+
     return {
       pet_id: pet.id,
       pet_name: pet.name,
@@ -233,26 +269,115 @@ export class CardService {
       tutor_name: pet.tutor.name,
       vaccines_count: pet.vaccineRecords.length,
       upcoming_vaccines_count: pet.vaccineRecords.filter((record) =>
-        isFutureOrToday(record.nextDoseAt),
+        isFutureOrTodayInTimeZone(record.nextDoseAt, timeZone),
       ).length,
       dewormings_count: pet.dewormingRecords.length,
       upcoming_dewormings_count: pet.dewormingRecords.filter((record) =>
-        isFutureOrToday(record.nextDoseAt),
+        isFutureOrTodayInTimeZone(record.nextDoseAt, timeZone),
       ).length,
       medications_count: pet.medicationRecords.length,
       active_medications_count: pet.medicationRecords.filter((record) =>
-        isMedicationActive(record.endDate),
+        isMedicationActive(record.endDate, timeZone),
       ).length,
       issued_at: card.createdAt,
     };
   }
 
-  private buildPublicUrl(token: string): string {
-    const baseUrl = this.configService.get<string>(
+  /** Busca a carteira + pet + vacinas/vermífugos vivos, comuns à carteira pública e à clínica. */
+  private async loadCardByToken(token: string) {
+    const card = await this.prisma.carteiraDigital.findUnique({
+      where: { token },
+      include: {
+        pet: {
+          include: {
+            tutor: true,
+            vaccineRecords: {
+              where: { deletedAt: null },
+              orderBy: { appliedAt: 'desc' },
+            },
+            dewormingRecords: {
+              where: { deletedAt: null },
+              orderBy: { appliedAt: 'desc' },
+            },
+          },
+        },
+      },
+    });
+
+    if (!card) {
+      throw new NotFoundException('Carteira digital not found');
+    }
+
+    return card;
+  }
+
+  /**
+   * Monta a resposta base, comum à carteira pública e à clínica.
+   *
+   * `comNotesDeVacinaEVermifugo` é `false` na carteira pública (item 1 da
+   * auditoria de rotas públicas) e `true` na clínica: o texto livre do vet só
+   * é seguro para quem tem CRMV verificado.
+   */
+  private toCarteiraResponse(
+    card: Awaited<ReturnType<CardService['loadCardByToken']>>,
+    { comNotesDeVacinaEVermifugo }: { comNotesDeVacinaEVermifugo: boolean },
+  ): CarteiraDigitalPublicResponseDto {
+    const { pet } = card;
+
+    return {
+      pet_id: pet.id,
+      pet_name: pet.name,
+      species: pet.species as unknown as Species,
+      breed: pet.breed ?? undefined,
+      sex: pet.sex as unknown as Sex,
+      birth_date: pet.birthDate
+        ? pet.birthDate.toISOString().split('T')[0]
+        : undefined,
+      weight: pet.weight ?? undefined,
+      photo_url: pet.photoUrl ?? undefined,
+      qr_code_url: card.qrCodeUrl ?? undefined,
+      tutor_name: pet.tutor.name,
+      tutor_phone: pet.tutor.phone ?? undefined,
+      vaccines: pet.vaccineRecords.map((r) => ({
+        id: r.id,
+        pet_id: r.petId,
+        vaccine_name: r.vaccineName,
+        applied_at: r.appliedAt.toISOString(),
+        next_dose_at: r.nextDoseAt?.toISOString(),
+        veterinarian_name: r.veterinarianName ?? undefined,
+        notes: comNotesDeVacinaEVermifugo ? (r.notes ?? undefined) : undefined,
+        created_at: r.createdAt,
+        updated_at: r.updatedAt,
+      })),
+      dewormings: pet.dewormingRecords.map((r) => ({
+        id: r.id,
+        pet_id: r.petId,
+        product_name: r.productName,
+        applied_at: r.appliedAt.toISOString(),
+        next_dose_at: r.nextDoseAt?.toISOString(),
+        veterinarian_name: r.veterinarianName ?? undefined,
+        notes: comNotesDeVacinaEVermifugo ? (r.notes ?? undefined) : undefined,
+        created_at: r.createdAt,
+        updated_at: r.updatedAt,
+      })),
+      // Medicações omitidas da carteira pública (api#114): revelam condições
+      // de saúde em tratamento. Ficam só nos endpoints autenticados. O campo é
+      // mantido (vazio) por compatibilidade com o DTO/consumidores (web); a
+      // clínica (findClinicaByToken) sobrescreve com as de verdade.
+      medications: [],
+      issued_at: card.createdAt,
+    };
+  }
+
+  private publicBaseUrl(): string {
+    return this.configService.get<string>(
       'card.publicBaseUrl',
-      'https://card.petcard.app/#',
+      'https://card.petcard.app/#/card',
     );
-    return `${baseUrl.replace(/\/+$/, '')}/${token}`;
+  }
+
+  private buildPublicUrl(token: string): string {
+    return `${this.publicBaseUrl().replace(/\/+$/, '')}/${token}`;
   }
 
   private async generateBuffer(data: string): Promise<Buffer> {

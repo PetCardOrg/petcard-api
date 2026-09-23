@@ -1,6 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import request from 'supertest';
 import {
+  acaoClinicaProvider,
+  comTransacao,
+} from '../../../../../test/utils/acao-clinica';
+import {
   createControllerTestApp,
   ControllerHarness,
   TUTOR,
@@ -8,22 +12,29 @@ import {
 } from '../../../../../test/utils/controller-harness';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { QrCodePublisher } from '../../../queue/qr-code.publisher';
+import { CardService } from '../../../card/card.service';
+import { ColeiraService } from '../../../coleira/coleira.service';
 import { PetService } from '../../../pet/pet.service';
 import { TutorService } from '../../../tutor/tutor.service';
+import { UploadService } from '../../../upload/upload.service';
 import { MedicationController } from '../medication.controller';
+import { CrmvVerificationService } from '../../../veterinario/crmv/crmv-verification.service';
 import { MedicationService } from '../medication.service';
 
 describe('MedicationController (integração)', () => {
   let harness: ControllerHarness;
   let prisma: {
     pet: { findUnique: jest.Mock };
+    veterinario: { findUnique: jest.Mock };
     medicationRecord: {
       create: jest.Mock;
       findMany: jest.Mock;
-      findUnique: jest.Mock;
+      findFirst: jest.Mock;
       update: jest.Mock;
       delete: jest.Mock;
     };
+    petAtendido: { findUnique: jest.Mock };
+    notification: { deleteMany: jest.Mock };
   };
 
   const pet = { id: 'pet-1', tutorId: 'tutor-1' };
@@ -43,25 +54,44 @@ describe('MedicationController (integração)', () => {
   beforeAll(async () => {
     prisma = {
       pet: { findUnique: jest.fn() },
+      // O create assina a prescrição com o nome do vet logado (web#34).
+      veterinario: {
+        findUnique: jest.fn().mockResolvedValue({ nome: 'Dra. Camila' }),
+      },
       medicationRecord: {
         create: jest.fn(),
         findMany: jest.fn(),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
       },
+      petAtendido: { findUnique: jest.fn() },
+      notification: { deleteMany: jest.fn() },
     };
+
+    comTransacao(prisma);
 
     harness = await createControllerTestApp({
       controllers: [MedicationController],
       providers: [
+        acaoClinicaProvider().provider,
         MedicationService,
         PetService,
         TutorService,
+        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
         { provide: PrismaService, useValue: prisma },
         {
           provide: QrCodePublisher,
           useValue: { publishGenerate: jest.fn() },
+        },
+        { provide: CardService, useValue: { rotateTokenForPet: jest.fn() } },
+        { provide: ColeiraService, useValue: { rotateTokenForPet: jest.fn() } },
+        {
+          // O guard real roda; só a consulta de verificação é mockada.
+          provide: CrmvVerificationService,
+          useValue: {
+            getStatus: jest.fn().mockResolvedValue({ verified: true }),
+          },
         },
       ],
     });
@@ -75,6 +105,8 @@ describe('MedicationController (integração)', () => {
     jest.clearAllMocks();
     harness.setUser(TUTOR);
     prisma.pet.findUnique.mockResolvedValue(pet);
+    // Vínculo vet-pet presente por padrão; os casos de bloqueio zeram.
+    prisma.petAtendido.findUnique.mockResolvedValue({ id: 'vinculo-1' });
   });
 
   const validBody = {
@@ -97,7 +129,7 @@ describe('MedicationController (integração)', () => {
     expect(res.body.medication_name).toBe('Amoxicilina');
   });
 
-  it('POST permite VET registrar em qualquer pet (201)', async () => {
+  it('POST permite ao VET que atende o pet registrar (201)', async () => {
     harness.setUser(VET);
     prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'outro' });
     prisma.medicationRecord.create.mockResolvedValue(record);
@@ -106,6 +138,21 @@ describe('MedicationController (integração)', () => {
       .post('/pets/pet-1/medications')
       .send(validBody)
       .expect(201);
+  });
+
+  it('POST barra o VET que não atende o pet (403)', async () => {
+    // O papel VET, sozinho, não abre o prontuário: sem a leitura do QR Code
+    // o pet não está na lista dele.
+    harness.setUser(VET);
+    prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'outro' });
+    prisma.petAtendido.findUnique.mockResolvedValue(null);
+
+    await request(harness.app.getHttpServer())
+      .post('/pets/pet-1/medications')
+      .send(validBody)
+      .expect(403);
+
+    expect(prisma.medicationRecord.create).not.toHaveBeenCalled();
   });
 
   it('POST rejeita payload inválido (400)', async () => {
@@ -128,7 +175,7 @@ describe('MedicationController (integração)', () => {
   });
 
   it('PATCH atualiza o registro (200)', async () => {
-    prisma.medicationRecord.findUnique.mockResolvedValue(record);
+    prisma.medicationRecord.findFirst.mockResolvedValue(record);
     prisma.medicationRecord.update.mockResolvedValue({
       ...record,
       dosage: '250mg',
@@ -143,7 +190,7 @@ describe('MedicationController (integração)', () => {
   });
 
   it('DELETE remove o registro do dono (204)', async () => {
-    prisma.medicationRecord.findUnique.mockResolvedValue(record);
+    prisma.medicationRecord.findFirst.mockResolvedValue(record);
     prisma.medicationRecord.delete.mockResolvedValue(record);
 
     await request(harness.app.getHttpServer())
@@ -151,11 +198,26 @@ describe('MedicationController (integração)', () => {
       .expect(204);
   });
 
-  it('DELETE é proibido para VET (403)', async () => {
+  it('DELETE é proibido ao VET sobre registro do tutor (403)', async () => {
+    // O que o tutor declarou não é do veterinário para apagar (web#34).
     harness.setUser(VET);
+    prisma.medicationRecord.findFirst.mockResolvedValue(record);
 
     await request(harness.app.getHttpServer())
       .delete('/medications/med-1')
       .expect(403);
+
+    expect(prisma.medicationRecord.update).not.toHaveBeenCalled();
+  });
+
+  it('DELETE permite ao VET remover a própria prescrição (204)', async () => {
+    harness.setUser(VET);
+    const prescricao = { ...record, veterinarioId: 'vet-1' };
+    prisma.medicationRecord.findFirst.mockResolvedValue(prescricao);
+    prisma.medicationRecord.update.mockResolvedValue(prescricao);
+
+    await request(harness.app.getHttpServer())
+      .delete('/medications/med-1')
+      .expect(204);
   });
 });

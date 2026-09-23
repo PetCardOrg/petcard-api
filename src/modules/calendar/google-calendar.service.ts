@@ -1,11 +1,35 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { google, calendar_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
+import { Appointment } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EncryptionService } from '../../common/crypto/encryption.service';
+import { resolveTimeZone } from '../../common/time/timezone';
+import { isAlreadyGoneError } from './google-api-error';
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
+
+interface CalendarEventInput {
+  title: string;
+  description?: string;
+  startTime: Date;
+  durationMinutes: number;
+  location?: string;
+}
+
+/** Validade assumida quando o Google não informa expiry_date. */
+const DEFAULT_TOKEN_TTL_MS = 3_600_000;
+
+/** Janela de vida do `state` do OAuth — tempo de dar o consentimento. */
+const STATE_TTL_MS = 10 * 60 * 1000;
 
 @Injectable()
 export class GoogleCalendarService {
@@ -25,6 +49,65 @@ export class GoogleCalendarService {
       this.configService.get<string>('googleCalendar.clientSecret') ?? '';
     this.redirectUri =
       this.configService.get<string>('googleCalendar.redirectUri') ?? '';
+  }
+
+  /**
+   * Assina o `state` do OAuth com o id do tutor, um nonce e um prazo.
+   *
+   * O `state` viajava como o id do tutor em texto puro, e o callback é uma
+   * rota pública: bastava chamar `/calendar/callback?code=<código do
+   * atacante>&state=<id da vítima>` para pendurar a agenda do atacante na
+   * conta da vítima — e passar a receber, no Google Calendar dele, todos os
+   * compromissos que ela criasse. Sem assinatura o parâmetro não prova nada
+   * sobre quem começou o fluxo.
+   */
+  private signState(tutorId: string): string {
+    const nonce = randomBytes(16).toString('base64url');
+    const expiresAt = Date.now() + STATE_TTL_MS;
+    const payload = `${tutorId}.${nonce}.${expiresAt}`;
+    return `${payload}.${this.stateSignature(payload)}`;
+  }
+
+  /**
+   * Confere a assinatura e o prazo do `state` e devolve o tutor de origem.
+   * Qualquer inconsistência derruba o fluxo antes de trocar o código.
+   */
+  resolveState(state: string): string {
+    const partes = state?.split('.') ?? [];
+    if (partes.length !== 4) {
+      throw new BadRequestException('Parâmetro state inválido.');
+    }
+
+    const [tutorId, nonce, expiresAtRaw, assinatura] = partes;
+    const esperada = this.stateSignature(`${tutorId}.${nonce}.${expiresAtRaw}`);
+
+    const recebida = Buffer.from(assinatura);
+    const referencia = Buffer.from(esperada);
+    if (
+      recebida.length !== referencia.length ||
+      !timingSafeEqual(recebida, referencia)
+    ) {
+      throw new BadRequestException('Parâmetro state inválido.');
+    }
+
+    const expiresAt = Number(expiresAtRaw);
+    if (!Number.isFinite(expiresAt) || Date.now() > expiresAt) {
+      throw new BadRequestException(
+        'A autorização expirou. Inicie a conexão pelo app novamente.',
+      );
+    }
+
+    return tutorId;
+  }
+
+  private stateSignature(payload: string): string {
+    const secret = this.configService.get<string>('auth.jwtSecret');
+    if (!secret) {
+      throw new Error(
+        'JWT_SECRET é obrigatória para assinar o state do OAuth.',
+      );
+    }
+    return createHmac('sha256', secret).update(payload).digest('base64url');
   }
 
   private get isConfigured(): boolean {
@@ -47,31 +130,82 @@ export class GoogleCalendarService {
       access_type: 'offline',
       scope: SCOPES,
       prompt: 'consent',
-      state: tutorId,
+      state: this.signState(tutorId),
     });
   }
 
   async handleCallback(code: string, tutorId: string): Promise<void> {
+    if (!this.isConfigured) {
+      throw new ServiceUnavailableException(
+        'Integração com o Google Calendar não está configurada no servidor.',
+      );
+    }
+
+    // O código do Google é de uso único: valida a chave antes de trocá-lo, senão
+    // o usuário precisa refazer o consentimento por uma falha de configuração.
+    this.encryption.assertConfigured();
+
     const oauth2Client = this.createOAuth2Client();
     const { tokens } = await oauth2Client.getToken(code);
+
+    if (!tokens.access_token) {
+      throw new BadGatewayException(
+        'O Google não devolveu um access token para esta autorização.',
+      );
+    }
+
+    // O refresh token só vem no primeiro consentimento. Numa reconexão, o Google
+    // pode omiti-lo — nesse caso mantemos o que já está salvo.
+    const novoRefreshToken = tokens.refresh_token
+      ? this.encryption.encrypt(tokens.refresh_token)
+      : undefined;
+
+    const existente = await this.prisma.googleOAuthToken.findUnique({
+      where: { tutorId },
+      select: { refreshToken: true },
+    });
+
+    const refreshTokenParaCriar = novoRefreshToken ?? existente?.refreshToken;
+    if (!refreshTokenParaCriar) {
+      throw new BadGatewayException(
+        'O Google não devolveu um refresh token. Remova o acesso do PetCard em ' +
+          'myaccount.google.com/permissions e conecte novamente.',
+      );
+    }
+
+    const accessToken = this.encryption.encrypt(tokens.access_token);
+    const expiresAt = tokens.expiry_date
+      ? new Date(tokens.expiry_date)
+      : new Date(Date.now() + DEFAULT_TOKEN_TTL_MS);
 
     await this.prisma.googleOAuthToken.upsert({
       where: { tutorId },
       update: {
-        accessToken: this.encryption.encrypt(tokens.access_token!),
-        refreshToken: tokens.refresh_token
-          ? this.encryption.encrypt(tokens.refresh_token)
-          : undefined,
-        expiresAt: new Date(tokens.expiry_date!),
+        accessToken,
+        // undefined preserva o refresh token já salvo.
+        refreshToken: novoRefreshToken,
+        expiresAt,
         scopes: SCOPES,
       },
       create: {
         tutorId,
-        accessToken: this.encryption.encrypt(tokens.access_token!),
-        refreshToken: this.encryption.encrypt(tokens.refresh_token!),
-        expiresAt: new Date(tokens.expiry_date!),
+        accessToken,
+        refreshToken: refreshTokenParaCriar,
+        expiresAt,
         scopes: SCOPES,
       },
+    });
+
+    // Recupera o que ficou para trás enquanto não havia conexão válida. Sem
+    // isso, quem reconecta depois de uma revogação nunca mais veria esses
+    // agendamentos na agenda — não há mais botão de sincronizar no app.
+    // Fora do caminho da resposta: a página de sucesso não espera o catch-up.
+    void this.syncAllPending(tutorId).catch((error: unknown) => {
+      this.logger.warn(
+        `Catch-up de sincronização falhou para o tutor ${tutorId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     });
   }
 
@@ -91,13 +225,8 @@ export class GoogleCalendarService {
   async createEvent(
     tutorId: string,
     appointmentId: string,
-    event: {
-      title: string;
-      description?: string;
-      startTime: Date;
-      durationMinutes: number;
-      location?: string;
-    },
+    event: CalendarEventInput,
+    timeZone?: string,
   ): Promise<void> {
     const calendar = await this.getCalendarClient(tutorId);
     if (!calendar) return;
@@ -107,10 +236,9 @@ export class GoogleCalendarService {
         event.startTime.getTime() + event.durationMinutes * 60_000,
       );
 
-      const tutor = await this.prisma.tutor.findUnique({
-        where: { id: tutorId },
-        select: { timezone: true },
-      });
+      // O fuso pode vir pronto de quem chama em laço (`syncAllPending`), que já
+      // o buscou uma vez para o tutor inteiro.
+      const tz = timeZone ?? (await this.tutorTimeZone(tutorId));
 
       const res = await calendar.events.insert({
         calendarId: 'primary',
@@ -119,11 +247,11 @@ export class GoogleCalendarService {
           description: event.description,
           start: {
             dateTime: event.startTime.toISOString(),
-            timeZone: tutor?.timezone ?? 'America/Fortaleza',
+            timeZone: tz,
           },
           end: {
             dateTime: endTime.toISOString(),
-            timeZone: tutor?.timezone ?? 'America/Fortaleza',
+            timeZone: tz,
           },
           location: event.location,
           reminders: {
@@ -169,18 +297,20 @@ export class GoogleCalendarService {
   async updateEvent(
     tutorId: string,
     appointmentId: string,
-    event: {
-      title: string;
-      description?: string;
-      startTime: Date;
-      durationMinutes: number;
-      location?: string;
-    },
+    event: CalendarEventInput,
+    timeZone?: string,
+    googleEventId?: string,
   ): Promise<void> {
-    const appointment = await this.prisma.appointment.findUnique({
-      where: { id: appointmentId },
-    });
-    if (!appointment?.googleEventId) return;
+    // O id do evento pode vir de quem já carregou o appointment (`syncAllPending`).
+    const eventId =
+      googleEventId ??
+      (
+        await this.prisma.appointment.findUnique({
+          where: { id: appointmentId },
+          select: { googleEventId: true },
+        })
+      )?.googleEventId;
+    if (!eventId) return;
 
     const calendar = await this.getCalendarClient(tutorId);
     if (!calendar) return;
@@ -190,24 +320,21 @@ export class GoogleCalendarService {
         event.startTime.getTime() + event.durationMinutes * 60_000,
       );
 
-      const tutor = await this.prisma.tutor.findUnique({
-        where: { id: tutorId },
-        select: { timezone: true },
-      });
+      const tz = timeZone ?? (await this.tutorTimeZone(tutorId));
 
       const res = await calendar.events.update({
         calendarId: 'primary',
-        eventId: appointment.googleEventId,
+        eventId,
         requestBody: {
           summary: event.title,
           description: event.description,
           start: {
             dateTime: event.startTime.toISOString(),
-            timeZone: tutor?.timezone ?? 'America/Fortaleza',
+            timeZone: tz,
           },
           end: {
             dateTime: endTime.toISOString(),
-            timeZone: tutor?.timezone ?? 'America/Fortaleza',
+            timeZone: tz,
           },
           location: event.location,
         },
@@ -248,6 +375,14 @@ export class GoogleCalendarService {
         eventId: googleEventId,
       });
     } catch (error) {
+      // Apagar é idempotente: se o evento já não está lá, o objetivo foi
+      // atingido. Sem isso, apagar duas vezes virava erro, 3 retries e DLQ.
+      if (isAlreadyGoneError(error)) {
+        this.logger.log(
+          `Calendar event ${googleEventId} já não existe no Google; nada a apagar`,
+        );
+        return;
+      }
       this.logger.error(
         `Failed to delete calendar event ${googleEventId}`,
         error instanceof Error ? error.stack : error,
@@ -259,11 +394,25 @@ export class GoogleCalendarService {
   async syncAppointment(tutorId: string, appointmentId: string): Promise<void> {
     const appointment = await this.prisma.appointment.findUnique({
       where: { id: appointmentId },
-      include: { pet: { select: { name: true } } },
     });
     if (!appointment) return;
 
-    const event = {
+    await this.syncOne(tutorId, appointment);
+  }
+
+  /**
+   * Sincroniza um agendamento já carregado.
+   *
+   * Existe para o laço do `syncAllPending` não refazer, por item, o
+   * `findUnique` do agendamento que o `findMany` acabou de trazer nem a busca
+   * do fuso do tutor, que é o mesmo para a leva inteira.
+   */
+  private async syncOne(
+    tutorId: string,
+    appointment: Appointment,
+    timeZone?: string,
+  ): Promise<void> {
+    const event: CalendarEventInput = {
       title: appointment.title,
       description: appointment.description ?? undefined,
       startTime: appointment.scheduledAt,
@@ -272,12 +421,27 @@ export class GoogleCalendarService {
     };
 
     if (appointment.googleEventId) {
-      await this.updateEvent(tutorId, appointmentId, event);
+      await this.updateEvent(
+        tutorId,
+        appointment.id,
+        event,
+        timeZone,
+        appointment.googleEventId,
+      );
     } else {
-      await this.createEvent(tutorId, appointmentId, event);
+      await this.createEvent(tutorId, appointment.id, event, timeZone);
     }
   }
 
+  /**
+   * Sincroniza o que ficou pendente e devolve quantos realmente foram parar na
+   * agenda do Google.
+   *
+   * Contava `pending.length`, o tamanho da fila de entrada: com o token
+   * revogado, todas as chamadas falhavam e o `POST /calendar/sync` ainda
+   * respondia `{synced: 12}` — o app dizia ao tutor que sincronizou quando não
+   * criou evento nenhum. O que o tutor precisa saber é quantos deram certo.
+   */
   async syncAllPending(tutorId: string): Promise<number> {
     const connected = await this.isConnected(tutorId);
     if (!connected) return 0;
@@ -288,10 +452,15 @@ export class GoogleCalendarService {
         syncStatus: { in: ['PENDING_CREATE', 'PENDING_UPDATE', 'FAILED'] },
       },
     });
+    if (pending.length === 0) return 0;
 
+    const timeZone = await this.tutorTimeZone(tutorId);
+
+    let synced = 0;
     for (const appointment of pending) {
       try {
-        await this.syncAppointment(tutorId, appointment.id);
+        await this.syncOne(tutorId, appointment, timeZone);
+        synced++;
       } catch (error) {
         // syncStatus=FAILED is already persisted inside createEvent/updateEvent.
         this.logger.warn(
@@ -302,7 +471,21 @@ export class GoogleCalendarService {
       }
     }
 
-    return pending.length;
+    if (synced < pending.length) {
+      this.logger.warn(
+        `Sync do tutor ${tutorId}: ${synced}/${pending.length} agendamento(s) sincronizado(s)`,
+      );
+    }
+    return synced;
+  }
+
+  /** Fuso do tutor, com o padrão do projeto quando a conta não tem um. */
+  private async tutorTimeZone(tutorId: string): Promise<string> {
+    const tutor = await this.prisma.tutor.findUnique({
+      where: { id: tutorId },
+      select: { timezone: true },
+    });
+    return resolveTimeZone(tutor?.timezone);
   }
 
   private async getCalendarClient(

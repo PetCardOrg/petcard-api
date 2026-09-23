@@ -3,7 +3,12 @@ import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types';
 import request from 'supertest';
 import { createE2EApp, E2EApp } from '../utils/e2e-app';
-import { createAndLoginVet, registerTutor, resetDb } from '../utils/e2e-db';
+import {
+  createAndLoginVet,
+  registerTutor,
+  resetDb,
+  vincularPetAoVet,
+} from '../utils/e2e-db';
 import { PrismaService } from '../../src/prisma/prisma.service';
 
 describe('Pet + prontuário (e2e)', () => {
@@ -107,14 +112,26 @@ describe('Pet + prontuário (e2e)', () => {
       .expect(403);
   });
 
-  it('permite que o VET leia o pet de qualquer tutor (200)', async () => {
+  it('permite que o VET leia o pet que ele atende (200)', async () => {
+    const petId = await createPet();
+    const vet = await createAndLoginVet(app, prisma);
+    await vincularPetAoVet(prisma, vet.user.id, petId);
+
+    await request(app.getHttpServer())
+      .get(`/pets/${petId}`)
+      .set('Authorization', `Bearer ${vet.token}`)
+      .expect(200);
+  });
+
+  it('proíbe o VET de ler pet que não atende (403)', async () => {
+    // Conhecer o id não é autorização: o vínculo vem da leitura do QR Code.
     const petId = await createPet();
     const { token: vetToken } = await createAndLoginVet(app, prisma);
 
     await request(app.getHttpServer())
       .get(`/pets/${petId}`)
       .set('Authorization', `Bearer ${vetToken}`)
-      .expect(200);
+      .expect(403);
   });
 
   it('proíbe o VET de criar pet (403)', async () => {

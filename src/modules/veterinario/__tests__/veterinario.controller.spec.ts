@@ -3,12 +3,13 @@ import request from 'supertest';
 import {
   createControllerTestApp,
   ControllerHarness,
-  TUTOR,
   VET,
 } from '../../../../test/utils/controller-harness';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { UploadService } from '../../upload/upload.service';
 import { VeterinarioController } from '../veterinario.controller';
 import { VeterinarioService } from '../veterinario.service';
+import { CrmvVerificationService } from '../crmv/crmv-verification.service';
 
 describe('VeterinarioController (integração)', () => {
   let harness: ControllerHarness;
@@ -20,9 +21,16 @@ describe('VeterinarioController (integração)', () => {
       update: jest.Mock;
       delete: jest.Mock;
     };
-    notaClinica: { findMany: jest.Mock };
-    pet: { findMany: jest.Mock };
+    petAtendido: {
+      count: jest.Mock;
+      findMany: jest.Mock;
+      findUnique: jest.Mock;
+      upsert: jest.Mock;
+      delete: jest.Mock;
+    };
+    carteiraDigital: { findUnique: jest.Mock };
   };
+  let crmv: { getStatus: jest.Mock; verify: jest.Mock };
 
   const vet = {
     id: 'vet-1',
@@ -44,8 +52,18 @@ describe('VeterinarioController (integração)', () => {
         update: jest.fn(),
         delete: jest.fn(),
       },
-      notaClinica: { findMany: jest.fn() },
-      pet: { findMany: jest.fn() },
+      petAtendido: {
+        count: jest.fn().mockResolvedValue(0),
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn(),
+        delete: jest.fn(),
+      },
+      carteiraDigital: { findUnique: jest.fn() },
+    };
+    crmv = {
+      getStatus: jest.fn().mockResolvedValue({ verified: false }),
+      verify: jest.fn().mockResolvedValue({ verified: true }),
     };
 
     harness = await createControllerTestApp({
@@ -53,6 +71,8 @@ describe('VeterinarioController (integração)', () => {
       providers: [
         VeterinarioService,
         { provide: PrismaService, useValue: prisma },
+        { provide: CrmvVerificationService, useValue: crmv },
+        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
       ],
     });
   });
@@ -66,92 +86,48 @@ describe('VeterinarioController (integração)', () => {
     harness.setUser(VET);
   });
 
-  describe('POST /veterinarios', () => {
-    it('cria um veterinário e não expõe o password (201)', async () => {
-      prisma.veterinario.findUnique.mockResolvedValue(null);
-      prisma.veterinario.create.mockResolvedValue(vet);
-
+  describe('CRMV do próprio veterinário', () => {
+    it('GET /veterinarios/me/crmv devolve a situação (200)', async () => {
       const res = await request(harness.app.getHttpServer())
-        .post('/veterinarios')
-        .send({
-          nome: 'Dra. Vet',
-          email: 'vet@petcard.com',
-          password: 'senha-forte',
-          crmv: 'CRMV-123',
-        })
-        .expect(201);
-
-      expect(res.body.id).toBe('vet-1');
-      expect(res.body.password).toBeUndefined();
-    });
-
-    it('proíbe TUTOR de criar veterinário (403)', async () => {
-      harness.setUser(TUTOR);
-
-      await request(harness.app.getHttpServer())
-        .post('/veterinarios')
-        .send({
-          nome: 'Dra. Vet',
-          email: 'vet@petcard.com',
-          password: 'senha-forte',
-          crmv: 'CRMV-123',
-        })
-        .expect(403);
-    });
-
-    it('rejeita payload inválido (400)', async () => {
-      await request(harness.app.getHttpServer())
-        .post('/veterinarios')
-        .send({ nome: 'Dra. Vet' })
-        .expect(400);
-
-      expect(prisma.veterinario.create).not.toHaveBeenCalled();
-    });
-
-    it('rejeita email já cadastrado (409)', async () => {
-      prisma.veterinario.findUnique.mockResolvedValue({
-        ...vet,
-        id: 'outro',
-      });
-
-      await request(harness.app.getHttpServer())
-        .post('/veterinarios')
-        .send({
-          nome: 'Dra. Vet',
-          email: 'vet@petcard.com',
-          password: 'senha-forte',
-          crmv: 'CRMV-123',
-        })
-        .expect(409);
-    });
-  });
-
-  describe('GET /veterinarios', () => {
-    it('lista os veterinários (200)', async () => {
-      prisma.veterinario.findMany.mockResolvedValue([vet]);
-
-      const res = await request(harness.app.getHttpServer())
-        .get('/veterinarios')
+        .get('/veterinarios/me/crmv')
         .expect(200);
 
-      expect(res.body).toHaveLength(1);
-      expect(res.body[0].password).toBeUndefined();
+      expect(res.body.verified).toBe(false);
+    });
+
+    it('POST /veterinarios/me/crmv/verificar dispara a consulta (200)', async () => {
+      const res = await request(harness.app.getHttpServer())
+        .post('/veterinarios/me/crmv/verificar')
+        .expect(200);
+
+      expect(res.body.verified).toBe(true);
+      expect(crmv.verify).toHaveBeenCalledWith('vet-1', false);
+    });
+
+    it('POST .../verificar?force=true reconsulta mesmo dentro do prazo', async () => {
+      await request(harness.app.getHttpServer())
+        .post('/veterinarios/me/crmv/verificar?force=true')
+        .expect(200);
+
+      expect(crmv.verify).toHaveBeenCalledWith('vet-1', true);
     });
   });
 
   describe('GET /veterinarios/dashboard/pets', () => {
     it('retorna os pets atendidos paginados (200)', async () => {
-      prisma.notaClinica.findMany.mockResolvedValue([
-        { petId: 'pet-1', createdAt: new Date('2026-02-01') },
-      ]);
-      prisma.pet.findMany.mockResolvedValue([
+      prisma.petAtendido.count.mockResolvedValue(1);
+      prisma.petAtendido.findMany.mockResolvedValue([
         {
-          id: 'pet-1',
-          name: 'Rex',
-          species: 'DOG',
-          breed: null,
-          photoUrl: null,
-          tutor: { name: 'Alice' },
+          id: 'v-1',
+          ultimoAcessoEm: new Date('2026-02-01'),
+          pet: {
+            id: 'pet-1',
+            name: 'Rex',
+            species: 'DOG',
+            breed: null,
+            photoUrl: null,
+            tutor: { name: 'Alice' },
+          },
         },
       ]);
 
@@ -170,28 +146,69 @@ describe('VeterinarioController (integração)', () => {
     });
   });
 
-  describe('GET /veterinarios/:id', () => {
-    it('retorna o veterinário (200)', async () => {
-      prisma.veterinario.findUnique.mockResolvedValue(vet);
-
-      const res = await request(harness.app.getHttpServer())
-        .get('/veterinarios/vet-1')
-        .expect(200);
-
-      expect(res.body.id).toBe('vet-1');
+  describe('POST /veterinarios/me/pets', () => {
+    beforeEach(() => {
+      crmv.getStatus.mockResolvedValue({ verified: true });
+      prisma.carteiraDigital.findUnique.mockResolvedValue({
+        petId: 'pet-1',
+        pet: { id: 'pet-1', name: 'Rex' },
+      });
+      prisma.petAtendido.upsert.mockResolvedValue({
+        id: 'v-1',
+        createdAt: new Date('2026-08-19'),
+      });
     });
 
-    it('retorna 404 para id inexistente', async () => {
-      prisma.veterinario.findUnique.mockResolvedValue(null);
+    it('adiciona o pet lido no QR à lista do veterinário (200)', async () => {
+      const res = await request(harness.app.getHttpServer())
+        .post('/veterinarios/me/pets')
+        .send({ token: 'token-abc' })
+        .expect(200);
+
+      expect(res.body).toMatchObject({ pet_id: 'pet-1', novo: true });
+    });
+
+    it('recusa veterinário sem CRMV verificado (403)', async () => {
+      crmv.getStatus.mockResolvedValue({ verified: false });
 
       await request(harness.app.getHttpServer())
-        .get('/veterinarios/missing')
+        .post('/veterinarios/me/pets')
+        .send({ token: 'token-abc' })
+        .expect(403);
+    });
+
+    it('rejeita corpo sem token (400)', async () => {
+      await request(harness.app.getHttpServer())
+        .post('/veterinarios/me/pets')
+        .send({})
+        .expect(400);
+    });
+  });
+
+  describe('DELETE /veterinarios/me/pets/:petId', () => {
+    it('tira o pet da lista (204)', async () => {
+      prisma.petAtendido.findUnique.mockResolvedValue({ id: 'v-1' });
+
+      await request(harness.app.getHttpServer())
+        .delete('/veterinarios/me/pets/pet-1')
+        .expect(204);
+
+      expect(prisma.petAtendido.delete).toHaveBeenCalled();
+    });
+
+    it('404 quando o pet não está na lista', async () => {
+      // clearAllMocks zera chamadas, não implementações: sem isto o vínculo
+      // do teste anterior continuaria valendo.
+      prisma.petAtendido.findUnique.mockResolvedValue(null);
+
+      await request(harness.app.getHttpServer())
+        .delete('/veterinarios/me/pets/pet-alheio')
         .expect(404);
     });
   });
 
-  describe('PATCH /veterinarios/:id', () => {
-    it('atualiza o veterinário (200)', async () => {
+  describe('cadastro do próprio veterinário', () => {
+    it('PATCH /veterinarios/me altera quem está no token (200)', async () => {
       prisma.veterinario.findUnique.mockResolvedValue(vet);
       prisma.veterinario.update.mockResolvedValue({
         ...vet,
@@ -199,22 +216,55 @@ describe('VeterinarioController (integração)', () => {
       });
 
       const res = await request(harness.app.getHttpServer())
-        .patch('/veterinarios/vet-1')
+        .patch('/veterinarios/me')
         .send({ nome: 'Dra. Nova' })
         .expect(200);
 
       expect(res.body.nome).toBe('Dra. Nova');
+      expect(res.body).not.toHaveProperty('password');
+      // O alvo vem do token, nunca da rota: é o que impede um veterinário
+      // de editar o cadastro de outro.
+      expect(prisma.veterinario.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: VET.sub } }),
+      );
     });
-  });
 
-  describe('DELETE /veterinarios/:id', () => {
-    it('remove o veterinário (204)', async () => {
+    it('DELETE /veterinarios/me apaga a própria conta (204)', async () => {
       prisma.veterinario.findUnique.mockResolvedValue(vet);
       prisma.veterinario.delete.mockResolvedValue(vet);
 
       await request(harness.app.getHttpServer())
-        .delete('/veterinarios/vet-1')
+        .delete('/veterinarios/me')
         .expect(204);
+
+      expect(prisma.veterinario.delete).toHaveBeenCalledWith({
+        where: { id: VET.sub },
+      });
+    });
+
+    it('não expõe rota alguma para o cadastro de outro veterinário', async () => {
+      // Havia PATCH/DELETE /veterinarios/:id sem checagem de posse e GET
+      // /veterinarios devolvendo e-mail, telefone e CRMV de todo mundo.
+      await request(harness.app.getHttpServer())
+        .patch('/veterinarios/vet-2')
+        .send({ nome: 'Invadida' })
+        .expect(404);
+
+      await request(harness.app.getHttpServer())
+        .delete('/veterinarios/vet-2')
+        .expect(404);
+
+      await request(harness.app.getHttpServer())
+        .get('/veterinarios/vet-2')
+        .expect(404);
+
+      await request(harness.app.getHttpServer())
+        .get('/veterinarios')
+        .expect(404);
+
+      expect(prisma.veterinario.update).not.toHaveBeenCalled();
+      expect(prisma.veterinario.delete).not.toHaveBeenCalled();
+      expect(prisma.veterinario.findMany).not.toHaveBeenCalled();
     });
   });
 });

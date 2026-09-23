@@ -55,6 +55,19 @@ export class NotificationService {
     await this.prisma.deviceToken.deleteMany({ where: { token } });
   }
 
+  /**
+   * Status atual da notificação, ou `null` quando ela não existe mais (o
+   * cascade de exclusão do agendamento leva as notificações junto, api#112).
+   * É o que dá idempotência ao consumidor de push.
+   */
+  async findStatus(notificationId: string): Promise<NotificationStatus | null> {
+    const notification = await this.prisma.notification.findUnique({
+      where: { id: notificationId },
+      select: { status: true },
+    });
+    return notification?.status ?? null;
+  }
+
   async markSent(notificationId: string, fcmMessageId?: string): Promise<void> {
     await this.prisma.notification.update({
       where: { id: notificationId },

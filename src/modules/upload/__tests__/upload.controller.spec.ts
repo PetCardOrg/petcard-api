@@ -54,6 +54,17 @@ describe('UploadController (integração)', () => {
     expect(upload.uploadFile.mock.calls[0][1]).toBe('tutors');
   });
 
+  it('usa a pasta informada na query (vets)', async () => {
+    upload.uploadFile.mockResolvedValue('https://s3/vets/foto.png');
+
+    await request(harness.app.getHttpServer())
+      .post('/upload/image?folder=vets')
+      .attach('file', Buffer.from('fake-image'), 'foto.png')
+      .expect(201);
+
+    expect(upload.uploadFile.mock.calls[0][1]).toBe('vets');
+  });
+
   it('rejeita pasta inválida (400)', async () => {
     await request(harness.app.getHttpServer())
       .post('/upload/image?folder=hacker')

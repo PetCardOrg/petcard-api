@@ -3,19 +3,48 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import {
   CALENDAR_SYNC_DLQ_ROUTING_KEY,
-  CALENDAR_SYNC_DLX,
   NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
-  NOTIFICATION_PUSH_DLX,
   QR_CODE_DLQ_ROUTING_KEY,
-  QR_CODE_DLX,
 } from './modules/queue/queue.constants';
+
+/** Tamanho máximo de um corpo JSON aceito. Uploads vão por multipart. */
+const JSON_BODY_LIMIT = '1mb';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
+
+  // Cabeçalhos de segurança (HSTS, X-Content-Type-Options, frame-ancestors e
+  // afins). A API responde JSON e as duas páginas HTML do fluxo OAuth, que não
+  // carregam script externo — daí a CSP fechada.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'none'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          connectSrc: ["'self'"],
+          imgSrc: ["'self'", 'data:'],
+          formAction: ["'none'"],
+          frameAncestors: ["'none'"],
+          baseUri: ["'none'"],
+        },
+      },
+      crossOriginResourcePolicy: { policy: 'same-site' },
+      referrerPolicy: { policy: 'no-referrer' },
+    }),
+  );
+
+  // Teto do corpo das requisições: sem ele o Express aceita payload de
+  // qualquer tamanho e um POST grande vira consumo de memória do processo.
+  app.use(json({ limit: JSON_BODY_LIMIT }));
+  app.use(urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
 
   app.enableCors({
     origin: config.get<string[]>('app.corsOrigins'),
@@ -40,8 +69,12 @@ async function bootstrap() {
     .setVersion('1.0')
     .addBearerAuth()
     .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('docs', app, document);
+  // Publicar o Swagger em produção expõe o mapa completo da API (rotas, DTOs,
+  // exemplos) para reconhecimento — só habilitar fora de produção.
+  if (config.get<string>('app.nodeEnv') !== 'production') {
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('docs', app, document);
+  }
 
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.RMQ,
@@ -51,7 +84,7 @@ async function bootstrap() {
       queueOptions: {
         durable: true,
         arguments: {
-          'x-dead-letter-exchange': QR_CODE_DLX,
+          'x-dead-letter-exchange': config.get<string>('rabbitmq.qrCodeDlx')!,
           'x-dead-letter-routing-key': QR_CODE_DLQ_ROUTING_KEY,
         },
       },
@@ -68,7 +101,9 @@ async function bootstrap() {
       queueOptions: {
         durable: true,
         arguments: {
-          'x-dead-letter-exchange': NOTIFICATION_PUSH_DLX,
+          'x-dead-letter-exchange': config.get<string>(
+            'rabbitmq.notificationPushDlx',
+          )!,
           'x-dead-letter-routing-key': NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
         },
       },
@@ -85,7 +120,9 @@ async function bootstrap() {
       queueOptions: {
         durable: true,
         arguments: {
-          'x-dead-letter-exchange': CALENDAR_SYNC_DLX,
+          'x-dead-letter-exchange': config.get<string>(
+            'rabbitmq.calendarSyncDlx',
+          )!,
           'x-dead-letter-routing-key': CALENDAR_SYNC_DLQ_ROUTING_KEY,
         },
       },

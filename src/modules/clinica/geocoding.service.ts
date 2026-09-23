@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 export type GeocodingResult = {
@@ -17,7 +17,9 @@ type GeocodingResponse = {
 
 @Injectable()
 export class GeocodingService {
+  private readonly logger = new Logger(GeocodingService.name);
   private readonly apiKey: string;
+  private readonly timeoutMs: number;
 
   constructor(private readonly configService: ConfigService) {
     const key = this.configService.get<string>('googleMaps.apiKey');
@@ -25,6 +27,8 @@ export class GeocodingService {
       throw new Error('GOOGLE_MAPS_API_KEY is not configured');
     }
     this.apiKey = key;
+    this.timeoutMs =
+      this.configService.get<number>('googleMaps.timeoutMs') ?? 15000;
   }
 
   async geocode(address: string): Promise<GeocodingResult> {
@@ -32,7 +36,22 @@ export class GeocodingService {
     url.searchParams.set('address', address);
     url.searchParams.set('key', this.apiKey);
 
-    const response = await fetch(url.toString());
+    let response: Response;
+    try {
+      response = await fetch(url.toString(), {
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (error) {
+      this.logger.error(
+        `Falha ao geocodificar "${address}"`,
+        error instanceof Error ? error.stack : error,
+      );
+      throw new HttpException(
+        'Não foi possível geocodificar o endereço agora. Tente novamente.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const raw = await response.json();
     const data = raw as GeocodingResponse;

@@ -2,6 +2,7 @@ import { Controller, Logger } from '@nestjs/common';
 import { Ctx, MessagePattern, Payload } from '@nestjs/microservices';
 import type { RmqContext } from '@nestjs/microservices';
 import type { Channel, ConsumeMessage } from 'amqplib';
+import { NotificationStatus } from '@prisma/client';
 import type { NotificationPushMessage } from '../queue/dto/notification-push.message';
 import {
   NOTIFICATION_PUSH_MAX_RETRIES,
@@ -44,6 +45,23 @@ export class NotificationPushConsumer {
     }
 
     try {
+      // Idempotência: a fila entrega ao menos uma vez. Um crash entre o envio ao
+      // FCM e o ack faz o broker reentregar a mesma mensagem, e reenviar daria
+      // um push duplicado no aparelho do tutor. O status da Notification é o
+      // registro de que o trabalho já foi feito — só PENDING ainda merece
+      // envio. Sem notificação no banco (agendamento excluído levou a dela
+      // junto, api#112) também não há o que enviar: ack e segue.
+      const status = await this.notificationService.findStatus(notificationId);
+      if (status !== NotificationStatus.PENDING) {
+        this.logger.warn(
+          `Notification ${notificationId} não está PENDING (${
+            status ?? 'inexistente'
+          }); descartando reentrega`,
+        );
+        channel.ack(originalMessage);
+        return;
+      }
+
       const result = await this.fcmClient.send(data.device_token, {
         title: data.title,
         body: data.body,

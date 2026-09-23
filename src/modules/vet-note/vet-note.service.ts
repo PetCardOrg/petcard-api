@@ -4,25 +4,36 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { NotaClinica, NotificationKind } from '@prisma/client';
+import {
+  AcaoClinicaTipo,
+  EntidadeClinica,
+  NotaClinica,
+  NotificationKind,
+  Role,
+} from '@prisma/client';
+import { temVinculoComPet } from '../../common/authorization/pet-atendido';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
+import { AcaoClinicaService } from '../historico/acao-clinica.service';
 import {
   CreateNotaClinicaDto,
+  UpdateNotaClinicaDto,
   NotaClinicaResponseDto,
 } from '@petcardorg/shared';
 
-type NotaWithVet = NotaClinica & {
-  veterinario: { nome: string; crmv: string };
-};
-
-function toResponseDto(nota: NotaWithVet): NotaClinicaResponseDto {
+/**
+ * Nome e CRMV vêm da própria nota, não de um `JOIN` com o veterinário: a
+ * assinatura é gravada na escrita e continua legível depois que a conta do
+ * autor deixa de existir (ADR-009). `veterinario_id` é o que some nesse caso,
+ * e é por ele que a UI decide se ainda há alguém autorizado a editar.
+ */
+function toResponseDto(nota: NotaClinica): NotaClinicaResponseDto {
   return {
     id: nota.id,
     pet_id: nota.petId,
-    veterinario_id: nota.veterinarioId,
-    veterinario_nome: nota.veterinario.nome,
-    veterinario_crmv: nota.veterinario.crmv,
+    veterinario_id: nota.veterinarioId ?? undefined,
+    veterinario_nome: nota.veterinarioNome,
+    veterinario_crmv: nota.veterinarioCrmv,
     google_place_id: nota.googlePlaceId ?? undefined,
     diagnostico: nota.diagnostico,
     prescricao: nota.prescricao ?? undefined,
@@ -39,6 +50,7 @@ export class VetNoteService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
+    private readonly acoes: AcaoClinicaService,
   ) {}
 
   async create(
@@ -47,18 +59,34 @@ export class VetNoteService {
     dto: CreateNotaClinicaDto,
   ): Promise<NotaClinicaResponseDto> {
     const pet = await this.findPetOrFail(petId);
-    await this.assertVeterinarioExists(veterinarioId);
+    const vet = await this.buscarVeterinarioOuFalhar(veterinarioId);
+    await this.assertVinculoVet(petId, veterinarioId);
 
-    const nota = await this.prisma.notaClinica.create({
-      data: {
-        petId,
-        veterinarioId,
-        diagnostico: dto.diagnostico,
-        prescricao: dto.prescricao,
-        observacoes: dto.observacoes,
-        googlePlaceId: dto.google_place_id,
-      },
-      include: { veterinario: { select: { nome: true, crmv: true } } },
+    const nota = await this.prisma.$transaction(async (tx) => {
+      const criada = await tx.notaClinica.create({
+        data: {
+          petId,
+          veterinarioId,
+          veterinarioNome: vet.nome,
+          veterinarioCrmv: vet.crmv,
+          diagnostico: dto.diagnostico,
+          prescricao: dto.prescricao,
+          observacoes: dto.observacoes,
+          googlePlaceId: dto.google_place_id,
+        },
+      });
+      await this.acoes.registrar(
+        {
+          petId,
+          tipo: AcaoClinicaTipo.CRIACAO,
+          entidade: EntidadeClinica.NOTA_CLINICA,
+          entidadeId: criada.id,
+          autorId: veterinarioId,
+          autorTipo: Role.VET,
+        },
+        tx,
+      );
+      return criada;
     });
 
     const response = toResponseDto(nota);
@@ -70,7 +98,7 @@ export class VetNoteService {
         referenceType: 'CLINICAL_NOTE',
         referenceId: nota.id,
         title: 'Nova nota clínica',
-        body: `${nota.veterinario.nome} adicionou uma nota clínica para ${pet.name}`,
+        body: `${nota.veterinarioNome} adicionou uma nota clínica para ${pet.name}`,
         data: {
           pet_id: petId,
           clinical_note_id: nota.id,
@@ -94,14 +122,15 @@ export class VetNoteService {
   ): Promise<NotaClinicaResponseDto[]> {
     const pet = await this.findPetOrFail(petId);
 
-    if (!isVet && pet.tutorId !== userId) {
+    if (isVet) {
+      await this.assertVinculoVet(petId, userId);
+    } else if (pet.tutorId !== userId) {
       throw new ForbiddenException('You can only view notes for your own pets');
     }
 
     const notas = await this.prisma.notaClinica.findMany({
-      where: { petId },
+      where: { petId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
-      include: { veterinario: { select: { nome: true, crmv: true } } },
     });
 
     return notas.map(toResponseDto);
@@ -112,27 +141,96 @@ export class VetNoteService {
     userId: string,
     isVet: boolean,
   ): Promise<NotaClinicaResponseDto> {
-    const nota = await this.prisma.notaClinica.findUnique({
-      where: { id },
-      include: {
-        veterinario: { select: { nome: true, crmv: true } },
-        pet: { select: { tutorId: true } },
-      },
+    const nota = await this.prisma.notaClinica.findFirst({
+      where: { id, deletedAt: null },
+      include: { pet: { select: { tutorId: true } } },
     });
 
     if (!nota) {
       throw new NotFoundException(`Clinical note with id ${id} not found`);
     }
 
-    if (!isVet && nota.pet.tutorId !== userId) {
+    if (isVet) {
+      await this.assertVinculoVet(nota.petId, userId);
+    } else if (nota.pet.tutorId !== userId) {
       throw new ForbiddenException('You can only view notes for your own pets');
     }
 
     return toResponseDto(nota);
   }
 
+  /**
+   * Edição da própria nota (web#34). Mesma regra da exclusão: só o autor.
+   * Alterar nota alheia mantendo a assinatura falsificaria a autoria — a
+   * carteira seguiria dizendo quem escreveu, com outro conteúdo.
+   *
+   * Nota cuja conta de autor foi excluída tem `veterinarioId` nulo e por isso
+   * reprova a comparação para qualquer chamador: fica imutável, e é o que se
+   * espera de uma assinatura sem dono (ADR-009).
+   */
+  async update(
+    id: string,
+    veterinarioId: string,
+    dto: UpdateNotaClinicaDto,
+  ): Promise<NotaClinicaResponseDto> {
+    const nota = await this.prisma.notaClinica.findFirst({
+      where: { id, deletedAt: null },
+    });
+
+    if (!nota) {
+      throw new NotFoundException(`Clinical note with id ${id} not found`);
+    }
+
+    if (nota.veterinarioId !== veterinarioId) {
+      throw new ForbiddenException('You can only edit your own clinical notes');
+    }
+
+    const atualizada = await this.prisma.$transaction(async (tx) => {
+      const alterada = await tx.notaClinica.update({
+        where: { id },
+        data: {
+          diagnostico: dto.diagnostico,
+          prescricao: dto.prescricao,
+          observacoes: dto.observacoes,
+        },
+      });
+      await this.acoes.registrar(
+        {
+          petId: nota.petId,
+          tipo: AcaoClinicaTipo.EDICAO,
+          entidade: EntidadeClinica.NOTA_CLINICA,
+          entidadeId: id,
+          autorId: veterinarioId,
+          autorTipo: Role.VET,
+          detalhes: {
+            antes: {
+              diagnostico: nota.diagnostico,
+              prescricao: nota.prescricao,
+              observacoes: nota.observacoes,
+            },
+            depois: {
+              diagnostico: alterada.diagnostico,
+              prescricao: alterada.prescricao,
+              observacoes: alterada.observacoes,
+            },
+          },
+        },
+        tx,
+      );
+      return alterada;
+    });
+
+    return toResponseDto(atualizada);
+  }
+
+  /**
+   * Exclusão lógica (api#117): a nota some da listagem, mas o histórico
+   * clínico preserva o que foi diagnosticado e quem diagnosticou.
+   */
   async remove(id: string, veterinarioId: string): Promise<void> {
-    const nota = await this.prisma.notaClinica.findUnique({ where: { id } });
+    const nota = await this.prisma.notaClinica.findFirst({
+      where: { id, deletedAt: null },
+    });
 
     if (!nota) {
       throw new NotFoundException(`Clinical note with id ${id} not found`);
@@ -144,7 +242,30 @@ export class VetNoteService {
       );
     }
 
-    await this.prisma.notaClinica.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.notaClinica.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      await this.acoes.registrar(
+        {
+          petId: nota.petId,
+          tipo: AcaoClinicaTipo.EXCLUSAO,
+          entidade: EntidadeClinica.NOTA_CLINICA,
+          entidadeId: id,
+          autorId: veterinarioId,
+          autorTipo: Role.VET,
+          detalhes: {
+            antes: {
+              diagnostico: nota.diagnostico,
+              prescricao: nota.prescricao,
+              observacoes: nota.observacoes,
+            },
+          },
+        },
+        tx,
+      );
+    });
   }
 
   private async findPetOrFail(
@@ -160,14 +281,41 @@ export class VetNoteService {
     return pet;
   }
 
-  private async assertVeterinarioExists(veterinarioId: string): Promise<void> {
+  /**
+   * Exige que o pet esteja na lista de atendidos do veterinário.
+   *
+   * Repete a regra de `PetService.assertAccess` porque as notas clínicas não
+   * passam por lá — e sem a checagem o papel VET, sozinho, lia e escrevia no
+   * prontuário de qualquer pet cujo id fosse conhecido. O vínculo entra pela
+   * leitura do QR Code da carteira.
+   */
+  private async assertVinculoVet(
+    petId: string,
+    veterinarioId: string,
+  ): Promise<void> {
+    if (!(await temVinculoComPet(this.prisma, veterinarioId, petId))) {
+      throw new ForbiddenException(
+        'Pet fora da sua lista de atendidos. Leia o QR Code da carteira para iniciar o atendimento.',
+      );
+    }
+  }
+
+  /**
+   * Nome e CRMV de quem assina, que a nota grava na criação. `select` e não a
+   * linha inteira: `findUnique` traria o hash da senha junto, sem uso aqui.
+   */
+  private async buscarVeterinarioOuFalhar(
+    veterinarioId: string,
+  ): Promise<{ nome: string; crmv: string }> {
     const vet = await this.prisma.veterinario.findUnique({
       where: { id: veterinarioId },
+      select: { nome: true, crmv: true },
     });
     if (!vet) {
       throw new NotFoundException(
         `Veterinario with id ${veterinarioId} not found`,
       );
     }
+    return vet;
   }
 }

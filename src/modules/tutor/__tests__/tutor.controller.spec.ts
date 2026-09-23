@@ -7,17 +7,24 @@ import {
   VET,
 } from '../../../../test/utils/controller-harness';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { UploadService } from '../../upload/upload.service';
 import { TutorController } from '../tutor.controller';
 import { TutorService } from '../tutor.service';
 
 describe('TutorController (integração)', () => {
   let harness: ControllerHarness;
-  let prisma: { tutor: { findUnique: jest.Mock; update: jest.Mock } };
+  let prisma: {
+    tutor: { findUnique: jest.Mock; update: jest.Mock; delete: jest.Mock };
+    petAtendido: { findFirst: jest.Mock };
+  };
 
   const tutor = {
     id: 'tutor-1',
     name: 'Alice',
     email: 'tutor@petcard.com',
+    // O hash vem do banco em toda leitura; o que importa é ele não sair na
+    // resposta.
+    password: '$2b$12$hashdoTutor',
     phone: null,
     profileImageUrl: null,
     role: 'TUTOR',
@@ -26,11 +33,18 @@ describe('TutorController (integração)', () => {
   };
 
   beforeAll(async () => {
-    prisma = { tutor: { findUnique: jest.fn(), update: jest.fn() } };
+    prisma = {
+      tutor: { findUnique: jest.fn(), update: jest.fn(), delete: jest.fn() },
+      petAtendido: { findFirst: jest.fn() },
+    };
 
     harness = await createControllerTestApp({
       controllers: [TutorController],
-      providers: [TutorService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        TutorService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
+      ],
     });
   });
 
@@ -42,6 +56,7 @@ describe('TutorController (integração)', () => {
     jest.clearAllMocks();
     harness.setUser(TUTOR);
     prisma.tutor.findUnique.mockResolvedValue(tutor);
+    prisma.petAtendido.findFirst.mockResolvedValue({ id: 'vinculo-1' });
   });
 
   describe('GET /tutors/me', () => {
@@ -52,6 +67,7 @@ describe('TutorController (integração)', () => {
 
       expect(res.body.id).toBe('tutor-1');
       expect(res.body.email).toBe('tutor@petcard.com');
+      expect(res.body).not.toHaveProperty('password');
       expect(prisma.tutor.findUnique).toHaveBeenCalledWith({
         where: { id: 'tutor-1' },
       });
@@ -74,9 +90,115 @@ describe('TutorController (integração)', () => {
         .expect(200);
 
       expect(res.body.name).toBe('Alice B');
+      expect(res.body).not.toHaveProperty('password');
       expect(prisma.tutor.update).toHaveBeenCalledWith({
         where: { id: 'tutor-1' },
         data: { name: 'Alice B' },
+      });
+    });
+
+    it('devolve a foto salva em profile_image_url, não profileImageUrl', async () => {
+      // profileImageUrl é o nome do campo no Prisma Client (a coluna é que se
+      // chama profile_image_url via @map) — a resposta view precisa da chave
+      // em snake_case, que é o que o app mobile lê.
+      const url = 'https://bucket.s3.amazonaws.com/tutors/foto.jpg';
+      prisma.tutor.update.mockResolvedValue({
+        ...tutor,
+        profileImageUrl: url,
+      });
+
+      const res = await request(harness.app.getHttpServer())
+        .patch('/tutors/me')
+        .send({ profile_image_url: url })
+        .expect(200);
+
+      expect(res.body.profile_image_url).toBe(url);
+      expect(res.body).not.toHaveProperty('profileImageUrl');
+      expect(prisma.tutor.update).toHaveBeenCalledWith({
+        where: { id: 'tutor-1' },
+        data: { profileImageUrl: url },
+      });
+    });
+
+    /**
+     * Trocar o e-mail é trocar a identidade da conta. Sem derrubar a
+     * verificação, bastava confirmar um endereço próprio e apontar depois para
+     * o de outra pessoa para ficar "verificado" nele — o mesmo raciocínio que
+     * já zera a verificação de CRMV quando o veterinário troca de registro.
+     */
+    describe('troca de e-mail', () => {
+      it('zera a verificação ao apontar para outro endereço', async () => {
+        prisma.tutor.findUnique
+          .mockResolvedValueOnce({ ...tutor, emailVerifiedAt: new Date() })
+          .mockResolvedValueOnce(null);
+        prisma.tutor.update.mockResolvedValue({
+          ...tutor,
+          email: 'novo@petcard.com',
+          emailVerifiedAt: null,
+        });
+
+        const res = await request(harness.app.getHttpServer())
+          .patch('/tutors/me')
+          .send({ email: 'novo@petcard.com' })
+          .expect(200);
+
+        expect(res.body.email_verified).toBe(false);
+        expect(prisma.tutor.update).toHaveBeenCalledWith({
+          where: { id: 'tutor-1' },
+          data: { email: 'novo@petcard.com', emailVerifiedAt: null },
+        });
+      });
+
+      it('responde 409 quando o endereço já é de outra conta', async () => {
+        prisma.tutor.findUnique
+          .mockResolvedValueOnce(tutor)
+          .mockResolvedValueOnce({ ...tutor, id: 'tutor-2' });
+
+        // Sem a checagem, a unique do Prisma estourava e o cliente recebia 500
+        // — sem como distinguir "endereço ocupado" de falha do servidor.
+        await request(harness.app.getHttpServer())
+          .patch('/tutors/me')
+          .send({ email: 'ocupado@petcard.com' })
+          .expect(409);
+
+        expect(prisma.tutor.update).not.toHaveBeenCalled();
+      });
+
+      it('não zera a verificação quando o e-mail enviado é o mesmo', async () => {
+        prisma.tutor.findUnique.mockResolvedValue({
+          ...tutor,
+          emailVerifiedAt: new Date(),
+        });
+        prisma.tutor.update.mockResolvedValue(tutor);
+
+        // Salvar o formulário sem mexer no e-mail não pode obrigar o tutor a
+        // confirmar a conta de novo.
+        await request(harness.app.getHttpServer())
+          .patch('/tutors/me')
+          .send({ name: 'Alice B', email: tutor.email })
+          .expect(200);
+
+        const [[chamada]] = prisma.tutor.update.mock.calls as Array<
+          [{ data: Record<string, unknown> }]
+        >;
+        expect(chamada.data).not.toHaveProperty('emailVerifiedAt');
+      });
+
+      it('grava o endereço na forma canônica', async () => {
+        prisma.tutor.findUnique
+          .mockResolvedValueOnce(tutor)
+          .mockResolvedValueOnce(null);
+        prisma.tutor.update.mockResolvedValue(tutor);
+
+        await request(harness.app.getHttpServer())
+          .patch('/tutors/me')
+          .send({ email: 'Nova.Conta@PetCard.com' })
+          .expect(200);
+
+        const [[chamada]] = prisma.tutor.update.mock.calls as Array<
+          [{ data: { email: string } }]
+        >;
+        expect(chamada.data.email).toBe('nova.conta@petcard.com');
       });
     });
 
@@ -97,7 +219,7 @@ describe('TutorController (integração)', () => {
         .expect(403);
     });
 
-    it('retorna o tutor para VET (200)', async () => {
+    it('retorna o tutor para o VET que atende um pet dele (200)', async () => {
       harness.setUser(VET);
 
       const res = await request(harness.app.getHttpServer())
@@ -105,6 +227,17 @@ describe('TutorController (integração)', () => {
         .expect(200);
 
       expect(res.body.id).toBe('tutor-1');
+      expect(res.body).not.toHaveProperty('password');
+    });
+
+    it('barra o VET sem pet do tutor na lista (403)', async () => {
+      // O papel VET não dá acesso ao cadastro de qualquer tutor da base.
+      harness.setUser(VET);
+      prisma.petAtendido.findFirst.mockResolvedValue(null);
+
+      await request(harness.app.getHttpServer())
+        .get('/tutors/tutor-1')
+        .expect(403);
     });
 
     it('retorna 404 para tutor inexistente (VET)', async () => {
@@ -114,6 +247,49 @@ describe('TutorController (integração)', () => {
       await request(harness.app.getHttpServer())
         .get('/tutors/missing')
         .expect(404);
+    });
+  });
+
+  describe('DELETE /tutors/me', () => {
+    it('apaga a conta do tutor autenticado (204)', async () => {
+      prisma.tutor.delete.mockResolvedValue(tutor);
+
+      await request(harness.app.getHttpServer())
+        .delete('/tutors/me')
+        .expect(204);
+
+      // Sempre a conta de quem está autenticado, nunca um id do corpo.
+      expect(prisma.tutor.delete).toHaveBeenCalledWith({
+        where: { id: 'tutor-1' },
+      });
+    });
+
+    it('proíbe VET de apagar conta de tutor (403)', async () => {
+      harness.setUser(VET);
+
+      await request(harness.app.getHttpServer())
+        .delete('/tutors/me')
+        .expect(403);
+
+      expect(prisma.tutor.delete).not.toHaveBeenCalled();
+    });
+
+    it('exige autenticação (401)', async () => {
+      harness.setUser(null);
+
+      await request(harness.app.getHttpServer())
+        .delete('/tutors/me')
+        .expect(401);
+    });
+
+    it('devolve 404 se a conta já não existe', async () => {
+      prisma.tutor.findUnique.mockResolvedValue(null);
+
+      await request(harness.app.getHttpServer())
+        .delete('/tutors/me')
+        .expect(404);
+
+      expect(prisma.tutor.delete).not.toHaveBeenCalled();
     });
   });
 });
