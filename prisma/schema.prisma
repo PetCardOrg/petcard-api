@@ -41,6 +41,9 @@ enum AcaoClinicaTipo {
   CRIACAO
   EDICAO
   EXCLUSAO
+  ANEXO_ADICIONADO
+  ANEXO_REMOVIDO
+  ANEXO_VERIFICADO
 }
 
 enum EntidadeClinica {
@@ -162,6 +165,7 @@ model Pet {
   vaccineRecords    VaccineRecord[]
   dewormingRecords  DewormingRecord[]
   medicationRecords MedicationRecord[]
+  anexosClinicos    AnexoClinico[]
   carteiraDigital   CarteiraDigital?
   acoesClinicas     AcaoClinica[]
   appointments      Appointment[]
@@ -248,8 +252,9 @@ model VaccineRecord {
   updatedAt        DateTime  @updatedAt @map("updated_at")
   deletedAt        DateTime? @map("deleted_at")
 
-  pet         Pet          @relation(fields: [petId], references: [id], onDelete: Cascade)
-  veterinario Veterinario? @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
+  anexos      AnexoClinico[]
+  pet         Pet            @relation(fields: [petId], references: [id], onDelete: Cascade)
+  veterinario Veterinario?   @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
 
   // Todo caminho de prontuário — carteira, listagem, histórico — filtra por
   // pet, não por veterinário.
@@ -274,8 +279,9 @@ model DewormingRecord {
   updatedAt        DateTime  @updatedAt @map("updated_at")
   deletedAt        DateTime? @map("deleted_at")
 
-  pet         Pet          @relation(fields: [petId], references: [id], onDelete: Cascade)
-  veterinario Veterinario? @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
+  anexos      AnexoClinico[]
+  pet         Pet            @relation(fields: [petId], references: [id], onDelete: Cascade)
+  veterinario Veterinario?   @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
 
   // Todo caminho de prontuário — carteira, listagem, histórico — filtra por
   // pet, não por veterinário.
@@ -302,8 +308,9 @@ model MedicationRecord {
   updatedAt        DateTime  @updatedAt @map("updated_at")
   deletedAt        DateTime? @map("deleted_at")
 
-  pet         Pet          @relation(fields: [petId], references: [id], onDelete: Cascade)
-  veterinario Veterinario? @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
+  anexos      AnexoClinico[]
+  pet         Pet            @relation(fields: [petId], references: [id], onDelete: Cascade)
+  veterinario Veterinario?   @relation(fields: [veterinarioId], references: [id], onDelete: SetNull)
 
   // Todo caminho de prontuário — carteira, listagem, histórico — filtra por
   // pet, não por veterinário.
@@ -386,11 +393,12 @@ model Veterinario {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  notasClinicas NotaClinica[]
-  vacinas       VaccineRecord[]
-  vermifugos    DewormingRecord[]
-  medicacoes    MedicationRecord[]
-  petsAtendidos PetAtendido[]
+  notasClinicas     NotaClinica[]
+  vacinas           VaccineRecord[]
+  vermifugos        DewormingRecord[]
+  medicacoes        MedicationRecord[]
+  petsAtendidos     PetAtendido[]
+  anexosVerificados AnexoClinico[]
 
   @@map("veterinario")
 }
@@ -487,4 +495,60 @@ model AcaoClinica {
   @@index([petId, createdAt])
   @@index([entidade, entidadeId])
   @@map("acao_clinica")
+}
+
+/// Comprovante (foto da carteirinha, receita, PDF) de uma vacina, vermífugo ou
+/// medicação.
+///
+/// Exatamente uma das três FKs é preenchida (CHECK `anexo_clinico_um_registro`,
+/// escrito à mão na migration — o Prisma não modela CHECK). Nada aqui é
+/// apagado: `deletedAt` tira o anexo da visualização, mas a linha e o arquivo
+/// no bucket permanecem, como nos demais registros clínicos (api#117).
+///
+/// Quem enviou e quem verificou ficam gravados por valor (nome, CRMV), não só
+/// por FK: a evidência precisa sobreviver à exclusão da conta.
+model AnexoClinico {
+  id    String @id @default(uuid())
+  petId String @map("pet_id")
+
+  vaccineRecordId    String? @map("vaccine_record_id")
+  dewormingRecordId  String? @map("deworming_record_id")
+  medicationRecordId String? @map("medication_record_id")
+
+  /// Chave do objeto no bucket. Privado: não há URL pública, o acesso é por
+  /// link temporário assinado. Gerada no servidor, nunca derivada do nome.
+  s3Key        String @unique @map("s3_key")
+  /// Nome original, só para exibição; nunca compõe a chave do objeto.
+  nomeArquivo  String @map("nome_arquivo")
+  mimeType     String @map("mime_type")
+  tamanhoBytes Int    @map("tamanho_bytes")
+  /// SHA-256 do conteúdo, gravado no envio: permite demonstrar depois que o
+  /// arquivo guardado é o mesmo que foi enviado.
+  sha256       String
+
+  enviadoPorTipo Role   @map("enviado_por_tipo")
+  enviadoPorId   String @map("enviado_por_id")
+  enviadoPorNome String @map("enviado_por_nome")
+
+  /// Nulo = ainda não conferido por um veterinário.
+  verificadoEm      DateTime? @map("verificado_em")
+  verificadoPorId   String?   @map("verificado_por_id")
+  verificadoPorNome String?   @map("verificado_por_nome")
+  verificadoPorCrmv String?   @map("verificado_por_crmv")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  pet              Pet               @relation(fields: [petId], references: [id], onDelete: Cascade)
+  vaccineRecord    VaccineRecord?    @relation(fields: [vaccineRecordId], references: [id], onDelete: Cascade)
+  dewormingRecord  DewormingRecord?  @relation(fields: [dewormingRecordId], references: [id], onDelete: Cascade)
+  medicationRecord MedicationRecord? @relation(fields: [medicationRecordId], references: [id], onDelete: Cascade)
+  verificadoPor    Veterinario?      @relation(fields: [verificadoPorId], references: [id], onDelete: SetNull)
+
+  @@index([petId])
+  @@index([vaccineRecordId])
+  @@index([dewormingRecordId])
+  @@index([medicationRecordId])
+  @@index([verificadoPorId])
+  @@map("anexo_clinico")
 }

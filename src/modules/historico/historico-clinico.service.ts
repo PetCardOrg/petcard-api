@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   AcaoClinica,
+  AnexoClinico,
   DewormingRecord,
   MedicationRecord,
   NotaClinica,
@@ -15,6 +16,7 @@ import {
   Role,
 } from '@petcardorg/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ANEXOS_ATIVOS, toAnexoResponseDto } from '../anexo/anexo.mapper';
 import { PetService } from '../pet/pet.service';
 
 /**
@@ -25,10 +27,16 @@ import { PetService } from '../pet/pet.service';
  */
 type VetDaAssinatura = { id: string; nome: string; crmv: string };
 
-type ComVet<T> = T & { veterinario: VetDaAssinatura | null };
+type ComVet<T> = T & {
+  veterinario: VetDaAssinatura | null;
+  anexos?: AnexoClinico[];
+};
 
 const ASSINATURA_DO_VET = {
   veterinario: { select: { id: true, nome: true, crmv: true } },
+  // Comprovantes ativos, também dos registros excluídos: o histórico mostra o
+  // que foi comprovado, mesmo depois de o tutor tirar o registro da carteira.
+  ...ANEXOS_ATIVOS,
 } as const;
 
 @Injectable()
@@ -109,6 +117,7 @@ export class HistoricoClinicoService {
       veterinario_nome: nota.veterinarioNome,
       veterinario_crmv: nota.veterinarioCrmv,
       acoes: acoes.get(chave(EntidadeClinica.NOTA_CLINICA, nota.id)) ?? [],
+      anexos: [],
     };
   }
 
@@ -126,6 +135,7 @@ export class HistoricoClinicoService {
       ...this.exclusao(vacina.deletedAt),
       ...this.vet(vacina.veterinario, vacina.veterinarianName),
       acoes: acoes.get(chave(EntidadeClinica.VACINA, vacina.id)) ?? [],
+      anexos: (vacina.anexos ?? []).map(toAnexoResponseDto),
     };
   }
 
@@ -143,6 +153,7 @@ export class HistoricoClinicoService {
       ...this.exclusao(verm.deletedAt),
       ...this.vet(verm.veterinario, verm.veterinarianName),
       acoes: acoes.get(chave(EntidadeClinica.VERMIFUGO, verm.id)) ?? [],
+      anexos: (verm.anexos ?? []).map(toAnexoResponseDto),
     };
   }
 
@@ -160,6 +171,7 @@ export class HistoricoClinicoService {
       ...this.exclusao(med.deletedAt),
       ...this.vet(med.veterinario),
       acoes: acoes.get(chave(EntidadeClinica.MEDICACAO, med.id)) ?? [],
+      anexos: (med.anexos ?? []).map(toAnexoResponseDto),
     };
   }
 

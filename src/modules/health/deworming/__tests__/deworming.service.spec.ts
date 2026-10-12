@@ -93,6 +93,7 @@ describe('DewormingService', () => {
         next_dose_at: undefined,
         veterinarian_name: undefined,
         notes: undefined,
+        anexos: [],
         created_at: record.createdAt,
         updated_at: record.updatedAt,
       },

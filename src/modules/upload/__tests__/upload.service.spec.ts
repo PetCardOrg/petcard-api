@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import {
   BadRequestException,
   InternalServerErrorException,
@@ -22,6 +22,14 @@ jest.mock('@aws-sdk/client-s3', () => ({
   DeleteObjectCommand: jest
     .fn()
     .mockImplementation((input: unknown) => ({ __kind: 'Delete', input })),
+  GetObjectCommand: jest
+    .fn()
+    .mockImplementation((input: unknown) => ({ __kind: 'Get', input })),
+}));
+
+const mockGetSignedUrl = jest.fn();
+jest.mock('@aws-sdk/s3-request-presigner', () => ({
+  getSignedUrl: (...args: unknown[]) => mockGetSignedUrl(...args),
 }));
 
 const FULL_AWS: Record<string, string> = {
@@ -180,6 +188,75 @@ describe('UploadService', () => {
         BadRequestException,
       );
       expect(mockSend).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('objetos privados (comprovantes)', () => {
+    let service: UploadService;
+    beforeEach(() => {
+      service = new UploadService(makeConfig(FULL_AWS));
+    });
+
+    it('putPrivate grava na chave dada e não devolve URL', async () => {
+      mockSend.mockResolvedValue({});
+
+      const resultado = await service.putPrivate(
+        'anexos/pet-1/abc.pdf',
+        Buffer.from('%PDF-'),
+        'application/pdf',
+      );
+
+      expect(resultado).toBeUndefined();
+      expect(mockSend.mock.calls[0][0].input).toMatchObject({
+        Bucket: 'petcard-bucket',
+        Key: 'anexos/pet-1/abc.pdf',
+        ContentType: 'application/pdf',
+      });
+    });
+
+    it('putPrivate traduz falha do S3 em erro 500 sem vazar o motivo', async () => {
+      mockSend.mockRejectedValue(new Error('AccessDenied arn:aws:...'));
+
+      await expect(
+        service.putPrivate(
+          'anexos/p/a.pdf',
+          Buffer.from('x'),
+          'application/pdf',
+        ),
+      ).rejects.toThrow(
+        new InternalServerErrorException('Failed to upload file'),
+      );
+    });
+
+    it('presignDownload assina a leitura com validade, nome e tipo forçados', async () => {
+      mockGetSignedUrl.mockResolvedValue('https://assinado');
+
+      const url = await service.presignDownload('anexos/p/a.pdf', {
+        filename: 'vacina cão.pdf',
+        contentType: 'application/pdf',
+        expiresInSeconds: 300,
+      });
+
+      expect(url).toBe('https://assinado');
+      const [, comando, opcoes] = mockGetSignedUrl.mock.calls[0];
+      expect(comando.input).toMatchObject({
+        Bucket: 'petcard-bucket',
+        Key: 'anexos/p/a.pdf',
+        ResponseContentType: 'application/pdf',
+        ResponseContentDisposition: `inline; filename*=UTF-8''vacina%20c%C3%A3o.pdf`,
+      });
+      expect(opcoes).toEqual({ expiresIn: 300 });
+    });
+
+    it('removePrivate apaga o objeto', async () => {
+      mockSend.mockResolvedValue({});
+
+      await service.removePrivate('anexos/p/a.pdf');
+
+      expect(mockSend.mock.calls[0][0]).toMatchObject({
+        __kind: 'Delete',
+        input: { Bucket: 'petcard-bucket', Key: 'anexos/p/a.pdf' },
+      });
     });
   });
 
