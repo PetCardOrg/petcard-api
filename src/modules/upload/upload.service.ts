@@ -1,9 +1,11 @@
 import { randomUUID } from 'crypto';
 import {
   DeleteObjectCommand,
+  GetObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   BadRequestException,
   Injectable,
@@ -121,6 +123,94 @@ export class UploadService {
     }
 
     return `https://${this.bucket}.s3.${this.region}.amazonaws.com/${key}`;
+  }
+
+  /**
+   * Guarda um objeto **privado** e devolve só a chave.
+   *
+   * Ao contrário de `uploadBuffer`, não devolve URL: o objeto não é para ser
+   * servido por endereço fixo. Quem precisa abrir o arquivo pede um link
+   * temporário com `presignDownload`. Serve para dado de saúde (comprovantes),
+   * que não pode ficar acessível a quem apenas conhece o endereço.
+   */
+  async putPrivate(
+    key: string,
+    buffer: Buffer,
+    contentType: string,
+  ): Promise<void> {
+    if (!this.s3Client || !this.bucket) {
+      throw new InternalServerErrorException(
+        'S3 storage is not configured on the server',
+      );
+    }
+
+    try {
+      await this.s3Client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          Body: buffer,
+          ContentType: contentType,
+        }),
+      );
+    } catch (error) {
+      this.logger.error(
+        'Failed to upload private object to S3',
+        error as Error,
+      );
+      throw new InternalServerErrorException('Failed to upload file');
+    }
+  }
+
+  /**
+   * Desfaz um `putPrivate` cuja gravação no banco falhou. Não serve para
+   * apagar comprovante: esses são preservados (exclusão lógica).
+   */
+  async removePrivate(key: string): Promise<void> {
+    if (!this.s3Client || !this.bucket) {
+      return;
+    }
+    await this.s3Client.send(
+      new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+    );
+  }
+
+  /**
+   * Link temporário de leitura para um objeto privado.
+   *
+   * `filename` vira o nome do download e o tipo é forçado por
+   * `ResponseContentType`, para o navegador não inferir outro a partir do
+   * conteúdo.
+   */
+  async presignDownload(
+    key: string,
+    options: {
+      filename: string;
+      contentType: string;
+      expiresInSeconds: number;
+    },
+  ): Promise<string> {
+    if (!this.s3Client || !this.bucket) {
+      throw new InternalServerErrorException(
+        'S3 storage is not configured on the server',
+      );
+    }
+
+    try {
+      return await getSignedUrl(
+        this.s3Client,
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          ResponseContentType: options.contentType,
+          ResponseContentDisposition: `inline; filename*=UTF-8''${encodeURIComponent(options.filename)}`,
+        }),
+        { expiresIn: options.expiresInSeconds },
+      );
+    } catch (error) {
+      this.logger.error('Failed to presign S3 download', error as Error);
+      throw new InternalServerErrorException('Failed to generate file link');
+    }
   }
 
   /**

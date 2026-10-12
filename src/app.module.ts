@@ -27,6 +27,7 @@ import { ClinicaModule } from './modules/clinica/clinica.module';
 import { ColeiraModule } from './modules/coleira/coleira.module';
 import { DewormingModule } from './modules/health/deworming/deworming.module';
 import { MedicationModule } from './modules/health/medication/medication.module';
+import { AnexoModule } from './modules/anexo/anexo.module';
 import { VaccineModule } from './modules/health/vaccine/vaccine.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { PetModule } from './modules/pet/pet.module';
@@ -100,6 +101,7 @@ import { PrismaModule } from './prisma/prisma.module';
     TutorModule,
     PetModule,
     VaccineModule,
+    AnexoModule,
     DewormingModule,
     MedicationModule,
     UploadModule,

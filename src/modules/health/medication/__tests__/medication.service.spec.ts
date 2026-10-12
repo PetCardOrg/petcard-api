@@ -103,7 +103,11 @@ describe('MedicationService', () => {
       where: { petId: 'pet-1', deletedAt: null },
       orderBy: { startDate: 'desc' },
       // O CRMV de quem prescreveu vem pelo vínculo, não pela linha.
-      include: { veterinario: { select: { crmv: true } } },
+      // Só os comprovantes ativos acompanham o registro.
+      include: {
+        veterinario: { select: { crmv: true } },
+        anexos: { where: { deletedAt: null }, orderBy: { createdAt: 'asc' } },
+      },
     });
     expect(result).toEqual([
       {
@@ -115,6 +119,7 @@ describe('MedicationService', () => {
         start_date: '2026-01-01',
         end_date: undefined,
         notes: undefined,
+        anexos: [],
         created_at: record.createdAt,
         updated_at: record.updatedAt,
       },
