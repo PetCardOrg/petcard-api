@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   AcaoClinicaTipo,
+  AnexoClinico,
   EntidadeClinica,
   Role,
   VaccineRecord,
@@ -11,6 +12,7 @@ import {
   VaccineRecordResponseDto,
 } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { ANEXOS_ATIVOS, toAnexoResponseDto } from '../../anexo/anexo.mapper';
 import { PetService } from '../../pet/pet.service';
 import { AcaoClinicaService } from '../../historico/acao-clinica.service';
 import {
@@ -24,6 +26,8 @@ type VaccineInput = Omit<CreateVaccineRecordDto, 'pet_id'>;
 /** O CRMV vem do vínculo; o nome fica gravado na linha. */
 type ComVeterinario = VaccineRecord & {
   veterinario?: { crmv: string } | null;
+  /** Só os ativos: ver `ANEXOS_ATIVOS`. */
+  anexos?: AnexoClinico[];
 };
 
 function toResponseDto(record: ComVeterinario): VaccineRecordResponseDto {
@@ -39,6 +43,7 @@ function toResponseDto(record: ComVeterinario): VaccineRecordResponseDto {
     veterinario_id: record.veterinarioId ?? undefined,
     veterinario_crmv: record.veterinario?.crmv ?? undefined,
     notes: record.notes ?? undefined,
+    anexos: (record.anexos ?? []).map(toAnexoResponseDto),
     created_at: record.createdAt,
     updated_at: record.updatedAt,
   };
@@ -72,7 +77,7 @@ export class VaccineService {
     await this.petService.assertAccess(petId, userId, isVet);
     const record = await this.prisma.$transaction(async (tx) => {
       const criado = await tx.vaccineRecord.create({
-        include: { veterinario: { select: { crmv: true } } },
+        include: { veterinario: { select: { crmv: true } }, ...ANEXOS_ATIVOS },
         data: {
           petId,
           vaccineName: dto.vaccine_name,
@@ -113,7 +118,7 @@ export class VaccineService {
     const records = await this.prisma.vaccineRecord.findMany({
       where: { petId, deletedAt: null },
       orderBy: { appliedAt: 'desc' },
-      include: { veterinario: { select: { crmv: true } } },
+      include: { veterinario: { select: { crmv: true } }, ...ANEXOS_ATIVOS },
     });
     return records.map(toResponseDto);
   }
@@ -129,7 +134,7 @@ export class VaccineService {
     assertPodeEditar(record, userId, isVet);
     const updated = await this.prisma.$transaction(async (tx) => {
       const alterado = await tx.vaccineRecord.update({
-        include: { veterinario: { select: { crmv: true } } },
+        include: { veterinario: { select: { crmv: true } }, ...ANEXOS_ATIVOS },
         where: { id },
         data: {
           vaccineName: dto.vaccine_name,

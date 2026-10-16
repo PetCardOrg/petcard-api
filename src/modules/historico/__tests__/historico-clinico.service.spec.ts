@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Test, TestingModule } from '@nestjs/testing';
 import { AcaoClinicaTipo, EntidadeClinica, Role } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -71,6 +72,53 @@ describe('HistoricoClinicoService', () => {
       excluido_em: medicacaoExcluida.deletedAt,
       veterinario_crmv: 'CRMV-SP 12345',
     });
+  });
+
+  it('traz os comprovantes ativos do registro, também quando ele foi excluído', async () => {
+    prisma.medicationRecord.findMany.mockResolvedValue([
+      {
+        ...medicacaoExcluida,
+        anexos: [
+          {
+            id: 'anx-1',
+            petId: 'pet-1',
+            vaccineRecordId: null,
+            dewormingRecordId: null,
+            medicationRecordId: 'med-1',
+            nomeArquivo: 'receita.pdf',
+            mimeType: 'application/pdf',
+            tamanhoBytes: 10,
+            enviadoPorTipo: 'VET',
+            enviadoPorId: 'vet-1',
+            enviadoPorNome: 'Dra. Camila',
+            verificadoEm: new Date('2026-03-10'),
+            verificadoPorNome: 'Dra. Camila',
+            verificadoPorCrmv: 'CRMV-SP 12345',
+            createdAt: new Date('2026-03-10'),
+          },
+        ],
+      },
+    ]);
+
+    const resultado = await service.doPet('pet-1', 'tutor-1', false);
+
+    expect(resultado.itens[0].anexos).toEqual([
+      expect.objectContaining({
+        id: 'anx-1',
+        entidade: EntidadeClinica.MEDICACAO,
+        entidade_id: 'med-1',
+        verificado: true,
+        verificado_por_crmv: 'CRMV-SP 12345',
+      }),
+    ]);
+    // A consulta pede só os ativos: removido continua no banco, fora da tela.
+    expect(prisma.medicationRecord.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          anexos: { where: { deletedAt: null }, orderBy: { createdAt: 'asc' } },
+        }),
+      }),
+    );
   });
 
   it('não filtra excluídos na consulta — é o oposto das listagens', async () => {
