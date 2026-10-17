@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   Logger,
@@ -7,7 +8,11 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { CRMV_VALIDATOR, type CrmvValidator } from './crmv-validator';
+import {
+  CRMV_VALIDATOR,
+  type CrmvValidationResult,
+  type CrmvValidator,
+} from './crmv-validator';
 
 const MS_PER_DAY = 86_400_000;
 
@@ -15,15 +20,40 @@ const MS_PER_DAY = 86_400_000;
 const CRMV_PATTERN =
   /^(?:CRMV[-\s]?)?([A-Z]{2})[-\s/]?(\d{3,6})$|^(\d{3,6})[-\s/]([A-Z]{2})$/i;
 
+/**
+ * Quanto a consulta do cadastro fica guardada em memória. Cobre o intervalo
+ * entre o vet informar o CRMV no formulário e concluir o cadastro, para a
+ * verificação do cadastro reaproveitar a consulta em vez de pagar outra.
+ */
+const CONSULTA_TTL_MS = 30 * 60 * 1000;
+const CONSULTA_MAX_ENTRADAS = 500;
+
 export type CrmvVerificationStatus = {
   verified: boolean;
   situacao?: string;
   verified_at?: Date;
 };
 
+/** Resposta de `GET /auth/veterinario/crmv` (cadastro com CRMV primeiro). */
+export type CrmvConsulta = {
+  /** CRMV no formato canônico ("CRMV-SP 12345"), para o cadastro gravar. */
+  crmv: string;
+  uf: string;
+  numero: string;
+  /** Registro encontrado e em situação regular. */
+  valido: boolean;
+  /** Nome no cadastro do CFMV — o cadastro usa este, não o digitado. */
+  nome?: string;
+  situacao?: string;
+};
+
 @Injectable()
 export class CrmvVerificationService {
   private readonly logger = new Logger(CrmvVerificationService.name);
+  private readonly consultas = new Map<
+    string,
+    { resultado: CrmvValidationResult; expiraEm: number }
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -94,7 +124,9 @@ export class CrmvVerificationService {
     }
 
     const { numero, uf } = this.parseCrmv(vet.crmv);
-    const resultado = await this.validator.validate(numero, uf);
+    const resultado = force
+      ? await this.validator.validate(numero, uf)
+      : await this.consultar(numero, uf);
 
     const verifiedAt = resultado.valid ? new Date() : null;
     await this.prisma.veterinario.update({
@@ -111,5 +143,77 @@ export class CrmvVerificationService {
       situacao: resultado.situacao,
       verified_at: verifiedAt ?? undefined,
     };
+  }
+
+  /** "CRMV-SP 12345" — o formato em que o cadastro passa a gravar. */
+  formatCrmv(crmv: string): string {
+    const { numero, uf } = this.parseCrmv(crmv);
+    return `CRMV-${uf} ${numero}`;
+  }
+
+  /**
+   * Consulta o CRMV antes do cadastro, para o formulário preencher o nome a
+   * partir do registro oficial.
+   *
+   * CRMV já cadastrado responde 409 antes de consultar: além de avisar o vet
+   * cedo, não paga uma consulta para um cadastro que não vai acontecer.
+   */
+  async lookup(crmv: string): Promise<CrmvConsulta> {
+    const { numero, uf } = this.parseCrmv(crmv);
+    const canonico = this.formatCrmv(crmv);
+
+    const existente = await this.prisma.veterinario.findFirst({
+      where: { crmv: { in: [crmv.trim(), canonico] } },
+      select: { id: true },
+    });
+    if (existente) {
+      throw new ConflictException('CRMV already registered');
+    }
+
+    const resultado = await this.consultar(numero, uf);
+    return {
+      crmv: canonico,
+      uf,
+      numero,
+      valido: resultado.valid,
+      nome: resultado.valid ? resultado.nome : undefined,
+      situacao: resultado.situacao,
+    };
+  }
+
+  /**
+   * Nome do registro oficial, se o CRMV foi consultado há pouco e está
+   * regular. Não consulta: só reaproveita o que o `lookup` já pagou.
+   */
+  nomeOficialEmCache(crmv: string): string | undefined {
+    const { numero, uf } = this.parseCrmv(crmv);
+    const guardada = this.consultas.get(`${uf}-${numero}`);
+    if (!guardada || guardada.expiraEm < Date.now()) return undefined;
+    return guardada.resultado.valid ? guardada.resultado.nome : undefined;
+  }
+
+  /** Consulta paga, com cache curto em memória (ver `CONSULTA_TTL_MS`). */
+  private async consultar(
+    numero: string,
+    uf: string,
+  ): Promise<CrmvValidationResult> {
+    const chave = `${uf}-${numero}`;
+    const guardada = this.consultas.get(chave);
+    if (guardada && guardada.expiraEm > Date.now()) {
+      return guardada.resultado;
+    }
+
+    const resultado = await this.validator.validate(numero, uf);
+    this.consultas.delete(chave);
+    this.consultas.set(chave, {
+      resultado,
+      expiraEm: Date.now() + CONSULTA_TTL_MS,
+    });
+    // Map guarda ordem de inserção: o primeiro é o mais antigo.
+    if (this.consultas.size > CONSULTA_MAX_ENTRADAS) {
+      const [maisAntiga] = this.consultas.keys();
+      if (maisAntiga) this.consultas.delete(maisAntiga);
+    }
+    return resultado;
   }
 }

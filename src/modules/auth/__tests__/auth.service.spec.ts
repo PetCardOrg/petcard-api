@@ -33,7 +33,11 @@ describe('AuthService', () => {
     veterinario: { findUnique: jest.Mock; create: jest.Mock };
   };
   let jwtService: { sign: jest.Mock };
-  let crmvVerification: { parseCrmv: jest.Mock; verify: jest.Mock };
+  let crmvVerification: {
+    parseCrmv: jest.Mock;
+    verify: jest.Mock;
+    nomeOficialEmCache: jest.Mock;
+  };
   let authToken: { issue: jest.Mock; consume: jest.Mock };
   let mail: { sendEmailVerification: jest.Mock; sendPasswordReset: jest.Mock };
   let config: { get: jest.Mock };
@@ -68,6 +72,7 @@ describe('AuthService', () => {
     crmvVerification = {
       parseCrmv: jest.fn().mockReturnValue({ numero: '12345', uf: 'SP' }),
       verify: jest.fn().mockResolvedValue({ verified: true }),
+      nomeOficialEmCache: jest.fn().mockReturnValue(undefined),
     };
     authToken = {
       issue: jest.fn().mockResolvedValue('raw-token'),
@@ -615,6 +620,18 @@ describe('AuthService', () => {
       expect(result.user.role).toBe('VET');
       expect(result.crmv_verificado).toBe(true);
       expect(crmvVerification.verify).toHaveBeenCalledWith('vet-9');
+    });
+
+    it('grava o nome do registro oficial quando o CRMV foi consultado antes', async () => {
+      // O formulário trava o nome vindo do CFMV; o corpo da requisição não
+      // pode contornar isso mandando outro nome.
+      crmvVerification.nomeOficialEmCache.mockReturnValue('CARLOS DA SILVA');
+
+      await service.registerVeterinario({ ...novoVet, nome: 'Outro Nome' });
+
+      expect(prisma.veterinario.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ nome: 'CARLOS DA SILVA' }) as object,
+      });
     });
 
     it('não devolve o hash da senha', async () => {

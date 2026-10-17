@@ -4,18 +4,22 @@ import {
   Get,
   HttpCode,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import {
+  ApiBadRequestResponse,
   ApiConflictResponse,
   ApiOperation,
+  ApiQuery,
   ApiTags,
   ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { CreateVeterinarioDto } from '@petcardorg/shared';
 import { LIMITE_DE_ROTA_CARA } from '../../config/throttler.config';
+import type { CrmvConsulta } from '../veterinario/crmv/crmv-verification.service';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -150,6 +154,28 @@ export class AuthController {
   @ApiOperation({ summary: 'Payload do JWT do usuário autenticado' })
   getProfile(@CurrentUser() user: JwtPayload): JwtPayload {
     return user;
+  }
+
+  @Get('veterinario/crmv')
+  @Public()
+  // Consulta paga por chamada numa rota pública: o teto é o das rotas caras,
+  // não o do login. O cache curto do serviço faz o cadastro logo em seguida
+  // reaproveitar esta consulta.
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ auth: { limit: LIMITE_DE_ROTA_CARA } })
+  @SkipThrottle({ 'public-card': true, places: true, 'clinica-photo': true })
+  @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
+  @ApiOperation({
+    summary: 'Consultar CRMV antes do cadastro do veterinário',
+    description:
+      'Primeiro passo do cadastro: devolve o CRMV no formato canônico, se ' +
+      'está regular e o nome no cadastro do CFMV, que o cadastro passa a usar.',
+  })
+  @ApiQuery({ name: 'crmv', example: 'CRMV-SP 12345' })
+  @ApiBadRequestResponse({ description: 'CRMV em formato irreconhecível' })
+  @ApiConflictResponse({ description: 'CRMV já cadastrado' })
+  consultarCrmv(@Query('crmv') crmv: string): Promise<CrmvConsulta> {
+    return this.authService.consultarCrmv(crmv ?? '');
   }
 
   @Post('veterinario/register')
