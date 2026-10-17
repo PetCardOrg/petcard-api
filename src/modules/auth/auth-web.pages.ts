@@ -44,9 +44,15 @@ const STYLE = `<style>
   button.primary { width: 100%; margin-top: 22px; padding: 14px; font-size: 16px; font-weight: 700; color: #fff; background: #27A9D8; border: 0; border-radius: 12px; cursor: pointer; }
   .foot { background: #E6F7FC; padding: 16px 28px; font-size: 12px; color: #7C93A0; text-align: center; }
   .ok-mark { font-size: 40px; }
+  .perks { margin: 4px 0 8px; padding: 0; list-style: none; }
+  .perks li { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid #EEF6FA; font-size: 14px; line-height: 1.5; color: #3D525C; }
+  .perks li:first-child { border-top: 0; }
+  .perks .ico { flex: none; width: 32px; height: 32px; border-radius: 9px; background: #E6F7FC; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .perks strong { display: block; color: #14313F; font-size: 14px; }
+  .hint { font-size: 13px; color: #7C93A0; text-align: center; margin: 18px 0 0; }
 </style>`;
 
-function shell(title: string, inner: string, headExtra = ''): string {
+export function shell(title: string, inner: string, headExtra = ''): string {
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title>${STYLE}${headExtra}</head>

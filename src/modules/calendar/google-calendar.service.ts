@@ -31,6 +31,28 @@ const DEFAULT_TOKEN_TTL_MS = 3_600_000;
 /** Janela de vida do `state` do OAuth — tempo de dar o consentimento. */
 const STATE_TTL_MS = 10 * 60 * 1000;
 
+/**
+ * Esquemas pelos quais o app pode pedir para ser reaberto depois do
+ * consentimento: `petcard` no app instalado, `exp`/`exps` no Expo Go.
+ */
+const APP_RETURN_SCHEMES = ['petcard:', 'exp:', 'exps:'];
+const MAX_RETURN_URL_LENGTH = 300;
+
+export function isAppReturnUrl(value: string): boolean {
+  if (value.length > MAX_RETURN_URL_LENGTH) return false;
+  try {
+    return APP_RETURN_SCHEMES.includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+}
+
+export interface ResolvedState {
+  tutorId: string;
+  /** Endereço do app validado em `getAuthUrl`; ausente se o app não pediu. */
+  returnUrl?: string;
+}
+
 @Injectable()
 export class GoogleCalendarService {
   private readonly logger = new Logger(GoogleCalendarService.name);
@@ -61,25 +83,32 @@ export class GoogleCalendarService {
    * compromissos que ela criasse. Sem assinatura o parâmetro não prova nada
    * sobre quem começou o fluxo.
    */
-  private signState(tutorId: string): string {
+  private signState(tutorId: string, returnUrl?: string): string {
     const nonce = randomBytes(16).toString('base64url');
     const expiresAt = Date.now() + STATE_TTL_MS;
-    const payload = `${tutorId}.${nonce}.${expiresAt}`;
+    const retorno = returnUrl
+      ? Buffer.from(returnUrl).toString('base64url')
+      : '';
+    const payload = `${tutorId}.${nonce}.${expiresAt}.${retorno}`;
     return `${payload}.${this.stateSignature(payload)}`;
   }
 
   /**
-   * Confere a assinatura e o prazo do `state` e devolve o tutor de origem.
+   * Confere a assinatura e o prazo do `state` e devolve o tutor de origem e,
+   * se o app pediu, o endereço para onde devolvê-lo. A volta viaja assinada
+   * junto: ninguém troca o destino da página de sucesso sem invalidar o state.
    * Qualquer inconsistência derruba o fluxo antes de trocar o código.
    */
-  resolveState(state: string): string {
+  resolveState(state: string): ResolvedState {
     const partes = state?.split('.') ?? [];
-    if (partes.length !== 4) {
+    if (partes.length !== 5) {
       throw new BadRequestException('Parâmetro state inválido.');
     }
 
-    const [tutorId, nonce, expiresAtRaw, assinatura] = partes;
-    const esperada = this.stateSignature(`${tutorId}.${nonce}.${expiresAtRaw}`);
+    const [tutorId, nonce, expiresAtRaw, retorno, assinatura] = partes;
+    const esperada = this.stateSignature(
+      `${tutorId}.${nonce}.${expiresAtRaw}.${retorno}`,
+    );
 
     const recebida = Buffer.from(assinatura);
     const referencia = Buffer.from(esperada);
@@ -97,7 +126,12 @@ export class GoogleCalendarService {
       );
     }
 
-    return tutorId;
+    return {
+      tutorId,
+      returnUrl: retorno
+        ? Buffer.from(retorno, 'base64url').toString()
+        : undefined,
+    };
   }
 
   private stateSignature(payload: string): string {
@@ -122,15 +156,25 @@ export class GoogleCalendarService {
     );
   }
 
-  getAuthUrl(tutorId: string): string | null {
+  /**
+   * `returnUrl` é o endereço do app que a página de sucesso abre de volta — é
+   * o que fecha a aba de consentimento sozinha. Só aceita os esquemas do
+   * próprio app: qualquer outro faria de uma página do PetCard um
+   * redirecionamento aberto.
+   */
+  getAuthUrl(tutorId: string, returnUrl?: string): string | null {
     if (!this.isConfigured) return null;
+
+    if (returnUrl !== undefined && !isAppReturnUrl(returnUrl)) {
+      throw new BadRequestException('return_url inválida.');
+    }
 
     const oauth2Client = this.createOAuth2Client();
     return oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: SCOPES,
       prompt: 'consent',
-      state: this.signState(tutorId),
+      state: this.signState(tutorId, returnUrl),
     });
   }
 
