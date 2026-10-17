@@ -54,6 +54,7 @@ describe('GoogleCalendarService', () => {
       deleteMany: jest.Mock;
       update: jest.Mock;
     };
+    healthCalendarEvent: { deleteMany: jest.Mock };
     appointment: {
       update: jest.Mock;
       findUnique: jest.Mock;
@@ -97,6 +98,9 @@ describe('GoogleCalendarService', () => {
         findUnique: jest.fn(),
         deleteMany: jest.fn().mockResolvedValue(undefined),
         update: jest.fn().mockResolvedValue(undefined),
+      },
+      healthCalendarEvent: {
+        deleteMany: jest.fn().mockResolvedValue(undefined),
       },
       appointment: {
         update: jest.fn().mockResolvedValue(undefined),
@@ -389,9 +393,14 @@ describe('GoogleCalendarService', () => {
       await expect(service.isConnected('tutor-1')).resolves.toBe(false);
     });
 
-    it('disconnect remove os tokens do tutor', async () => {
+    it('disconnect remove os tokens do tutor e esquece os eventos de saúde', async () => {
       await service.disconnect('tutor-1');
       expect(prisma.googleOAuthToken.deleteMany).toHaveBeenCalledWith({
+        where: { tutorId: 'tutor-1' },
+      });
+      // Reconectar (talvez com outra conta) precisa recriar os eventos, não
+      // tentar atualizar os da agenda antiga.
+      expect(prisma.healthCalendarEvent.deleteMany).toHaveBeenCalledWith({
         where: { tutorId: 'tutor-1' },
       });
     });

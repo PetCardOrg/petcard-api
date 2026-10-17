@@ -2,20 +2,27 @@ import { Controller, Logger } from '@nestjs/common';
 import { Ctx, MessagePattern, Payload } from '@nestjs/microservices';
 import type { RmqContext } from '@nestjs/microservices';
 import type { Channel, ConsumeMessage } from 'amqplib';
-import type { CalendarSyncMessage } from '../queue/dto/calendar-sync.message';
+import type {
+  CalendarSyncMessage,
+  HealthRecordSyncMessage,
+} from '../queue/dto/calendar-sync.message';
 import {
   CALENDAR_SYNC_MAX_RETRIES,
   CALENDAR_SYNC_PATTERN,
   CALENDAR_SYNC_RETRY_HEADER,
 } from '../queue/queue.constants';
 import { GoogleCalendarService } from './google-calendar.service';
+import { HealthCalendarService } from './health-calendar.service';
 import { extractGoogleStatus, isAlreadyGoneError } from './google-api-error';
 
 @Controller()
 export class CalendarSyncConsumer {
   private readonly logger = new Logger(CalendarSyncConsumer.name);
 
-  constructor(private readonly calendarService: GoogleCalendarService) {}
+  constructor(
+    private readonly calendarService: GoogleCalendarService,
+    private readonly healthCalendar: HealthCalendarService,
+  ) {}
 
   @MessagePattern(CALENDAR_SYNC_PATTERN)
   async handleSync(
@@ -24,6 +31,11 @@ export class CalendarSyncConsumer {
   ): Promise<void> {
     const channel = context.getChannelRef() as Channel;
     const message = context.getMessage() as ConsumeMessage;
+
+    if (data?.kind === 'HEALTH_RECORD') {
+      await this.handleHealthRecord(data, channel, message);
+      return;
+    }
 
     if (!data?.appointment_id || !data?.tutor_id || !data?.action) {
       this.logger.warn(
@@ -85,7 +97,7 @@ export class CalendarSyncConsumer {
 
       const reason = error instanceof Error ? error.message : String(error);
       await this.retryOrDlq(
-        data.appointment_id,
+        `appointment ${data.appointment_id}`,
         data.action,
         reason,
         channel,
@@ -94,8 +106,46 @@ export class CalendarSyncConsumer {
     }
   }
 
+  private async handleHealthRecord(
+    data: HealthRecordSyncMessage,
+    channel: Channel,
+    message: ConsumeMessage,
+  ): Promise<void> {
+    if (!data.record_type || !data.record_id) {
+      this.logger.warn(
+        'Received calendar.sync health message with missing record_type/record_id',
+      );
+      channel.ack(message);
+      return;
+    }
+
+    try {
+      await this.healthCalendar.reconcile(data.record_type, data.record_id);
+      channel.ack(message);
+    } catch (error) {
+      // Acesso revogado: repetir não adianta. O token morto é descartado no
+      // próximo sync de agendamento; o catch-up da reconexão recupera este.
+      if (this.isPermanentAuthError(error)) {
+        this.logger.warn(
+          `Calendar OAuth revoked for ${data.record_type} ${data.record_id}; skipping`,
+        );
+        channel.ack(message);
+        return;
+      }
+
+      const reason = error instanceof Error ? error.message : String(error);
+      await this.retryOrDlq(
+        `${data.record_type} ${data.record_id}`,
+        'RECONCILE',
+        reason,
+        channel,
+        message,
+      );
+    }
+  }
+
   private async retryOrDlq(
-    appointmentId: string,
+    subject: string,
     action: string,
     reason: string,
     channel: Channel,
@@ -105,7 +155,7 @@ export class CalendarSyncConsumer {
 
     if (retryCount < CALENDAR_SYNC_MAX_RETRIES) {
       this.logger.warn(
-        `Retry ${retryCount + 1}/${CALENDAR_SYNC_MAX_RETRIES} for appointment ${appointmentId} (${action}): ${reason}`,
+        `Retry ${retryCount + 1}/${CALENDAR_SYNC_MAX_RETRIES} for ${subject} (${action}): ${reason}`,
       );
       channel.publish('', message.fields.routingKey, message.content, {
         ...message.properties,
@@ -119,7 +169,7 @@ export class CalendarSyncConsumer {
     }
 
     this.logger.error(
-      `Exhausted retries for appointment ${appointmentId} (${action}): ${reason}; routing to DLQ`,
+      `Exhausted retries for ${subject} (${action}): ${reason}; routing to DLQ`,
     );
     channel.nack(message, false, false);
     return Promise.resolve();

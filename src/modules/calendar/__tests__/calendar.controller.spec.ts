@@ -10,6 +10,7 @@ import {
 } from '../../../../test/utils/controller-harness';
 import { CalendarController } from '../calendar.controller';
 import { GoogleCalendarService } from '../google-calendar.service';
+import { HealthCalendarService } from '../health-calendar.service';
 
 describe('CalendarController (integração)', () => {
   let harness: ControllerHarness;
@@ -22,6 +23,7 @@ describe('CalendarController (integração)', () => {
     syncAllPending: jest.Mock;
   };
   let nodeEnv: string;
+  const healthCalendar = { syncAllForTutor: jest.fn() };
 
   beforeAll(async () => {
     calendar = {
@@ -37,6 +39,7 @@ describe('CalendarController (integração)', () => {
       controllers: [CalendarController],
       providers: [
         { provide: GoogleCalendarService, useValue: calendar },
+        { provide: HealthCalendarService, useValue: healthCalendar },
         {
           provide: ConfigService,
           useValue: {
@@ -53,6 +56,7 @@ describe('CalendarController (integração)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    healthCalendar.syncAllForTutor.mockResolvedValue(0);
     harness.setUser(TUTOR);
     nodeEnv = 'test';
   });
@@ -98,6 +102,8 @@ describe('CalendarController (integração)', () => {
       expect(res.text).toContain('Google Agenda conectado!');
       expect(calendar.resolveState).toHaveBeenCalledWith('state-assinado');
       expect(calendar.handleCallback).toHaveBeenCalledWith('abc', 'tutor-1');
+      // Doses e tratamentos já registrados vão para a agenda recém-conectada.
+      expect(healthCalendar.syncAllForTutor).toHaveBeenCalledWith('tutor-1');
     });
 
     describe('quando o app pediu para voltar (return_url no state)', () => {
