@@ -12,6 +12,7 @@ import {
   UpdateMedicationRecordDto,
 } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { CalendarSyncPublisher } from '../../queue/calendar-sync.publisher';
 import { ANEXOS_ATIVOS, toAnexoResponseDto } from '../../anexo/anexo.mapper';
 import { PetService } from '../../pet/pet.service';
 import { AcaoClinicaService } from '../../historico/acao-clinica.service';
@@ -70,6 +71,7 @@ export class MedicationService {
     private readonly prisma: PrismaService,
     private readonly petService: PetService,
     private readonly acoes: AcaoClinicaService,
+    private readonly calendarSync: CalendarSyncPublisher,
   ) {}
 
   async create(
@@ -112,6 +114,7 @@ export class MedicationService {
       );
       return criado;
     });
+    await this.calendarSync.publishHealthRecord('MEDICACAO', record.id);
     return toResponseDto(record);
   }
 
@@ -166,6 +169,7 @@ export class MedicationService {
       );
       return alterado;
     });
+    await this.calendarSync.publishHealthRecord('MEDICACAO', id);
     return toResponseDto(updated);
   }
 
@@ -202,6 +206,7 @@ export class MedicationService {
         tx,
       );
     });
+    await this.calendarSync.publishHealthRecord('MEDICACAO', id);
   }
 
   private async getRecord(id: string): Promise<MedicationRecord> {

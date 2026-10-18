@@ -1,16 +1,20 @@
 import { RmqContext } from '@nestjs/microservices';
 import { Test, TestingModule } from '@nestjs/testing';
-import type { CalendarSyncMessage } from '../../queue/dto/calendar-sync.message';
+import type {
+  AppointmentSyncMessage,
+  CalendarSyncMessage,
+} from '../../queue/dto/calendar-sync.message';
 import {
   CALENDAR_SYNC_MAX_RETRIES,
   CALENDAR_SYNC_RETRY_HEADER,
 } from '../../queue/queue.constants';
 import { CalendarSyncConsumer } from '../calendar-sync.consumer';
 import { GoogleCalendarService } from '../google-calendar.service';
+import { HealthCalendarService } from '../health-calendar.service';
 
 const createMessage = (
-  overrides: Partial<CalendarSyncMessage> = {},
-): CalendarSyncMessage => ({
+  overrides: Partial<AppointmentSyncMessage> = {},
+): AppointmentSyncMessage => ({
   action: 'CREATE',
   appointment_id: 'appt-1',
   tutor_id: 'tutor-1',
@@ -42,6 +46,7 @@ describe('CalendarSyncConsumer', () => {
     disconnect: jest.Mock;
   };
   let channel: { ack: jest.Mock; nack: jest.Mock; publish: jest.Mock };
+  let healthCalendar: { reconcile: jest.Mock };
 
   beforeEach(async () => {
     calendarService = {
@@ -50,11 +55,13 @@ describe('CalendarSyncConsumer', () => {
       disconnect: jest.fn().mockResolvedValue(undefined),
     };
     channel = { ack: jest.fn(), nack: jest.fn(), publish: jest.fn() };
+    healthCalendar = { reconcile: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CalendarSyncConsumer,
         { provide: GoogleCalendarService, useValue: calendarService },
+        { provide: HealthCalendarService, useValue: healthCalendar },
       ],
     }).compile();
 
@@ -226,5 +233,51 @@ describe('CalendarSyncConsumer', () => {
     expect(channel.nack).toHaveBeenCalledWith(message, false, false);
     expect(channel.publish).not.toHaveBeenCalled();
     expect(channel.ack).not.toHaveBeenCalled();
+  });
+
+  describe('registro de saúde', () => {
+    const healthMessage: CalendarSyncMessage = {
+      kind: 'HEALTH_RECORD',
+      record_type: 'VACINA',
+      record_id: 'vac-1',
+    };
+
+    it('reconcilia o registro e confirma a mensagem', async () => {
+      const { context, message } = buildContext(channel, healthMessage);
+
+      await consumer.handleSync(healthMessage, context);
+
+      expect(healthCalendar.reconcile).toHaveBeenCalledWith('VACINA', 'vac-1');
+      expect(calendarService.syncAppointment).not.toHaveBeenCalled();
+      expect(channel.ack).toHaveBeenCalledWith(message);
+    });
+
+    it('reenfileira com retry quando o Google falha de forma transitória', async () => {
+      healthCalendar.reconcile.mockRejectedValue(new Error('503 backend'));
+      const { context, message } = buildContext(channel, healthMessage);
+
+      await consumer.handleSync(healthMessage, context);
+
+      expect(channel.publish).toHaveBeenCalledWith(
+        '',
+        'calendar.sync',
+        message.content,
+        expect.objectContaining({
+          headers: { [CALENDAR_SYNC_RETRY_HEADER]: 1 },
+        }),
+      );
+      expect(channel.ack).toHaveBeenCalledWith(message);
+    });
+
+    it('não insiste quando o acesso à agenda foi revogado', async () => {
+      healthCalendar.reconcile.mockRejectedValue(new Error('invalid_grant'));
+      const { context, message } = buildContext(channel, healthMessage);
+
+      await consumer.handleSync(healthMessage, context);
+
+      expect(channel.publish).not.toHaveBeenCalled();
+      expect(channel.nack).not.toHaveBeenCalled();
+      expect(channel.ack).toHaveBeenCalledWith(message);
+    });
   });
 });

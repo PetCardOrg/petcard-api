@@ -16,7 +16,10 @@ import { OAuth2Client } from 'google-auth-library';
 import { CreateVeterinarioDto, normalizeEmail } from '@petcardorg/shared';
 import { BCRYPT_ROUNDS } from '../../common/crypto/password.constants';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CrmvVerificationService } from '../veterinario/crmv/crmv-verification.service';
+import {
+  CrmvVerificationService,
+  type CrmvConsulta,
+} from '../veterinario/crmv/crmv-verification.service';
 import { MailService } from '../mail/mail.service';
 import { AuthTokenService } from './auth-token.service';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -242,6 +245,11 @@ export class AuthService {
       return;
     }
     await this.dispatchEmailVerification(tutor);
+  }
+
+  /** Primeiro passo do cadastro do vet: o CRMV antes dos demais campos. */
+  consultarCrmv(crmv: string): Promise<CrmvConsulta> {
+    return this.crmvVerification.lookup(crmv);
   }
 
   /**

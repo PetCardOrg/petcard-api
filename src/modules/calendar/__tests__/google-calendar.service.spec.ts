@@ -54,6 +54,7 @@ describe('GoogleCalendarService', () => {
       deleteMany: jest.Mock;
       update: jest.Mock;
     };
+    healthCalendarEvent: { deleteMany: jest.Mock };
     appointment: {
       update: jest.Mock;
       findUnique: jest.Mock;
@@ -98,6 +99,9 @@ describe('GoogleCalendarService', () => {
         deleteMany: jest.fn().mockResolvedValue(undefined),
         update: jest.fn().mockResolvedValue(undefined),
       },
+      healthCalendarEvent: {
+        deleteMany: jest.fn().mockResolvedValue(undefined),
+      },
       appointment: {
         update: jest.fn().mockResolvedValue(undefined),
         findUnique: jest.fn(),
@@ -130,9 +134,21 @@ describe('GoogleCalendarService', () => {
         scope: SCOPES,
         prompt: 'consent',
         state: expect.stringMatching(
-          /^tutor-1\.[\w-]+\.\d+\.[\w-]+$/,
+          /^tutor-1\.[\w-]+\.\d+\.\.[\w-]+$/,
         ) as string,
       });
+    });
+
+    it('recusa return_url fora dos esquemas do app', () => {
+      // Sem a lista, a página pública do callback viraria um redirecionamento
+      // aberto assinado pelo PetCard.
+      expect(() =>
+        service.getAuthUrl('tutor-1', 'https://site-malicioso.com/x'),
+      ).toThrow(BadRequestException);
+      expect(() =>
+        service.getAuthUrl('tutor-1', 'javascript:alert(1)'),
+      ).toThrow(BadRequestException);
+      expect(mockOAuth2Instance.generateAuthUrl).not.toHaveBeenCalled();
     });
 
     it('retorna null quando o Google Calendar não está configurado', () => {
@@ -149,8 +165,8 @@ describe('GoogleCalendarService', () => {
 
   describe('resolveState', () => {
     /** Extrai o state que o getAuthUrl acabou de emitir. */
-    const emitirState = (tutorId: string): string => {
-      service.getAuthUrl(tutorId);
+    const emitirState = (tutorId: string, returnUrl?: string): string => {
+      service.getAuthUrl(tutorId, returnUrl);
       const call = mockOAuth2Instance.generateAuthUrl.mock.calls.at(-1) as [
         { state: string },
       ];
@@ -158,17 +174,40 @@ describe('GoogleCalendarService', () => {
     };
 
     it('devolve o tutor de origem do state que ele mesmo assinou', () => {
-      expect(service.resolveState(emitirState('tutor-1'))).toBe('tutor-1');
+      expect(service.resolveState(emitirState('tutor-1'))).toEqual({
+        tutorId: 'tutor-1',
+        returnUrl: undefined,
+      });
+    });
+
+    it('devolve a volta ao app que viajou assinada no state', () => {
+      const state = emitirState('tutor-1', 'exp://192.168.0.10:8081/--/agenda');
+
+      expect(service.resolveState(state)).toEqual({
+        tutorId: 'tutor-1',
+        returnUrl: 'exp://192.168.0.10:8081/--/agenda',
+      });
     });
 
     it('recusa state forjado com outro tutor', () => {
       // O ataque que a assinatura fecha: chamar o callback com o id da vítima
       // e um code do atacante, pendurando a agenda dele na conta dela.
       const state = emitirState('tutor-1');
-      const [, nonce, exp, sig] = state.split('.');
-      const forjado = ['tutor-vitima', nonce, exp, sig].join('.');
+      const [, nonce, exp, retorno, sig] = state.split('.');
+      const forjado = ['tutor-vitima', nonce, exp, retorno, sig].join('.');
 
       expect(() => service.resolveState(forjado)).toThrow(BadRequestException);
+    });
+
+    it('recusa state com a volta ao app trocada', () => {
+      const state = emitirState('tutor-1', 'petcard://agenda');
+      const [tutorId, nonce, exp, , sig] = state.split('.');
+      const outraVolta = Buffer.from('petcard://outro').toString('base64url');
+      const adulterado = [tutorId, nonce, exp, outraVolta, sig].join('.');
+
+      expect(() => service.resolveState(adulterado)).toThrow(
+        BadRequestException,
+      );
     });
 
     it('recusa state sem assinatura', () => {
@@ -180,7 +219,7 @@ describe('GoogleCalendarService', () => {
     it('recusa state expirado', () => {
       const state = emitirState('tutor-1');
       const [tutorId, nonce] = state.split('.');
-      const vencido = `${tutorId}.${nonce}.${Date.now() - 1000}`;
+      const vencido = `${tutorId}.${nonce}.${Date.now() - 1000}.`;
       // Assinatura correta para um prazo já vencido não vale.
       const service2 = service as unknown as {
         stateSignature: (p: string) => string;
@@ -354,9 +393,14 @@ describe('GoogleCalendarService', () => {
       await expect(service.isConnected('tutor-1')).resolves.toBe(false);
     });
 
-    it('disconnect remove os tokens do tutor', async () => {
+    it('disconnect remove os tokens do tutor e esquece os eventos de saúde', async () => {
       await service.disconnect('tutor-1');
       expect(prisma.googleOAuthToken.deleteMany).toHaveBeenCalledWith({
+        where: { tutorId: 'tutor-1' },
+      });
+      // Reconectar (talvez com outra conta) precisa recriar os eventos, não
+      // tentar atualizar os da agenda antiga.
+      expect(prisma.healthCalendarEvent.deleteMany).toHaveBeenCalledWith({
         where: { tutorId: 'tutor-1' },
       });
     });

@@ -4,11 +4,12 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { CalendarController } from './calendar.controller';
 import { CalendarSyncConsumer } from './calendar-sync.consumer';
 import { GoogleCalendarService } from './google-calendar.service';
+import { HealthCalendarService } from './health-calendar.service';
 
 @Module({
   imports: [AuthModule, PrismaModule],
   controllers: [CalendarController, CalendarSyncConsumer],
-  providers: [GoogleCalendarService],
-  exports: [GoogleCalendarService],
+  providers: [GoogleCalendarService, HealthCalendarService],
+  exports: [GoogleCalendarService, HealthCalendarService],
 })
 export class CalendarModule {}

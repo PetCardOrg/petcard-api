@@ -33,7 +33,10 @@ describe('AuthService', () => {
     veterinario: { findUnique: jest.Mock; create: jest.Mock };
   };
   let jwtService: { sign: jest.Mock };
-  let crmvVerification: { parseCrmv: jest.Mock; verify: jest.Mock };
+  let crmvVerification: {
+    parseCrmv: jest.Mock;
+    verify: jest.Mock;
+  };
   let authToken: { issue: jest.Mock; consume: jest.Mock };
   let mail: { sendEmailVerification: jest.Mock; sendPasswordReset: jest.Mock };
   let config: { get: jest.Mock };

@@ -10,6 +10,7 @@ import {
 } from '../../../../test/utils/controller-harness';
 import { CalendarController } from '../calendar.controller';
 import { GoogleCalendarService } from '../google-calendar.service';
+import { HealthCalendarService } from '../health-calendar.service';
 
 describe('CalendarController (integração)', () => {
   let harness: ControllerHarness;
@@ -22,11 +23,12 @@ describe('CalendarController (integração)', () => {
     syncAllPending: jest.Mock;
   };
   let nodeEnv: string;
+  const healthCalendar = { syncAllForTutor: jest.fn() };
 
   beforeAll(async () => {
     calendar = {
       getAuthUrl: jest.fn(),
-      resolveState: jest.fn().mockReturnValue('tutor-1'),
+      resolveState: jest.fn().mockReturnValue({ tutorId: 'tutor-1' }),
       handleCallback: jest.fn().mockResolvedValue(undefined),
       isConnected: jest.fn(),
       disconnect: jest.fn().mockResolvedValue(undefined),
@@ -37,6 +39,7 @@ describe('CalendarController (integração)', () => {
       controllers: [CalendarController],
       providers: [
         { provide: GoogleCalendarService, useValue: calendar },
+        { provide: HealthCalendarService, useValue: healthCalendar },
         {
           provide: ConfigService,
           useValue: {
@@ -53,6 +56,7 @@ describe('CalendarController (integração)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    healthCalendar.syncAllForTutor.mockResolvedValue(0);
     harness.setUser(TUTOR);
     nodeEnv = 'test';
   });
@@ -95,9 +99,57 @@ describe('CalendarController (integração)', () => {
         .get('/calendar/callback?code=abc&state=state-assinado')
         .expect(200);
 
-      expect(res.text).toContain('conectado com sucesso');
+      expect(res.text).toContain('Google Agenda conectado!');
       expect(calendar.resolveState).toHaveBeenCalledWith('state-assinado');
       expect(calendar.handleCallback).toHaveBeenCalledWith('abc', 'tutor-1');
+      // Doses e tratamentos já registrados vão para a agenda recém-conectada.
+      expect(healthCalendar.syncAllForTutor).toHaveBeenCalledWith('tutor-1');
+    });
+
+    describe('quando o app pediu para voltar (return_url no state)', () => {
+      beforeEach(() => {
+        harness.setUser(null);
+        calendar.resolveState.mockReturnValue({
+          tutorId: 'tutor-1',
+          returnUrl: 'petcard://agenda',
+        });
+      });
+
+      afterEach(() => {
+        calendar.resolveState.mockReturnValue({ tutorId: 'tutor-1' });
+      });
+
+      it('devolve ao app com calendar=connected depois de salvar os tokens', async () => {
+        const res = await request(harness.app.getHttpServer())
+          .get('/calendar/callback?code=abc&state=state-assinado')
+          .expect(302);
+
+        expect(res.headers.location).toBe(
+          'petcard://agenda?calendar=connected',
+        );
+        expect(calendar.handleCallback).toHaveBeenCalledWith('abc', 'tutor-1');
+      });
+
+      it('devolve calendar=denied quando o tutor nega o consentimento', async () => {
+        const res = await request(harness.app.getHttpServer())
+          .get('/calendar/callback?error=access_denied&state=state-assinado')
+          .expect(302);
+
+        expect(res.headers.location).toBe('petcard://agenda?calendar=denied');
+        expect(calendar.handleCallback).not.toHaveBeenCalled();
+      });
+
+      it('devolve calendar=error sem vazar o detalhe da falha', async () => {
+        calendar.handleCallback.mockRejectedValueOnce(
+          new Error('ENCRYPTION_KEY ausente'),
+        );
+
+        const res = await request(harness.app.getHttpServer())
+          .get('/calendar/callback?code=abc&state=state-assinado')
+          .expect(302);
+
+        expect(res.headers.location).toBe('petcard://agenda?calendar=error');
+      });
     });
 
     it('recusa state que não passa na verificação (400)', async () => {
