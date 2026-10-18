@@ -91,12 +91,13 @@ model Tutor {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  pets             Pet[]
-  appointments     Appointment[]
-  notifications    Notification[]
-  deviceTokens     DeviceToken[]
-  googleOAuthToken GoogleOAuthToken?
-  authTokens       AuthToken[]
+  pets                 Pet[]
+  appointments         Appointment[]
+  notifications        Notification[]
+  deviceTokens         DeviceToken[]
+  googleOAuthToken     GoogleOAuthToken?
+  healthCalendarEvents HealthCalendarEvent[]
+  authTokens           AuthToken[]
 
   @@map("tutor")
 }
@@ -551,4 +552,26 @@ model AnexoClinico {
   @@index([medicationRecordId])
   @@index([verificadoPorId])
   @@map("anexo_clinico")
+}
+
+/// Evento que o PetCard criou no Google Agenda do tutor para um registro de
+/// saúde: próxima dose de vacina ou vermífugo, período de uma medicação.
+///
+/// O vínculo fica fora das tabelas de prontuário de propósito — sincronizar
+/// agenda é preocupação do tutor conectado, não dado clínico. O registro é
+/// apontado por `entidade` + `registroId` (as três tabelas não têm FK comum).
+model HealthCalendarEvent {
+  id            String          @id @default(uuid())
+  tutorId       String          @map("tutor_id")
+  entidade      EntidadeClinica
+  registroId    String          @map("registro_id")
+  googleEventId String          @map("google_event_id")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  tutor Tutor @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+  @@unique([entidade, registroId])
+  @@index([tutorId])
+  @@map("health_calendar_event")
 }

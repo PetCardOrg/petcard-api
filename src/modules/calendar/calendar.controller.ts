@@ -29,6 +29,7 @@ import {
   GoogleCalendarService,
   type ResolvedState,
 } from './google-calendar.service';
+import { HealthCalendarService } from './health-calendar.service';
 
 /** Resultado que o app lê na volta (`?calendar=`) para mostrar a confirmação. */
 type CallbackOutcome = 'connected' | 'denied' | 'error';
@@ -46,6 +47,7 @@ export class CalendarController {
 
   constructor(
     private readonly googleCalendarService: GoogleCalendarService,
+    private readonly healthCalendar: HealthCalendarService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -147,6 +149,18 @@ export class CalendarController {
     const { tutorId } = resolved;
     try {
       await this.googleCalendarService.handleCallback(code, tutorId);
+      // Próximas doses e tratamentos em curso que já estavam registrados antes
+      // da conexão. Fora do caminho da resposta, como o catch-up de
+      // agendamentos dentro do handleCallback.
+      void this.healthCalendar
+        .syncAllForTutor(tutorId)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `Catch-up de saúde falhou para o tutor ${tutorId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          ),
+        );
     } catch (err) {
       this.logger.error(
         `Falha ao concluir o callback do Google Calendar (tutor ${tutorId})`,

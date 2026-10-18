@@ -264,6 +264,12 @@ export class GoogleCalendarService {
     await this.prisma.googleOAuthToken.deleteMany({
       where: { tutorId },
     });
+    // Os eventos de saúde apontam para a agenda que acabou de sair. Sem
+    // esquecê-los, uma reconexão (talvez com outra conta Google) tentaria
+    // atualizar eventos que não são dela em vez de criar os novos.
+    await this.prisma.healthCalendarEvent.deleteMany({
+      where: { tutorId },
+    });
   }
 
   async createEvent(
@@ -532,7 +538,8 @@ export class GoogleCalendarService {
     return resolveTimeZone(tutor?.timezone);
   }
 
-  private async getCalendarClient(
+  /** Cliente autenticado da agenda do tutor; `null` se ele não conectou. */
+  async getCalendarClient(
     tutorId: string,
   ): Promise<calendar_v3.Calendar | null> {
     const token = await this.prisma.googleOAuthToken.findUnique({

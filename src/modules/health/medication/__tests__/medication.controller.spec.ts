@@ -11,6 +11,7 @@ import {
   VET,
 } from '../../../../../test/utils/controller-harness';
 import { PrismaService } from '../../../../prisma/prisma.service';
+import { CalendarSyncPublisher } from '../../../queue/calendar-sync.publisher';
 import { QrCodePublisher } from '../../../queue/qr-code.publisher';
 import { CardService } from '../../../card/card.service';
 import { ColeiraService } from '../../../coleira/coleira.service';
@@ -83,6 +84,10 @@ describe('MedicationController (integração)', () => {
         {
           provide: QrCodePublisher,
           useValue: { publishGenerate: jest.fn() },
+        },
+        {
+          provide: CalendarSyncPublisher,
+          useValue: { publishHealthRecord: jest.fn() },
         },
         { provide: CardService, useValue: { rotateTokenForPet: jest.fn() } },
         { provide: ColeiraService, useValue: { rotateTokenForPet: jest.fn() } },

@@ -12,6 +12,7 @@ import {
   UpdateDewormingRecordDto,
 } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { CalendarSyncPublisher } from '../../queue/calendar-sync.publisher';
 import { ANEXOS_ATIVOS, toAnexoResponseDto } from '../../anexo/anexo.mapper';
 import { PetService } from '../../pet/pet.service';
 import { AcaoClinicaService } from '../../historico/acao-clinica.service';
@@ -66,6 +67,7 @@ export class DewormingService {
     private readonly prisma: PrismaService,
     private readonly petService: PetService,
     private readonly acoes: AcaoClinicaService,
+    private readonly calendarSync: CalendarSyncPublisher,
   ) {}
 
   async create(
@@ -105,6 +107,7 @@ export class DewormingService {
       );
       return criado;
     });
+    await this.calendarSync.publishHealthRecord('VERMIFUGO', record.id);
     return toResponseDto(record);
   }
 
@@ -157,6 +160,7 @@ export class DewormingService {
       );
       return alterado;
     });
+    await this.calendarSync.publishHealthRecord('VERMIFUGO', id);
     return toResponseDto(updated);
   }
 
@@ -185,6 +189,7 @@ export class DewormingService {
         tx,
       );
     });
+    await this.calendarSync.publishHealthRecord('VERMIFUGO', id);
   }
 
   private async getRecord(id: string): Promise<DewormingRecord> {

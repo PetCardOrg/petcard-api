@@ -6,6 +6,7 @@ import {
 } from '../../../../../test/utils/acao-clinica';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { PetService } from '../../../pet/pet.service';
+import { CalendarSyncPublisher } from '../../../queue/calendar-sync.publisher';
 import { VaccineService } from '../vaccine.service';
 
 describe('VaccineService', () => {
@@ -21,6 +22,7 @@ describe('VaccineService', () => {
       delete: jest.Mock;
     };
   };
+  const calendarSync = { publishHealthRecord: jest.fn() };
   let petService: {
     assertAccess: jest.Mock;
     assertOwnership: jest.Mock;
@@ -65,6 +67,7 @@ describe('VaccineService', () => {
         VaccineService,
         { provide: PrismaService, useValue: prisma },
         { provide: PetService, useValue: petService },
+        { provide: CalendarSyncPublisher, useValue: calendarSync },
       ],
     }).compile();
 
