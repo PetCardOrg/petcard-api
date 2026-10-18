@@ -281,14 +281,9 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
 
-    // Se o CRMV acabou de ser consultado (primeiro passo do formulário), o
-    // nome vem do registro oficial, não do que chegou no corpo: é o que trava
-    // o nome na tela, e travar só na tela não vale nada.
-    const nome = this.crmvVerification.nomeOficialEmCache(dto.crmv) ?? dto.nome;
-
     const vet = await this.prisma.veterinario.create({
       data: {
-        nome,
+        nome: dto.nome,
         email,
         password: hashedPassword,
         crmv: dto.crmv,

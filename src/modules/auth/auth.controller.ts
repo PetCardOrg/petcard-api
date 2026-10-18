@@ -169,7 +169,7 @@ export class AuthController {
     summary: 'Consultar CRMV antes do cadastro do veterinário',
     description:
       'Primeiro passo do cadastro: devolve o CRMV no formato canônico, se ' +
-      'está regular e o nome no cadastro do CFMV, que o cadastro passa a usar.',
+      'está regular e o nome no cadastro do CFMV, para pré-preencher o formulário.',
   })
   @ApiQuery({ name: 'crmv', example: 'CRMV-SP 12345' })
   @ApiBadRequestResponse({ description: 'CRMV em formato irreconhecível' })

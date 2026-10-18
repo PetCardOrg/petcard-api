@@ -42,7 +42,7 @@ export type CrmvConsulta = {
   numero: string;
   /** Registro encontrado e em situação regular. */
   valido: boolean;
-  /** Nome no cadastro do CFMV — o cadastro usa este, não o digitado. */
+  /** Nome no cadastro do CFMV, para pré-preencher o formulário (editável). */
   nome?: string;
   situacao?: string;
 };
@@ -179,17 +179,6 @@ export class CrmvVerificationService {
       nome: resultado.valid ? resultado.nome : undefined,
       situacao: resultado.situacao,
     };
-  }
-
-  /**
-   * Nome do registro oficial, se o CRMV foi consultado há pouco e está
-   * regular. Não consulta: só reaproveita o que o `lookup` já pagou.
-   */
-  nomeOficialEmCache(crmv: string): string | undefined {
-    const { numero, uf } = this.parseCrmv(crmv);
-    const guardada = this.consultas.get(`${uf}-${numero}`);
-    if (!guardada || guardada.expiraEm < Date.now()) return undefined;
-    return guardada.resultado.valid ? guardada.resultado.nome : undefined;
   }
 
   /** Consulta paga, com cache curto em memória (ver `CONSULTA_TTL_MS`). */

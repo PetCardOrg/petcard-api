@@ -224,7 +224,6 @@ describe('CrmvVerificationService', () => {
 
       expect(status.verified).toBe(true);
       expect(validator.validate).toHaveBeenCalledTimes(1);
-      expect(service.nomeOficialEmCache('SP-12345')).toBe('CARLOS DA SILVA');
     });
   });
 });
