@@ -72,7 +72,10 @@ export class InfosimplesCrmvValidator implements CrmvValidator {
       query: crmv,
       uf,
       // Veterinário é pessoa física; a clínica (jurídica) seria tipo 1.
-      tipo_inscricao: this.tipoInscricao ?? TIPO_INSCRICAO_PESSOA_FISICA,
+      // `||`, não `??`: a variável vazia no .env (`INFOSIMPLES_TIPO_INSCRICAO=`)
+      // chega como "", e a Infosimples recusa tipo vazio com code 607.
+      tipo_inscricao:
+        this.tipoInscricao?.trim() || TIPO_INSCRICAO_PESSOA_FISICA,
       timeout: String(Math.floor(this.timeoutMs / 1000)),
     });
 

@@ -3,10 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { InfosimplesCrmvValidator } from '../crmv/infosimples-crmv.validator';
 import { StubCrmvValidator } from '../crmv/stub-crmv.validator';
 
-const makeConfig = (token?: string): ConfigService =>
+const makeConfig = (token?: string, tipoInscricao?: string): ConfigService =>
   ({
     get: jest.fn((chave: string) => {
       if (chave === 'crmv.infosimplesToken') return token;
+      if (chave === 'crmv.tipoInscricao') return tipoInscricao;
       if (chave === 'crmv.timeoutMs') return 15000;
       return undefined;
     }),
@@ -162,6 +163,21 @@ describe('InfosimplesCrmvValidator', () => {
     expect(init.body.get('query')).toBe('12345');
     expect(init.body.get('uf')).toBe('SP');
     // Veterinário é pessoa física (0); a clínica seria 1.
+    expect(init.body.get('tipo_inscricao')).toBe('0');
+  });
+
+  it('usa pessoa física quando INFOSIMPLES_TIPO_INSCRICAO está vazia no .env', async () => {
+    // A linha `INFOSIMPLES_TIPO_INSCRICAO=` do .env.example chega como "".
+    // Mandar tipo vazio faz a Infosimples recusar a consulta (code 607).
+    const fetchMock = jest.fn().mockResolvedValue(respostaCfmv([]));
+    global.fetch = fetchMock;
+    const validator = new InfosimplesCrmvValidator(makeConfig('tok', ''));
+
+    await validator.validate('12345', 'SP');
+
+    const [[, init]] = fetchMock.mock.calls as Array<
+      [string, { body: URLSearchParams }]
+    >;
     expect(init.body.get('tipo_inscricao')).toBe('0');
   });
 
