@@ -23,18 +23,20 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
-import { GoogleCalendarService } from './google-calendar.service';
+import { resultPage } from '../auth/auth-web.pages';
+import { calendarConnectedPage } from './calendar.pages';
+import {
+  GoogleCalendarService,
+  type ResolvedState,
+} from './google-calendar.service';
 
-const HTML_ESCAPES: Record<string, string> = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&#39;',
-};
+/** Resultado que o app lê na volta (`?calendar=`) para mostrar a confirmação. */
+type CallbackOutcome = 'connected' | 'denied' | 'error';
 
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => HTML_ESCAPES[char]);
+function appReturn(returnUrl: string, outcome: CallbackOutcome): string {
+  const url = new URL(returnUrl);
+  url.searchParams.set('calendar', outcome);
+  return url.toString();
 }
 
 @ApiTags('calendar')
@@ -52,8 +54,17 @@ export class CalendarController {
   @ApiOperation({
     summary: 'Obter URL de autorização OAuth do Google Calendar',
   })
-  connect(@CurrentUser() user: JwtPayload) {
-    const url = this.googleCalendarService.getAuthUrl(user.sub);
+  @ApiQuery({
+    name: 'return_url',
+    required: false,
+    description:
+      'Endereço do app (petcard://, exp://) para onde o callback devolve o tutor',
+  })
+  connect(
+    @CurrentUser() user: JwtPayload,
+    @Query('return_url') returnUrl?: string,
+  ) {
+    const url = this.googleCalendarService.getAuthUrl(user.sub, returnUrl);
     if (!url) {
       return {
         connected: false,
@@ -67,6 +78,9 @@ export class CalendarController {
   @Public()
   @ApiOperation({
     summary: 'Callback OAuth do Google (redirecionamento do consentimento)',
+    description:
+      'Se o app informou `return_url` no connect, redireciona para ela com ' +
+      '`?calendar=connected|denied|error`; senão, responde uma página HTML.',
   })
   @ApiQuery({ name: 'code', description: 'Código de autorização do Google' })
   @ApiQuery({
@@ -84,14 +98,28 @@ export class CalendarController {
     @Query('error') error: string,
     @Res() res: Response,
   ) {
-    // Esta rota é o retorno do navegador: qualquer falha precisa virar página,
-    // não um 500 com stack trace na cara do usuário.
+    // Esta rota é o retorno do navegador: qualquer falha precisa virar página
+    // (ou volta ao app), não um 500 com stack trace na cara do usuário.
+    let resolved: ResolvedState | undefined;
+    try {
+      resolved = state
+        ? this.googleCalendarService.resolveState(state)
+        : undefined;
+    } catch {
+      resolved = undefined;
+    }
+    const returnUrl = resolved?.returnUrl;
+
     if (error) {
       this.logger.warn(`Consentimento negado no Google Calendar: ${error}`);
+      if (returnUrl) {
+        res.redirect(appReturn(returnUrl, 'denied'));
+        return;
+      }
       res
         .status(HttpStatus.BAD_REQUEST)
         .send(
-          this.renderCallbackPage(
+          resultPage(
             false,
             'Autorização não concluída',
             'Você não autorizou o acesso ao Google Agenda. Volte ao app e tente de novo se quiser conectar.',
@@ -100,31 +128,14 @@ export class CalendarController {
       return;
     }
 
-    if (!code || !state) {
+    if (!code || !resolved) {
       this.logger.warn(
-        `Callback do Google Calendar sem parâmetros (code=${!!code}, state=${!!state})`,
+        `Callback do Google Calendar sem parâmetros válidos (code=${!!code}, state=${!!state}, state válido=${!!resolved})`,
       );
       res
         .status(HttpStatus.BAD_REQUEST)
         .send(
-          this.renderCallbackPage(
-            false,
-            'Link inválido',
-            'Este endereço não veio de uma autorização válida do Google. Inicie a conexão pelo app.',
-          ),
-        );
-      return;
-    }
-
-    let tutorId: string;
-    try {
-      tutorId = this.googleCalendarService.resolveState(state);
-    } catch {
-      this.logger.warn('Callback do Google Calendar com state inválido.');
-      res
-        .status(HttpStatus.BAD_REQUEST)
-        .send(
-          this.renderCallbackPage(
+          resultPage(
             false,
             'Link inválido',
             'Este endereço não veio de uma autorização válida do Google, ou expirou. Inicie a conexão pelo app.',
@@ -133,49 +144,40 @@ export class CalendarController {
       return;
     }
 
+    const { tutorId } = resolved;
     try {
       await this.googleCalendarService.handleCallback(code, tutorId);
-      res.send(
-        this.renderCallbackPage(
-          true,
-          'Google Calendar conectado com sucesso!',
-          'Pode fechar esta janela e voltar ao app.',
-        ),
-      );
     } catch (err) {
       this.logger.error(
         `Falha ao concluir o callback do Google Calendar (tutor ${tutorId})`,
         err instanceof Error ? err.stack : err,
       );
-      // A mensagem do erro fica no log, não na página: ela carrega detalhe
-      // interno (configuração, resposta do Google) para uma rota pública.
+      // A mensagem do erro fica no log, não na página nem na volta ao app: ela
+      // carrega detalhe interno (configuração, resposta do Google).
+      if (returnUrl) {
+        res.redirect(appReturn(returnUrl, 'error'));
+        return;
+      }
       res
         .status(HttpStatus.INTERNAL_SERVER_ERROR)
         .send(
-          this.renderCallbackPage(
+          resultPage(
             false,
             'Não foi possível conectar',
             'Erro inesperado ao conectar o Google Agenda. Tente novamente pelo app.',
           ),
         );
+      return;
     }
-  }
 
-  private renderCallbackPage(
-    ok: boolean,
-    title: string,
-    message: string,
-  ): string {
-    const accent = ok ? '#06A77D' : '#E63946';
-    return `<!DOCTYPE html>
-<html lang="pt-BR"><head><meta charset="utf-8"><title>PetCard - Google Calendar</title>
-<style>
-  body { font-family: system-ui; max-width: 480px; margin: 40px auto; padding: 0 20px; background: #F6FBFE; color: #14313F; }
-  .card { background: #fff; border: 1px solid #D8EEF6; border-left: 4px solid ${accent}; border-radius: 12px; padding: 24px; }
-  h2 { color: ${accent}; margin-top: 0; }
-</style></head><body>
-<div class="card"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p></div>
-</body></html>`;
+    // Redirecionar direto (em vez de uma página com botão) mantém o gesto do
+    // usuário no consentimento: é o que deixa o navegador abrir o esquema do
+    // app e a aba se fechar sozinha. A confirmação fica por conta do app.
+    if (returnUrl) {
+      res.redirect(appReturn(returnUrl, 'connected'));
+      return;
+    }
+    res.send(calendarConnectedPage());
   }
 
   @Get('dev-connect')
