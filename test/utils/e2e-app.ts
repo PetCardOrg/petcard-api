@@ -16,7 +16,7 @@ export interface E2EApp {
   publishers: {
     qrCode: { publishGenerate: jest.Mock };
     notificationPush: { publish: jest.Mock };
-    calendarSync: { publish: jest.Mock };
+    calendarSync: { publish: jest.Mock; publishHealthRecord: jest.Mock };
   };
   /** Bucket em memória: chave -> conteúdo. Substitui o S3 dos comprovantes. */
   storage: Map<string, Buffer>;
@@ -34,7 +34,10 @@ export interface E2EApp {
 export async function createE2EApp(): Promise<E2EApp> {
   const qrCode = { publishGenerate: jest.fn().mockResolvedValue(undefined) };
   const notificationPush = { publish: jest.fn().mockResolvedValue(undefined) };
-  const calendarSync = { publish: jest.fn().mockResolvedValue(undefined) };
+  const calendarSync = {
+    publish: jest.fn().mockResolvedValue(undefined),
+    publishHealthRecord: jest.fn().mockResolvedValue(undefined),
+  };
 
   const storage = new Map<string, Buffer>();
   const uploadService = {
