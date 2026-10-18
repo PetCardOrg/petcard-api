@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CrmvVerificationService } from '../crmv/crmv-verification.service';
@@ -7,14 +8,22 @@ const makeConfig = (ttlDays = 180): ConfigService =>
 
 describe('CrmvVerificationService', () => {
   let prisma: {
-    veterinario: { findUnique: jest.Mock; update: jest.Mock };
+    veterinario: {
+      findUnique: jest.Mock;
+      findFirst: jest.Mock;
+      update: jest.Mock;
+    };
   };
   let validator: { validate: jest.Mock };
   let service: CrmvVerificationService;
 
   beforeEach(() => {
     prisma = {
-      veterinario: { findUnique: jest.fn(), update: jest.fn() },
+      veterinario: {
+        findUnique: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+        update: jest.fn(),
+      },
     };
     validator = { validate: jest.fn() };
     service = new CrmvVerificationService(
@@ -155,6 +164,66 @@ describe('CrmvVerificationService', () => {
         verified: true,
         situacao: 'Ativo',
       });
+    });
+  });
+
+  describe('lookup (cadastro com CRMV primeiro)', () => {
+    it('devolve o CRMV canônico, a situação e o nome do registro oficial', async () => {
+      validator.validate.mockResolvedValue({
+        valid: true,
+        situacao: 'Ativo',
+        nome: 'CARLOS DA SILVA',
+      });
+
+      await expect(service.lookup('12345/sp')).resolves.toEqual({
+        crmv: 'CRMV-SP 12345',
+        uf: 'SP',
+        numero: '12345',
+        valido: true,
+        nome: 'CARLOS DA SILVA',
+        situacao: 'Ativo',
+      });
+    });
+
+    it('não expõe o nome de registro irregular', async () => {
+      validator.validate.mockResolvedValue({
+        valid: false,
+        situacao: 'Cancelado',
+        nome: 'FULANO',
+      });
+
+      const consulta = await service.lookup('CRMV-SP 12345');
+
+      expect(consulta.valido).toBe(false);
+      expect(consulta.nome).toBeUndefined();
+    });
+
+    it('CRMV já cadastrado responde 409 sem pagar a consulta', async () => {
+      prisma.veterinario.findFirst.mockResolvedValue({ id: 'vet-1' });
+
+      await expect(service.lookup('SP 12345')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(validator.validate).not.toHaveBeenCalled();
+    });
+
+    it('o cadastro logo depois reaproveita a consulta — uma cobrança só', async () => {
+      validator.validate.mockResolvedValue({
+        valid: true,
+        situacao: 'Ativo',
+        nome: 'CARLOS DA SILVA',
+      });
+      await service.lookup('CRMV-SP 12345');
+      prisma.veterinario.findUnique.mockResolvedValue({
+        crmv: 'CRMV-SP 12345',
+        crmvVerifiedAt: null,
+        crmvSituacao: null,
+      });
+
+      const status = await service.verify('vet-1');
+
+      expect(status.verified).toBe(true);
+      expect(validator.validate).toHaveBeenCalledTimes(1);
     });
   });
 });
