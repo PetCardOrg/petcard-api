@@ -64,21 +64,23 @@ export class InfosimplesCrmvValidator implements CrmvValidator {
       );
     }
 
-    const url = new URL(this.baseUrl);
-    url.searchParams.set('token', this.token);
-    url.searchParams.set('query', crmv);
-    url.searchParams.set('uf', uf);
-    // Veterinário é pessoa física; a clínica (jurídica) seria tipo 1.
-    url.searchParams.set(
-      'tipo_inscricao',
-      this.tipoInscricao ?? TIPO_INSCRICAO_PESSOA_FISICA,
-    );
-    url.searchParams.set('timeout', String(Math.floor(this.timeoutMs / 1000)));
+    // A API documenta POST com corpo form-urlencoded. Em GET, com os
+    // parâmetros na URL, ela recusava a consulta (code 607, "parâmetros
+    // inválidos") — e o token ainda viajava na URL, onde acaba em log.
+    const corpo = new URLSearchParams({
+      token: this.token,
+      query: crmv,
+      uf,
+      // Veterinário é pessoa física; a clínica (jurídica) seria tipo 1.
+      tipo_inscricao: this.tipoInscricao ?? TIPO_INSCRICAO_PESSOA_FISICA,
+      timeout: String(Math.floor(this.timeoutMs / 1000)),
+    });
 
     let response: Response;
     try {
-      response = await fetch(url, {
-        method: 'GET',
+      response = await fetch(this.baseUrl, {
+        method: 'POST',
+        body: corpo,
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (error) {

@@ -144,19 +144,25 @@ describe('InfosimplesCrmvValidator', () => {
     );
   });
 
-  it('envia token, crmv e uf na consulta', async () => {
+  it('envia token, crmv e uf no corpo de um POST, como a API documenta', async () => {
+    // Em GET com tudo na URL a Infosimples recusava com code 607, e o token
+    // ficava exposto na URL.
     const fetchMock = jest.fn().mockResolvedValue(respostaCfmv([]));
     global.fetch = fetchMock;
     const validator = new InfosimplesCrmvValidator(makeConfig('tok-123'));
 
     await validator.validate('12345', 'SP');
 
-    const [[url]] = fetchMock.mock.calls as Array<[URL]>;
-    expect(url.searchParams.get('token')).toBe('tok-123');
-    expect(url.searchParams.get('query')).toBe('12345');
-    expect(url.searchParams.get('uf')).toBe('SP');
+    const [[url, init]] = fetchMock.mock.calls as Array<
+      [string, { method: string; body: URLSearchParams }]
+    >;
+    expect(init.method).toBe('POST');
+    expect(String(url)).not.toContain('tok-123');
+    expect(init.body.get('token')).toBe('tok-123');
+    expect(init.body.get('query')).toBe('12345');
+    expect(init.body.get('uf')).toBe('SP');
     // Veterinário é pessoa física (0); a clínica seria 1.
-    expect(url.searchParams.get('tipo_inscricao')).toBe('0');
+    expect(init.body.get('tipo_inscricao')).toBe('0');
   });
 
   it('recusa quando a consulta volta sem resultados', async () => {
