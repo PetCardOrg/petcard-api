@@ -251,6 +251,21 @@ describe('AuthService', () => {
       expect(result.user.email_verified).toBe(false);
     });
 
+    it('responde sem esperar o envio do e-mail terminar (SMTP travado)', async () => {
+      prisma.tutor.findUnique.mockResolvedValue(null);
+      prisma.tutor.create.mockResolvedValue(tutorFixture);
+      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
+      mail.sendEmailVerification.mockReturnValue(new Promise(() => undefined));
+
+      const result = await service.register({
+        name: 'Alice',
+        email: 'alice@example.com',
+        password: 'Senha123!',
+      });
+
+      expect(result.access_token).toBe('jwt-token');
+    });
+
     it('não derruba o cadastro se o envio de e-mail falhar', async () => {
       prisma.tutor.findUnique.mockResolvedValue(null);
       prisma.tutor.create.mockResolvedValue(tutorFixture);
