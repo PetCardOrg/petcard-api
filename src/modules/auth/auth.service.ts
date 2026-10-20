@@ -189,15 +189,10 @@ export class AuthService {
       AuthTokenPurpose.PASSWORD_RESET,
     );
 
-    try {
-      await this.mail.sendPasswordReset(tutor.email, token);
-    } catch (error) {
-      this.logger.error(
-        `Falha ao enviar e-mail de redefinição para ${tutor.email}: ${
-          error instanceof Error ? error.message : 'erro desconhecido'
-        }`,
-      );
-    }
+    this.sendInBackground(
+      this.mail.sendPasswordReset(tutor.email, token),
+      `Falha ao enviar e-mail de redefinição para ${tutor.email}`,
+    );
   }
 
   /** Conclui a redefinição: consome o token e grava a nova senha. */
@@ -388,14 +383,31 @@ export class AuthService {
         tutor.id,
         AuthTokenPurpose.EMAIL_VERIFICATION,
       );
-      await this.mail.sendEmailVerification(tutor.email, token);
+      this.sendInBackground(
+        this.mail.sendEmailVerification(tutor.email, token),
+        `Cadastro de ${tutor.email} concluído sem enviar a verificação de e-mail`,
+      );
     } catch (error) {
       this.logger.warn(
-        `Cadastro de ${tutor.email} concluído sem enviar a verificação de e-mail: ${
+        `Cadastro de ${tutor.email} concluído sem emitir o token de verificação: ${
           error instanceof Error ? error.message : 'erro desconhecido'
         }`,
       );
     }
+  }
+
+  /**
+   * Não espera o envio do e-mail para responder. O SMTP pode travar por
+   * minutos (porta 587 bloqueada no host, provedor fora do ar) e o app desiste
+   * em 10 s: a conta já tinha sido criada, mas o tutor via "não foi possível
+   * criar a conta" e, ao tentar de novo, esbarrava no e-mail duplicado.
+   */
+  private sendInBackground(sending: Promise<void>, context: string): void {
+    sending.catch((error: unknown) => {
+      this.logger.warn(
+        `${context}: ${error instanceof Error ? error.message : 'erro desconhecido'}`,
+      );
+    });
   }
 
   private buildTutorSession(tutor: Tutor) {

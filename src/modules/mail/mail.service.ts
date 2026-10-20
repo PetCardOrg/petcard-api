@@ -1,6 +1,7 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 import {
   type EmailContent,
   passwordResetEmail,
@@ -8,6 +9,8 @@ import {
   renderText,
   verificationEmail,
 } from './mail.templates';
+
+const SMTP_TIMEOUT_MS = 10_000;
 
 /**
  * Envio de e-mail transacional do fluxo de auth (mobile#54).
@@ -41,7 +44,16 @@ export class MailService implements OnModuleInit {
       port: this.config.get<number>('mail.smtpPort', 587),
       secure: this.config.get<boolean>('mail.smtpSecure', false),
       auth: user && pass ? { user, pass } : undefined,
-    });
+      // O padrão do nodemailer espera até 2 min por conexão. Com a porta SMTP
+      // bloqueada, isso deixava sockets pendurados e mascarava a falha.
+      connectionTimeout: SMTP_TIMEOUT_MS,
+      greetingTimeout: SMTP_TIMEOUT_MS,
+      socketTimeout: SMTP_TIMEOUT_MS,
+      // O Render não tem rota IPv6 de saída: o nodemailer tentava o AAAA do
+      // Gmail primeiro e falhava com ENETUNREACH. `family` existe no runtime,
+      // mas falta nos tipos.
+      family: 4,
+    } as SMTPTransport.Options);
   }
 
   /** Link para confirmar o endereço de e-mail da conta. */
