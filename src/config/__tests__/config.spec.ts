@@ -27,6 +27,7 @@ const CHAVES = [
   'PUBLIC_CARD_THROTTLE_TTL_SECONDS',
   'JWT_SECRET',
   'SMTP_HOST',
+  'BREVO_API_KEY',
   'APP_DEEP_LINK_BASE',
   'API_BASE_URL',
 ] as const;
@@ -239,6 +240,24 @@ describe('configuração de ambiente', () => {
       process.env.APP_DEEP_LINK_BASE = 'https://api.petcard.app/auth';
 
       expect(mailConfig().smtpHost).toBe('smtp.petcard.app');
+    });
+
+    it('sobe em produção só com a chave da API da Brevo, sem SMTP', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.BREVO_API_KEY = ' xkeysib-teste ';
+      process.env.APP_DEEP_LINK_BASE = 'https://api.petcard.app/auth';
+
+      const config = mailConfig();
+
+      expect(config.brevoApiKey).toBe('xkeysib-teste');
+      expect(config.smtpHost).toBeUndefined();
+    });
+
+    it('chave da Brevo em branco não conta como configurada em produção', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.BREVO_API_KEY = '   ';
+
+      expect(() => mailConfig()).toThrow(/SMTP_HOST is required in production/);
     });
 
     it('não trava o desenvolvimento local sem SMTP (modo de log)', () => {

@@ -40,26 +40,27 @@ function parseAppLinkBase(raw: string | undefined, nodeEnv: string): string {
 }
 
 /**
- * Em produção, faltar `SMTP_HOST` não é uma configuração incompleta — é uma
- * falha de segurança silenciosa.
+ * Em produção, faltar um meio de envio não é uma configuração incompleta — é
+ * uma falha de segurança silenciosa.
  *
- * Sem host, o `MailService` cai no modo de log e escreve o link de
- * redefinição, com o token dentro, na saída do processo: no CloudWatch, em
- * texto claro, para quem tiver acesso aos logs. Ao mesmo tempo, nenhum e-mail
- * chega ao usuário, então ninguém percebe. Mesma escolha do `JWT_SECRET` e do
- * `CORS_ORIGINS`: em produção, faltar = não sobe.
+ * Sem `BREVO_API_KEY` nem `SMTP_HOST`, o `MailService` cai no modo de log e
+ * escreve o link de redefinição, com o token dentro, na saída do processo: no
+ * CloudWatch, em texto claro, para quem tiver acesso aos logs. Ao mesmo tempo,
+ * nenhum e-mail chega ao usuário, então ninguém percebe. Mesma escolha do
+ * `JWT_SECRET` e do `CORS_ORIGINS`: em produção, faltar = não sobe.
  */
 function parseSmtpHost(
   raw: string | undefined,
+  brevoApiKey: string | undefined,
   nodeEnv: string,
 ): string | undefined {
   if (raw && raw.trim().length > 0) {
     return raw.trim();
   }
 
-  if (nodeEnv === 'production') {
+  if (nodeEnv === 'production' && !brevoApiKey) {
     throw new Error(
-      'SMTP_HOST is required in production. Without it the reset link is written to the logs and no email is ever sent.',
+      'SMTP_HOST is required in production (or set BREVO_API_KEY to send through the Brevo HTTP API). Without it the reset link is written to the logs and no email is ever sent.',
     );
   }
 
@@ -69,36 +70,46 @@ function parseSmtpHost(
 /**
  * Envio de e-mail transacional (verificação de conta e recuperação de senha).
  *
- * Sem `SMTP_HOST` o `MailService` cai no modo de log: o link vai para o
- * console em vez de um servidor SMTP. É o suficiente para desenvolvimento e
+ * Com `BREVO_API_KEY` o envio vai pela API HTTP da Brevo; com `SMTP_HOST`, por
+ * SMTP. Sem nenhum dos dois o `MailService` cai no modo de log: o link vai para
+ * o console. É o suficiente para desenvolvimento e
  * para a demo dos UCs — nenhuma conta paga é necessária. Em produção o bloco
  * SMTP_* é obrigatório e o boot falha sem ele.
  */
-export const mailConfig = registerAs('mail', () => ({
-  smtpHost: parseSmtpHost(
-    process.env.SMTP_HOST,
-    process.env.NODE_ENV ?? 'development',
-  ),
-  smtpPort: inteiroPositivo(process.env.SMTP_PORT, 587),
-  smtpSecure: process.env.SMTP_SECURE === 'true',
-  smtpUser: process.env.SMTP_USER,
-  // As "senhas de app" do Gmail são exibidas em 4 grupos de 4 com espaços; o
-  // valor real não tem espaço. Remover qualquer espaço em branco evita um
-  // "auth failed" por causa de um espaço colado sem querer.
-  smtpPass: process.env.SMTP_PASS?.replace(/\s+/g, ''),
-  from: process.env.MAIL_FROM ?? DEFAULT_FROM,
-  // Base dos links dos e-mails, apontando para as páginas que a própria API
-  // serve: o link vira `<base>/reset-password?token=...`.
-  appLinkBase: parseAppLinkBase(
-    process.env.APP_DEEP_LINK_BASE,
-    process.env.NODE_ENV ?? 'development',
-  ),
-  verificationTtlHours: inteiroPositivo(
-    process.env.MAIL_VERIFICATION_TTL_HOURS,
-    DEFAULT_VERIFICATION_TTL_HOURS,
-  ),
-  resetTtlMinutes: inteiroPositivo(
-    process.env.MAIL_RESET_TTL_MINUTES,
-    DEFAULT_RESET_TTL_MINUTES,
-  ),
-}));
+export const mailConfig = registerAs('mail', () => {
+  const brevoApiKey = process.env.BREVO_API_KEY?.trim() || undefined;
+
+  return {
+    // Chave da API HTTP da Brevo. Quando presente, tem prioridade sobre o SMTP:
+    // hosts como o Render bloqueiam as portas SMTP de saída (25/465/587), e a
+    // API vai por HTTPS (443).
+    brevoApiKey,
+    smtpHost: parseSmtpHost(
+      process.env.SMTP_HOST,
+      brevoApiKey,
+      process.env.NODE_ENV ?? 'development',
+    ),
+    smtpPort: inteiroPositivo(process.env.SMTP_PORT, 587),
+    smtpSecure: process.env.SMTP_SECURE === 'true',
+    smtpUser: process.env.SMTP_USER,
+    // As "senhas de app" do Gmail são exibidas em 4 grupos de 4 com espaços; o
+    // valor real não tem espaço. Remover qualquer espaço em branco evita um
+    // "auth failed" por causa de um espaço colado sem querer.
+    smtpPass: process.env.SMTP_PASS?.replace(/\s+/g, ''),
+    from: process.env.MAIL_FROM ?? DEFAULT_FROM,
+    // Base dos links dos e-mails, apontando para as páginas que a própria API
+    // serve: o link vira `<base>/reset-password?token=...`.
+    appLinkBase: parseAppLinkBase(
+      process.env.APP_DEEP_LINK_BASE,
+      process.env.NODE_ENV ?? 'development',
+    ),
+    verificationTtlHours: inteiroPositivo(
+      process.env.MAIL_VERIFICATION_TTL_HOURS,
+      DEFAULT_VERIFICATION_TTL_HOURS,
+    ),
+    resetTtlMinutes: inteiroPositivo(
+      process.env.MAIL_RESET_TTL_MINUTES,
+      DEFAULT_RESET_TTL_MINUTES,
+    ),
+  };
+});
