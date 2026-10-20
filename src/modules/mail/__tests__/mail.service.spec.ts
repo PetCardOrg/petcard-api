@@ -91,4 +91,68 @@ describe('MailService', () => {
     expect(payload.html).not.toContain('petcard://');
     expect(payload.text).toContain('https://api.petcard.app/auth');
   });
+
+  describe('com a API HTTP da Brevo', () => {
+    const fetchMock = jest.fn();
+
+    beforeEach(() => {
+      fetchMock.mockReset();
+      jest.spyOn(global, 'fetch').mockImplementation(fetchMock);
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    const values = {
+      'mail.brevoApiKey': 'xkeysib-teste',
+      'mail.smtpHost': 'smtp.example.com',
+      'mail.appLinkBase': 'https://api.petcard.app/auth',
+      'mail.from': 'PetCard <no-reply@petcard.app>',
+    };
+
+    it('envia por HTTPS com a chave no header e não abre SMTP', async () => {
+      fetchMock.mockResolvedValue({ ok: true });
+      const service = await buildService(values);
+
+      await service.sendEmailVerification('bob@example.com', 'tok-abc');
+
+      expect(nodemailer.createTransport).not.toHaveBeenCalled();
+      const [url, init] = fetchMock.mock.calls[0] as [
+        string,
+        { headers: Record<string, string>; body: string },
+      ];
+      expect(url).toBe('https://api.brevo.com/v3/smtp/email');
+      expect(init.headers['api-key']).toBe('xkeysib-teste');
+      const body = JSON.parse(init.body) as {
+        sender: { name: string; email: string };
+        to: { email: string }[];
+        htmlContent: string;
+      };
+      expect(body.sender).toEqual({
+        name: 'PetCard',
+        email: 'no-reply@petcard.app',
+      });
+      expect(body.to).toEqual([{ email: 'bob@example.com' }]);
+      expect(body.htmlContent).toContain(
+        'https://api.petcard.app/auth/verify-email?token=tok-abc',
+      );
+    });
+
+    it('falha quando a Brevo recusa, sem vazar a chave na mensagem', async () => {
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 401,
+        text: () => Promise.resolve('{"message":"Key not found"}'),
+      });
+      const service = await buildService(values);
+
+      const error = await service
+        .sendPasswordReset('bob@example.com', 'tok-1')
+        .catch((e: Error) => e);
+
+      expect((error as Error).message).toMatch(/Brevo respondeu 401/);
+      expect((error as Error).message).not.toContain('xkeysib-teste');
+    });
+  });
 });
