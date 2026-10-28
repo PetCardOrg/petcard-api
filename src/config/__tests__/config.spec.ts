@@ -1,9 +1,11 @@
+import { Logger } from '@nestjs/common';
 import { appConfig } from '../app.config';
 import { cardConfig } from '../card.config';
 import { firebaseConfig } from '../firebase.config';
 import { authConfig } from '../auth.config';
 import { mailConfig } from '../mail.config';
 import { throttlerConfig } from '../throttler.config';
+import { crmvConfig } from '../crmv.config';
 
 /**
  * Só o que morde de verdade na configuração.
@@ -30,6 +32,7 @@ const CHAVES = [
   'BREVO_API_KEY',
   'APP_DEEP_LINK_BASE',
   'API_BASE_URL',
+  'CRMV_PROVIDER',
 ] as const;
 
 describe('configuração de ambiente', () => {
@@ -281,6 +284,49 @@ describe('configuração de ambiente', () => {
       // Nunca mais para `petcard://`: scheme customizado não tem dono e, no
       // Android, outro app pode ser escolhido para abrir o link do e-mail.
       expect(mailConfig().appLinkBase).toBe('http://localhost:3000/auth');
+    });
+  });
+
+  /**
+   * Sem a variável, o provedor caía no stub, que aceita qualquer CRMV bem
+   * formado: um esquecimento no painel do deploy desligava a verificação de
+   * CRMV em produção sem ninguém perceber.
+   */
+  describe('provedor de CRMV', () => {
+    it('recusa subir em produção sem CRMV_PROVIDER', () => {
+      process.env.NODE_ENV = 'production';
+
+      expect(() => crmvConfig()).toThrow(/CRMV_PROVIDER is required/);
+    });
+
+    it('recusa valor desconhecido em produção, em vez de cair no stub', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CRMV_PROVIDER = 'infosimple';
+
+      expect(() => crmvConfig()).toThrow(/CRMV_PROVIDER/);
+    });
+
+    it('sobe em produção com stub explícito, avisando alto', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CRMV_PROVIDER = 'stub';
+      const aviso = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => {});
+
+      expect(crmvConfig().provider).toBe('stub');
+      expect(aviso).toHaveBeenCalledWith(expect.stringMatching(/stub/));
+      aviso.mockRestore();
+    });
+
+    it('usa o provedor real quando configurado', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CRMV_PROVIDER = 'infosimples';
+
+      expect(crmvConfig().provider).toBe('infosimples');
+    });
+
+    it('cai no stub fora de produção, para o CI e a demo', () => {
+      expect(crmvConfig().provider).toBe('stub');
     });
   });
 });

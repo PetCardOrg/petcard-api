@@ -160,11 +160,19 @@ export class AuthService {
         },
       });
     } else if (tutor.googleId !== googleId || tutor.emailVerifiedAt === null) {
+      // E-mail nunca verificado: nada prova que a senha é de quem é dono dele
+      // (o cadastro não exige verificar). O Google prova agora, então a senha
+      // cai e o novo carimbo derruba as sessões abertas com ela (AUD API-05).
+      const senhaSemDonoComprovado = tutor.emailVerifiedAt === null;
+      const agora = new Date();
       tutor = await this.prisma.tutor.update({
         where: { id: tutor.id },
         data: {
           googleId,
-          emailVerifiedAt: tutor.emailVerifiedAt ?? new Date(),
+          emailVerifiedAt: tutor.emailVerifiedAt ?? agora,
+          ...(senhaSemDonoComprovado
+            ? { password: null, passwordChangedAt: agora }
+            : {}),
         },
       });
     }

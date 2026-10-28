@@ -13,8 +13,16 @@ import {
   type CrmvValidationResult,
   type CrmvValidator,
 } from './crmv-validator';
+import { nomesConferem } from './nomes-conferem';
 
 const MS_PER_DAY = 86_400_000;
+
+/**
+ * Situação gravada (e mostrada ao vet) quando o registro é regular mas está em
+ * nome de outra pessoa. Legível de propósito: a web exibe a situação como veio.
+ */
+export const SITUACAO_NOME_DIVERGENTE =
+  'Nome do cadastro não confere com o titular do CRMV';
 
 /** Aceita "SP 12345", "CRMV-SP 12345", "12345/SP". */
 const CRMV_PATTERN =
@@ -111,7 +119,12 @@ export class CrmvVerificationService {
   ): Promise<CrmvVerificationStatus> {
     const vet = await this.prisma.veterinario.findUnique({
       where: { id: veterinarioId },
-      select: { crmv: true, crmvVerifiedAt: true, crmvSituacao: true },
+      select: {
+        nome: true,
+        crmv: true,
+        crmvVerifiedAt: true,
+        crmvSituacao: true,
+      },
     });
     if (!vet) throw new NotFoundException('Veterinário não encontrado');
 
@@ -124,9 +137,10 @@ export class CrmvVerificationService {
     }
 
     const { numero, uf } = this.parseCrmv(vet.crmv);
-    const resultado = force
+    const consulta = force
       ? await this.validator.validate(numero, uf)
       : await this.consultar(numero, uf);
+    const resultado = this.conferirTitular(consulta, vet.nome);
 
     const verifiedAt = resultado.valid ? new Date() : null;
     await this.prisma.veterinario.update({
@@ -143,6 +157,25 @@ export class CrmvVerificationService {
       situacao: resultado.situacao,
       verified_at: verifiedAt ?? undefined,
     };
+  }
+
+  /**
+   * O CRMV é público: um registro regular só verifica a conta de quem é o
+   * titular dele (AUD API-06). Sem nome na resposta (o stub não devolve),
+   * não há o que comparar e vale a situação do registro.
+   */
+  private conferirTitular(
+    consulta: CrmvValidationResult,
+    nomeDoCadastro: string,
+  ): CrmvValidationResult {
+    if (
+      !consulta.valid ||
+      !consulta.nome ||
+      nomesConferem(nomeDoCadastro, consulta.nome)
+    ) {
+      return consulta;
+    }
+    return { ...consulta, valid: false, situacao: SITUACAO_NOME_DIVERGENTE };
   }
 
   /** "CRMV-SP 12345" — o formato em que o cadastro passa a gravar. */
