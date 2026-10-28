@@ -2,10 +2,12 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
+import { confiarNoProxyReverso } from './common/http/trust-proxy';
 import {
   CALENDAR_SYNC_DLQ_ROUTING_KEY,
   NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
@@ -16,8 +18,11 @@ import {
 const JSON_BODY_LIMIT = '1mb';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(ConfigService);
+
+  // Antes de tudo que lê `req.ip`, a começar pelo rate limit.
+  confiarNoProxyReverso(app);
 
   // Cabeçalhos de segurança (HSTS, X-Content-Type-Options, frame-ancestors e
   // afins). A API responde JSON e as duas páginas HTML do fluxo OAuth, que não
