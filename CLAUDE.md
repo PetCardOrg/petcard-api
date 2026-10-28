@@ -41,6 +41,7 @@ Backend do PetCard (carteira digital de saúde para pets). NestJS 11 + Prisma 6 
 - **`preview mode`** (`NestFactory.create(AppModule, { preview: true })`) monta o grafo de módulos e lê metadados sem instanciar providers nem rodar `onModuleInit` — gera o OpenAPI sem conectar Postgres/RabbitMQ.
 - Ao adicionar bloco `permissions:` num workflow, tudo não-listado vira `none` — incluir `packages: read`, senão `npm ci` falha (403) ao baixar `@petcardorg/shared`.
 - **O publish do `@petcardorg/shared` roda só em push para `main`** daquele repo. Bumpar a versão no `develop` não publica nada, e o `npm ci` da api quebra com `ETARGET`. O shared é o único repo cuja `main` acompanha o `develop` — o hold de `develop → main` vale para api, web, mobile e docs.
+- **`trust proxy` = 1 (`src/common/http/trust-proxy.ts`).** Atrás do proxy do Render todas as conexões chegam do mesmo IP; sem isso o rate limit põe todos os usuários num balde só e o login toma 429 para todo mundo (AUD API-01). Não trocar para `true`: o Express passaria a aceitar o primeiro IP do `X-Forwarded-For`, que o cliente forja à vontade. Se entrar outro proxy na frente (CDN), o número sobe.
 - **Consulta de CRMV é paga por chamada.** O `test/e2e/setup-env.ts` fixa `CRMV_PROVIDER=stub` por atribuição direta, justamente para um `.env` de desenvolvimento apontando para o provedor real não fazer o e2e gastar dinheiro. Não trocar para `??=`.
 
 ## Ambiente & comandos
