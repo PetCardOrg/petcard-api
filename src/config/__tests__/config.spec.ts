@@ -6,6 +6,7 @@ import { authConfig } from '../auth.config';
 import { mailConfig } from '../mail.config';
 import { throttlerConfig } from '../throttler.config';
 import { crmvConfig } from '../crmv.config';
+import { reminderConfig } from '../reminder.config';
 
 /**
  * Só o que morde de verdade na configuração.
@@ -33,6 +34,7 @@ const CHAVES = [
   'APP_DEEP_LINK_BASE',
   'API_BASE_URL',
   'CRMV_PROVIDER',
+  'REMINDERS_TRIGGER_SECRET',
 ] as const;
 
 describe('configuração de ambiente', () => {
@@ -327,6 +329,34 @@ describe('configuração de ambiente', () => {
 
     it('cai no stub fora de produção, para o CI e a demo', () => {
       expect(crmvConfig().provider).toBe('stub');
+    });
+  });
+
+  describe('segredo do disparo externo dos lembretes', () => {
+    it('recusa subir em produção sem o segredo', () => {
+      // Sem ele o disparo das 9h não autentica e, com o Render dormindo,
+      // nenhum lembrete sai.
+      process.env.NODE_ENV = 'production';
+
+      expect(() => reminderConfig()).toThrow(/REMINDERS_TRIGGER_SECRET/);
+    });
+
+    it('recusa segredo curto demais em produção', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.REMINDERS_TRIGGER_SECRET = 'curto';
+
+      expect(() => reminderConfig()).toThrow(/at least 32 characters/);
+    });
+
+    it('aceita segredo longo em produção', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.REMINDERS_TRIGGER_SECRET = 'a'.repeat(32);
+
+      expect(reminderConfig().triggerSecret).toHaveLength(32);
+    });
+
+    it('fora de produção sobe sem segredo (disparo externo desligado)', () => {
+      expect(reminderConfig().triggerSecret).toBeUndefined();
     });
   });
 });

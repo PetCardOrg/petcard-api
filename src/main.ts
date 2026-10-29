@@ -13,6 +13,7 @@ import {
   NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
   QR_CODE_DLQ_ROUTING_KEY,
 } from './modules/queue/queue.constants';
+import { ReminderTriggerService } from './modules/reminder/reminder-trigger.service';
 
 /** Tamanho máximo de um corpo JSON aceito. Uploads vão por multipart. */
 const JSON_BODY_LIMIT = '1mb';
@@ -138,5 +139,11 @@ async function bootstrap() {
 
   await app.startAllMicroservices();
   await app.listen(process.env.PORT ?? 3000);
+
+  // O Render gratuito dorme e perde o `@Cron` das 9h (AUD API-02): ao acordar,
+  // roda o que ficou para trás. Sem `await`, para não segurar o request que
+  // acordou o servidor. Fica aqui, e não num hook do módulo, para não rodar
+  // nos testes nem no `scripts/run-reminders.ts`.
+  void app.get(ReminderTriggerService).runOnBoot();
 }
 void bootstrap();

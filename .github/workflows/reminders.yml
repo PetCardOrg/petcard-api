@@ -1,0 +1,42 @@
+name: Lembretes diários
+
+# AUD API-02: o Render gratuito dorme e o @Cron das 9h não roda com o processo
+# parado. Este workflow acorda a API e dispara os lembretes de dose e de
+# agendamento. Repetir é seguro (cada registro é reivindicado antes do envio).
+#
+# - `schedule` só roda na branch padrão (main) e o GitHub pode atrasá-lo em
+#   até ~1h; a execução no boot da API cobre o atraso.
+# - Repo público: o GitHub desliga o `schedule` depois de 60 dias sem commit.
+#   Se os lembretes pararem, reativar em Actions → "Lembretes diários".
+# - Segredos (Settings → Secrets and variables → Actions):
+#   REMINDERS_API_URL (ex.: https://petcard-api.onrender.com) e
+#   REMINDERS_TRIGGER_SECRET (o mesmo valor da variável no Render).
+on:
+  schedule:
+    # 12:00 UTC = 9h em America/Fortaleza, o horário do @Cron.
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  disparar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Disparar lembretes na API
+        env:
+          API_URL: ${{ secrets.REMINDERS_API_URL }}
+          SECRET: ${{ secrets.REMINDERS_TRIGGER_SECRET }}
+        run: |
+          if [ -z "$API_URL" ] || [ -z "$SECRET" ]; then
+            echo "REMINDERS_API_URL ou REMINDERS_TRIGGER_SECRET não configurado." >&2
+            exit 1
+          fi
+          # O cold start do Render leva perto de 1 min: as retentativas cobrem
+          # o 502 do proxy enquanto o processo sobe.
+          curl --fail --silent --show-error \
+            --retry 6 --retry-delay 20 --retry-all-errors \
+            --max-time 120 \
+            -X POST -H "X-Reminders-Secret: $SECRET" \
+            "${API_URL%/}/internal/reminders/run"
