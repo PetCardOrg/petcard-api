@@ -60,11 +60,12 @@ export class DoseReminderService {
    * record is re-notified only once its current dose window opens, so a vet
    * setting a new future dose triggers a fresh push.
    *
-   * Cada processo roda o próprio `@Cron`, e a Fase 2 da M7 sobe mais de uma
-   * task no ECS: sem coordenação, duas instâncias acordam às 9h, selecionam o
-   * mesmo conjunto e mandam o push antes de qualquer uma marcar
-   * `lastNotifiedAt` — o tutor recebe duplicado. Por isso o registro é
-   * *reivindicado* antes do envio (ver `claim`).
+   * A varredura roda por mais de um caminho: o `@Cron`, o disparo externo do
+   * GitHub Actions e o boot do Render (AUD API-02), e cada instância roda o
+   * próprio `@Cron`. Sem coordenação, duas execuções selecionam o mesmo
+   * conjunto e mandam o push antes de qualquer uma marcar `lastNotifiedAt` —
+   * o tutor recebe duplicado. Por isso o registro é *reivindicado* antes do
+   * envio (ver `claim`).
    */
   async runDoseReminders(): Promise<{
     vaccine: number;
@@ -236,8 +237,9 @@ export class DoseReminderService {
    * no Postgres, então de duas instâncias que enxergaram o mesmo registro só
    * uma vê `count = 1` e segue para o push. A outra vê `0` e desiste. Foi a
    * opção escolhida em vez de advisory lock ou eleição de executor: não precisa
-   * de tabela nem de migration, não deixa lock pendurado se a task morrer no
-   * meio, e reparte o trabalho entre as instâncias em vez de deixar uma ociosa.
+   * de tabela nem de migration, não deixa lock pendurado se o processo morrer
+   * no meio, e reparte o trabalho entre as execuções em vez de deixar uma
+   * ociosa.
    */
   private async claim(
     model: ReminderModel,

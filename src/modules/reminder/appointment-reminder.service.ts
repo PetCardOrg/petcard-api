@@ -21,10 +21,10 @@ const HOUR_MS = 60 * 60 * 1000;
  * novo) zera o campo em `AppointmentService.update` para liberar um aviso
  * novo.
  *
- * Como o lembrete de dose, o registro é reivindicado antes do envio: cada
- * processo roda o próprio `@Cron` e a Fase 2 da M7 sobe mais de uma task no
- * ECS — sem isso, duas instâncias selecionam o mesmo agendamento às 9h e o
- * tutor recebe o aviso duas vezes.
+ * Como o lembrete de dose, o registro é reivindicado antes do envio: a
+ * varredura roda pelo `@Cron`, pelo disparo externo e pelo boot (AUD API-02)
+ * — sem isso, duas execuções selecionam o mesmo agendamento e o tutor recebe
+ * o aviso duas vezes.
  */
 @Injectable()
 export class AppointmentReminderService {
