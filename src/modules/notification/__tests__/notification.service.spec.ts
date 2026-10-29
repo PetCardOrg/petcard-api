@@ -137,7 +137,7 @@ describe('NotificationService', () => {
       );
     });
 
-    it('keeps the notification PENDING when publish fails', async () => {
+    it('marca como FAILED e não devolve a notificação cuja publicação falhou', async () => {
       prisma.deviceToken.findMany.mockResolvedValue([{ token: 't1' }]);
       prisma.notification.create.mockResolvedValue({ id: 'n1' });
       publisher.publish.mockRejectedValueOnce(new Error('rmq down'));
@@ -153,8 +153,41 @@ describe('NotificationService', () => {
         metadata: { tier: '1h' },
       });
 
-      expect(result).toHaveLength(1);
-      expect(prisma.notification.create).toHaveBeenCalledTimes(1);
+      expect(result).toEqual([]);
+      expect(prisma.notification.update).toHaveBeenCalledWith({
+        where: { id: 'n1' },
+        data: { status: 'FAILED', errorCode: 'ENQUEUE_FAILED' },
+      });
+    });
+
+    it('devolve só as notificações publicadas quando um dos aparelhos falha', async () => {
+      prisma.deviceToken.findMany.mockResolvedValue([
+        { token: 't1' },
+        { token: 't2' },
+      ]);
+      prisma.notification.create
+        .mockResolvedValueOnce({ id: 'n1' })
+        .mockResolvedValueOnce({ id: 'n2' });
+      publisher.publish
+        .mockRejectedValueOnce(new Error('rmq down'))
+        .mockResolvedValueOnce(undefined);
+      jest.spyOn(service['logger'], 'error').mockImplementation(() => {});
+
+      const result = await service.schedulePush({
+        tutorId: 'tutor-1',
+        kind: NotificationKind.DOSE_REMINDER,
+        referenceType: 'VACCINE_RECORD',
+        referenceId: 'vac-1',
+        title: 'Vacina',
+        body: 'Hora da próxima dose',
+      });
+
+      expect(result).toEqual([{ id: 'n2' }]);
+      expect(prisma.notification.update).toHaveBeenCalledTimes(1);
+      expect(prisma.notification.update).toHaveBeenCalledWith({
+        where: { id: 'n1' },
+        data: { status: 'FAILED', errorCode: 'ENQUEUE_FAILED' },
+      });
     });
   });
 
