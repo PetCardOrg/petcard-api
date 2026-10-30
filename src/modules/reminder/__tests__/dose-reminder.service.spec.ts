@@ -194,6 +194,28 @@ describe('DoseReminderService', () => {
       });
     });
 
+    it('boot e disparo externo juntos não duplicam o push (AUD API-02)', async () => {
+      // Banco de mentira com estado: as duas execuções leem o registro antes
+      // de qualquer uma reivindicar.
+      let lastNotifiedAt: Date | null = null;
+      prisma.vaccineRecord.findMany.mockImplementation(() =>
+        Promise.resolve([vaccineRecord({ lastNotifiedAt })]),
+      );
+      prisma.vaccineRecord.updateMany.mockImplementation(() => {
+        if (lastNotifiedAt !== null) return Promise.resolve({ count: 0 });
+        lastNotifiedAt = new Date();
+        return Promise.resolve({ count: 1 });
+      });
+
+      const [primeira, segunda] = await Promise.all([
+        service.runDoseReminders(),
+        service.runDoseReminders(),
+      ]);
+
+      expect(primeira.vaccine + segunda.vaccine).toBe(1);
+      expect(notificationService.schedulePush).toHaveBeenCalledTimes(1);
+    });
+
     it('não envia o push quando outra instância já reivindicou o registro', async () => {
       prisma.vaccineRecord.findMany.mockResolvedValue([vaccineRecord()]);
       // O UPDATE condicional não pegou nenhuma linha: a outra task marcou antes.
