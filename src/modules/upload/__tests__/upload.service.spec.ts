@@ -189,6 +189,40 @@ describe('UploadService', () => {
       );
       expect(mockSend).not.toHaveBeenCalled();
     });
+
+    describe('discardFile (AUD API-10)', () => {
+      it('apaga a foto que deixou de ser usada', async () => {
+        mockSend.mockResolvedValue({});
+        await service.discardFile(
+          'https://petcard-bucket.s3.us-east-1.amazonaws.com/pets/antiga.png',
+        );
+        expect(mockSend.mock.calls[0][0].input).toMatchObject({
+          Key: 'pets/antiga.png',
+        });
+      });
+
+      it('não faz nada sem foto', async () => {
+        await service.discardFile(null);
+        await service.discardFile(undefined);
+        expect(mockSend).not.toHaveBeenCalled();
+      });
+
+      it('falha do S3 não derruba quem chamou', async () => {
+        mockSend.mockRejectedValue(new Error('network'));
+        await expect(
+          service.discardFile(
+            'https://petcard-bucket.s3.us-east-1.amazonaws.com/pets/a.png',
+          ),
+        ).resolves.toBeUndefined();
+      });
+
+      it('URL fora do bucket não derruba quem chamou e não apaga nada', async () => {
+        await expect(
+          service.discardFile('https://example.com/pets/a.png'),
+        ).resolves.toBeUndefined();
+        expect(mockSend).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('objetos privados (comprovantes)', () => {

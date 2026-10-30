@@ -81,7 +81,10 @@ describe('PetController (integração)', () => {
           provide: ColeiraService,
           useValue: { rotateTokenForPet: jest.fn().mockResolvedValue('tag') },
         },
-        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
+        {
+          provide: UploadService,
+          useValue: { assertBucketUrl: jest.fn(), discardFile: jest.fn() },
+        },
       ],
     });
   });

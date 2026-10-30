@@ -31,6 +31,14 @@ export function inteiroPositivo(
 export const LIMITE_DE_ROTA_CARA = 3;
 
 /**
+ * Uploads de imagem por usuário e por minuto. Cada um grava até 5MB no S3,
+ * que é pago por volume; sem teto, um laço autenticado enchia o bucket. Dez
+ * cobre com folga o uso real (foto do pet e de perfil). Fixo pelo mesmo motivo
+ * do `LIMITE_DE_ROTA_CARA`.
+ */
+export const LIMITE_DE_UPLOAD = 10;
+
+/**
  * Rate limit das rotas sem sessão (login e cadastro).
  *
  * Elas eram as únicas superfícies públicas sem limite: dava para varrer senhas

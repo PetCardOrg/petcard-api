@@ -138,7 +138,7 @@ export class PetService {
     userId: string,
     dto: Omit<UpdatePetDto, 'tutor_id'>,
   ): Promise<PetResponseDto> {
-    await this.assertOwnership(id, userId);
+    const atual = await this.assertOwnership(id, userId);
     if (dto.photo_url !== undefined) {
       this.uploadService.assertBucketUrl(dto.photo_url);
     }
@@ -155,6 +155,9 @@ export class PetService {
       },
       include: { carteiraDigital: true },
     });
+    if (dto.photo_url !== undefined && dto.photo_url !== atual.photoUrl) {
+      await this.uploadService.discardFile(atual.photoUrl);
+    }
     return toResponseDto(pet);
   }
 
@@ -167,8 +170,9 @@ export class PetService {
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    await this.assertOwnership(id, userId);
+    const pet = await this.assertOwnership(id, userId);
     await this.prisma.pet.delete({ where: { id } });
+    await this.uploadService.discardFile(pet.photoUrl);
   }
 
   async assertOwnership(petId: string, userId: string): Promise<Pet> {

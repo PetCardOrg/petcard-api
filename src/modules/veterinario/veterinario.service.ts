@@ -117,6 +117,9 @@ export class VeterinarioService {
       where: { id },
       data,
     });
+    if (dto.foto_url !== undefined && dto.foto_url !== atual.photoUrl) {
+      await this.uploadService.discardFile(atual.photoUrl);
+    }
 
     return toResponse(vet);
   }
@@ -143,8 +146,9 @@ export class VeterinarioService {
   }
 
   async remove(id: string): Promise<void> {
-    await this.findById(id);
+    const vet = await this.buscarOuFalhar(id);
     await this.prisma.veterinario.delete({ where: { id } });
+    await this.uploadService.discardFile(vet.photoUrl);
   }
 
   /**
