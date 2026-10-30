@@ -1,12 +1,14 @@
 import {
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Appointment } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PetService } from '../pet/pet.service';
 import { CalendarSyncPublisher } from '../queue/calendar-sync.publisher';
+import type { AppointmentSyncMessage } from '../queue/dto/calendar-sync.message';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 
@@ -46,6 +48,8 @@ function toResponse(a: AppointmentWithPet): AppointmentResponse {
 
 @Injectable()
 export class AppointmentService {
+  private readonly logger = new Logger(AppointmentService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly calendarSyncPublisher: CalendarSyncPublisher,
@@ -73,7 +77,7 @@ export class AppointmentService {
       include: { pet: { select: { name: true } } },
     });
 
-    await this.calendarSyncPublisher.publish({
+    await this.enqueueCalendarSync({
       action: 'CREATE',
       appointment_id: appointment.id,
       tutor_id: userId,
@@ -136,7 +140,7 @@ export class AppointmentService {
       include: { pet: { select: { name: true } } },
     });
 
-    await this.calendarSyncPublisher.publish({
+    await this.enqueueCalendarSync({
       action: 'UPDATE',
       appointment_id: appointment.id,
       tutor_id: userId,
@@ -151,7 +155,7 @@ export class AppointmentService {
     // Capture the event id before deleting the row — the worker needs it to
     // call the Calendar API after the appointment is gone from the DB.
     if (appointment.googleEventId) {
-      await this.calendarSyncPublisher.publish({
+      await this.enqueueCalendarSync({
         action: 'DELETE',
         appointment_id: id,
         tutor_id: userId,
@@ -160,6 +164,28 @@ export class AppointmentService {
     }
 
     await this.prisma.appointment.delete({ where: { id } });
+  }
+
+  /**
+   * O agendamento já está salvo quando a sincronização é publicada: se a fila
+   * estiver fora, responder 500 dizia ao cliente que nada foi salvo.
+   * CREATE e UPDATE deixam a linha `PENDING_*`, que o `syncAllPending`
+   * recupera. No DELETE a linha some logo depois, então o evento fica órfão
+   * na agenda do Google; o log diz qual é.
+   */
+  private async enqueueCalendarSync(
+    message: AppointmentSyncMessage,
+  ): Promise<void> {
+    try {
+      await this.calendarSyncPublisher.publish(message);
+    } catch {
+      // O publisher já logou o erro com a stack; aqui só o destino da linha.
+      this.logger.warn(
+        message.action === 'DELETE'
+          ? `Evento ${message.google_event_id} do agendamento ${message.appointment_id} ficou órfão no Google Calendar`
+          : `Agendamento ${message.appointment_id} fica pendente até o próximo syncAllPending`,
+      );
+    }
   }
 
   private async findAndAssertOwnership(
