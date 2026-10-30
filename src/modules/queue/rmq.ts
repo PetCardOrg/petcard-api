@@ -66,6 +66,15 @@ export function rmqOptions(
   };
 }
 
+/**
+ * Espera antes de republicar. Objeto, e não função solta, para os testes dos
+ * consumidores trocarem a espera real sem mexer no fluxo que verificam.
+ */
+export const backoff = {
+  esperar: (ms: number): Promise<void> =>
+    new Promise((resolve) => setTimeout(resolve, ms)),
+};
+
 export function getRetryCount(message: ConsumeMessage): number {
   const raw: unknown = message.properties.headers?.[RETRY_HEADER];
   return typeof raw === 'number' ? raw : 0;
@@ -75,6 +84,16 @@ export function getRetryCount(message: ConsumeMessage): number {
  * Republica a mensagem com o contador +1 ou, esgotadas as tentativas, a manda
  * para a DLQ (`nack` sem requeue). Os logs e o que fazer ao desistir ficam com
  * cada consumidor, nos ganchos.
+ *
+ * Antes de republicar, espera 1s, 2s, 4s… (AUD API-09). Sem a espera, as três
+ * tentativas saíam em milissegundos e uma instabilidade de segundos no Google
+ * ou no FCM já mandava a mensagem para a DLQ. Esperar segurando a mensagem é
+ * seguro porque cada consumidor tem `prefetchCount: 1` (`main.ts`): ela não
+ * atrasa outra já entregue, e se o processo cair antes do `ack` o broker a
+ * reentrega.
+ *
+ * As DLQs não têm leitor: a mensagem que esgota as tentativas fica parada lá
+ * até alguém olhar no painel do RabbitMQ.
  */
 export async function retryOrDlq(
   channel: Channel,
@@ -89,6 +108,7 @@ export async function retryOrDlq(
 
   if (retryCount < maxRetries) {
     hooks.onRetry(retryCount + 1);
+    await backoff.esperar(1000 * 2 ** retryCount);
     channel.publish('', message.fields.routingKey, message.content, {
       ...message.properties,
       headers: {
