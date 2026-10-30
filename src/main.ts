@@ -8,11 +8,7 @@ import helmet from 'helmet';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { confiarNoProxyReverso } from './common/http/trust-proxy';
-import {
-  CALENDAR_SYNC_DLQ_ROUTING_KEY,
-  NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
-  QR_CODE_DLQ_ROUTING_KEY,
-} from './modules/queue/queue.constants';
+import { FILAS, rmqOptions } from './modules/queue/rmq';
 import { ReminderTriggerService } from './modules/reminder/reminder-trigger.service';
 
 /** Tamanho máximo de um corpo JSON aceito. Uploads vão por multipart. */
@@ -82,60 +78,24 @@ async function bootstrap() {
     SwaggerModule.setup('docs', app, document);
   }
 
-  app.connectMicroservice<MicroserviceOptions>({
-    transport: Transport.RMQ,
-    options: {
-      urls: [config.get<string>('rabbitmq.url')!],
-      queue: config.get<string>('rabbitmq.qrCodeQueue')!,
-      queueOptions: {
-        durable: true,
-        arguments: {
-          'x-dead-letter-exchange': config.get<string>('rabbitmq.qrCodeDlx')!,
-          'x-dead-letter-routing-key': QR_CODE_DLQ_ROUTING_KEY,
-        },
+  // Um consumidor por fila. As opções da fila saem do mesmo `rmqOptions` do
+  // `QueueModule`: publicador e consumidor precisam declará-la igual.
+  const rabbitUrl = config.get<string>('rabbitmq.url')!;
+  for (const fila of FILAS) {
+    app.connectMicroservice<MicroserviceOptions>({
+      transport: Transport.RMQ,
+      options: {
+        ...rmqOptions(
+          rabbitUrl,
+          config.get<string>(fila.queue)!,
+          config.get<string>(fila.dlx)!,
+          fila.dlqRoutingKey,
+        ),
+        noAck: false,
+        prefetchCount: 1,
       },
-      noAck: false,
-      prefetchCount: 1,
-    },
-  });
-
-  app.connectMicroservice<MicroserviceOptions>({
-    transport: Transport.RMQ,
-    options: {
-      urls: [config.get<string>('rabbitmq.url')!],
-      queue: config.get<string>('rabbitmq.notificationPushQueue')!,
-      queueOptions: {
-        durable: true,
-        arguments: {
-          'x-dead-letter-exchange': config.get<string>(
-            'rabbitmq.notificationPushDlx',
-          )!,
-          'x-dead-letter-routing-key': NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
-        },
-      },
-      noAck: false,
-      prefetchCount: 1,
-    },
-  });
-
-  app.connectMicroservice<MicroserviceOptions>({
-    transport: Transport.RMQ,
-    options: {
-      urls: [config.get<string>('rabbitmq.url')!],
-      queue: config.get<string>('rabbitmq.calendarSyncQueue')!,
-      queueOptions: {
-        durable: true,
-        arguments: {
-          'x-dead-letter-exchange': config.get<string>(
-            'rabbitmq.calendarSyncDlx',
-          )!,
-          'x-dead-letter-routing-key': CALENDAR_SYNC_DLQ_ROUTING_KEY,
-        },
-      },
-      noAck: false,
-      prefetchCount: 1,
-    },
-  });
+    });
+  }
 
   await app.startAllMicroservices();
   await app.listen(process.env.PORT ?? 3000);

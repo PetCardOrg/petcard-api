@@ -9,8 +9,8 @@ import type {
 import {
   CALENDAR_SYNC_MAX_RETRIES,
   CALENDAR_SYNC_PATTERN,
-  CALENDAR_SYNC_RETRY_HEADER,
 } from '../queue/queue.constants';
+import { retryOrDlq } from '../queue/rmq';
 import { GoogleCalendarService } from './google-calendar.service';
 import { HealthCalendarService } from './health-calendar.service';
 import { extractGoogleStatus, isAlreadyGoneError } from './google-api-error';
@@ -151,28 +151,16 @@ export class CalendarSyncConsumer {
     channel: Channel,
     message: ConsumeMessage,
   ): Promise<void> {
-    const retryCount = this.getRetryCount(message);
-
-    if (retryCount < CALENDAR_SYNC_MAX_RETRIES) {
-      this.logger.warn(
-        `Retry ${retryCount + 1}/${CALENDAR_SYNC_MAX_RETRIES} for ${subject} (${action}): ${reason}`,
-      );
-      channel.publish('', message.fields.routingKey, message.content, {
-        ...message.properties,
-        headers: {
-          ...message.properties.headers,
-          [CALENDAR_SYNC_RETRY_HEADER]: retryCount + 1,
-        },
-      });
-      channel.ack(message);
-      return Promise.resolve();
-    }
-
-    this.logger.error(
-      `Exhausted retries for ${subject} (${action}): ${reason}; routing to DLQ`,
-    );
-    channel.nack(message, false, false);
-    return Promise.resolve();
+    await retryOrDlq(channel, message, CALENDAR_SYNC_MAX_RETRIES, {
+      onRetry: (attempt) =>
+        this.logger.warn(
+          `Retry ${attempt}/${CALENDAR_SYNC_MAX_RETRIES} for ${subject} (${action}): ${reason}`,
+        ),
+      onExhausted: () =>
+        this.logger.error(
+          `Exhausted retries for ${subject} (${action}): ${reason}; routing to DLQ`,
+        ),
+    });
   }
 
   private isPermanentAuthError(error: unknown): boolean {
@@ -183,11 +171,5 @@ export class CalendarSyncConsumer {
       message.includes('invalid_grant') ||
       message.includes('token has been expired or revoked')
     );
-  }
-
-  private getRetryCount(message: ConsumeMessage): number {
-    const raw: unknown =
-      message.properties.headers?.[CALENDAR_SYNC_RETRY_HEADER];
-    return typeof raw === 'number' ? raw : 0;
   }
 }
