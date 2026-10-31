@@ -23,7 +23,7 @@ Backend do PetCard (carteira digital de saúde para pets). NestJS 11 + Prisma 6 
 - **Investigar antes de codar.** Ler o módulo/serviço alvo e seus testes vizinhos antes de escrever.
 - **DTOs no shared.** Toda request/response nova vai como DTO no `@petcardorg/shared` (bump minor + publish). Respostas tipadas explícitas — o CLI plugin do Swagger **não** infere tipos de pacote externo.
 - **Auth.** `@Auth()` + `@Roles(Role.VET)`/`Role.TUTOR`; usuário via `@CurrentUser()`. **Nunca ler o claim JWT direto no controller.**
-- **Filas.** Toda fila nova precisa de DLX/DLQ + retry.
+- **Filas.** Toda fila nova precisa de DLX/DLQ + retry: entra na lista `FILAS` de `src/modules/queue/rmq.ts` (publicador, consumidor e topologia leem dali) e o consumidor usa o `retryOrDlq` compartilhado, que espera 1s/2s/4s antes de republicar (AUD API-09/11). **As DLQs não têm leitor:** o que esgota as tentativas fica parado lá e só aparece no painel do RabbitMQ.
 - **Migrations.** `npx prisma migrate dev --name <descricao_snake_case>`. SQL fora do Prisma: `--create-only` + edição manual.
 - **Configuração.** Variáveis sensíveis em `.env` com entrada no `.env.example`. Sem fallback hardcoded; em produção, faltar variável crítica = falha rápida no boot. API obriga `CORS_ORIGINS` em produção.
 - **Commits/branches/PRs:** ver as regras cross-repo na raiz (`../CLAUDE.md`). PR mira `develop`.

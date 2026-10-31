@@ -11,6 +11,7 @@ import {
 import { CalendarSyncConsumer } from '../calendar-sync.consumer';
 import { GoogleCalendarService } from '../google-calendar.service';
 import { HealthCalendarService } from '../health-calendar.service';
+import { backoff } from '../../queue/rmq';
 
 const createMessage = (
   overrides: Partial<AppointmentSyncMessage> = {},
@@ -49,6 +50,8 @@ describe('CalendarSyncConsumer', () => {
   let healthCalendar: { reconcile: jest.Mock };
 
   beforeEach(async () => {
+    // Sem a espera real do backoff (AUD API-09), testada em `rmq.spec.ts`.
+    jest.spyOn(backoff, 'esperar').mockResolvedValue(undefined);
     calendarService = {
       syncAppointment: jest.fn().mockResolvedValue(undefined),
       deleteEvent: jest.fn().mockResolvedValue(undefined),

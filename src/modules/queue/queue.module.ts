@@ -8,15 +8,8 @@ import { CalendarSyncPublisher } from './calendar-sync.publisher';
 import { NotificationPushPublisher } from './notification-push.publisher';
 import { QrCodeConsumer } from './qr-code.consumer';
 import { QrCodePublisher } from './qr-code.publisher';
-import {
-  CALENDAR_SYNC_CLIENT,
-  CALENDAR_SYNC_DLQ_ROUTING_KEY,
-  NOTIFICATION_PUSH_CLIENT,
-  NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
-  QR_CODE_CLIENT,
-  QR_CODE_DLQ_ROUTING_KEY,
-} from './queue.constants';
 import { RabbitMqTopologyService } from './rabbitmq-topology.service';
+import { FILAS, rmqOptions } from './rmq';
 
 @Global()
 @Module({
@@ -24,73 +17,25 @@ import { RabbitMqTopologyService } from './rabbitmq-topology.service';
     CardModule,
     ColeiraModule,
     UploadModule,
-    ClientsModule.registerAsync([
-      {
-        name: QR_CODE_CLIENT,
+    ClientsModule.registerAsync(
+      FILAS.map((fila) => ({
+        name: fila.client,
         imports: [ConfigModule],
         inject: [ConfigService],
         useFactory: (config: ConfigService) => ({
-          transport: Transport.RMQ,
+          transport: Transport.RMQ as const,
           options: {
-            urls: [config.get<string>('rabbitmq.url')!],
-            queue: config.get<string>('rabbitmq.qrCodeQueue')!,
-            queueOptions: {
-              durable: true,
-              arguments: {
-                'x-dead-letter-exchange':
-                  config.get<string>('rabbitmq.qrCodeDlx')!,
-                'x-dead-letter-routing-key': QR_CODE_DLQ_ROUTING_KEY,
-              },
-            },
+            ...rmqOptions(
+              config.get<string>('rabbitmq.url')!,
+              config.get<string>(fila.queue)!,
+              config.get<string>(fila.dlx)!,
+              fila.dlqRoutingKey,
+            ),
             persistent: true,
           },
         }),
-      },
-      {
-        name: NOTIFICATION_PUSH_CLIENT,
-        imports: [ConfigModule],
-        inject: [ConfigService],
-        useFactory: (config: ConfigService) => ({
-          transport: Transport.RMQ,
-          options: {
-            urls: [config.get<string>('rabbitmq.url')!],
-            queue: config.get<string>('rabbitmq.notificationPushQueue')!,
-            queueOptions: {
-              durable: true,
-              arguments: {
-                'x-dead-letter-exchange': config.get<string>(
-                  'rabbitmq.notificationPushDlx',
-                )!,
-                'x-dead-letter-routing-key': NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
-              },
-            },
-            persistent: true,
-          },
-        }),
-      },
-      {
-        name: CALENDAR_SYNC_CLIENT,
-        imports: [ConfigModule],
-        inject: [ConfigService],
-        useFactory: (config: ConfigService) => ({
-          transport: Transport.RMQ,
-          options: {
-            urls: [config.get<string>('rabbitmq.url')!],
-            queue: config.get<string>('rabbitmq.calendarSyncQueue')!,
-            queueOptions: {
-              durable: true,
-              arguments: {
-                'x-dead-letter-exchange': config.get<string>(
-                  'rabbitmq.calendarSyncDlx',
-                )!,
-                'x-dead-letter-routing-key': CALENDAR_SYNC_DLQ_ROUTING_KEY,
-              },
-            },
-            persistent: true,
-          },
-        }),
-      },
-    ]),
+      })),
+    ),
   ],
   controllers: [QrCodeConsumer],
   providers: [
