@@ -26,7 +26,7 @@ describe('PetService', () => {
   let qrCodePublisher: { publishGenerate: jest.Mock };
   let cardService: { rotateTokenForPet: jest.Mock };
   let coleiraService: { rotateTokenForPet: jest.Mock };
-  let uploadService: { assertBucketUrl: jest.Mock };
+  let uploadService: { assertBucketUrl: jest.Mock; discardFile: jest.Mock };
 
   const tutor = { id: 'tutor-1' };
   const now = new Date('2025-01-15T12:00:00Z');
@@ -78,7 +78,10 @@ describe('PetService', () => {
     coleiraService = {
       rotateTokenForPet: jest.fn().mockResolvedValue('coleira-nova'),
     };
-    uploadService = { assertBucketUrl: jest.fn() };
+    uploadService = {
+      assertBucketUrl: jest.fn(),
+      discardFile: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -292,6 +295,32 @@ describe('PetService', () => {
       expect(result.name).toBe('Rex II');
     });
 
+    describe('foto antiga (AUD API-10)', () => {
+      const ANTIGA =
+        'https://bucket.s3.us-east-1.amazonaws.com/pets/antiga.png';
+      const NOVA = 'https://bucket.s3.us-east-1.amazonaws.com/pets/nova.png';
+
+      beforeEach(() => {
+        prisma.pet.findUnique.mockResolvedValue({ ...pet, photoUrl: ANTIGA });
+        prisma.pet.update.mockResolvedValue(petWithCard);
+      });
+
+      it('apaga a foto antiga quando a foto muda', async () => {
+        await service.update('pet-1', 'tutor-1', { photo_url: NOVA });
+        expect(uploadService.discardFile).toHaveBeenCalledWith(ANTIGA);
+      });
+
+      it('não apaga nada quando a foto não vem no corpo', async () => {
+        await service.update('pet-1', 'tutor-1', { name: 'Rex II' });
+        expect(uploadService.discardFile).not.toHaveBeenCalled();
+      });
+
+      it('não apaga quando a foto enviada é a mesma', async () => {
+        await service.update('pet-1', 'tutor-1', { photo_url: ANTIGA });
+        expect(uploadService.discardFile).not.toHaveBeenCalled();
+      });
+    });
+
     it('should refuse updates from non-owners', async () => {
       prisma.pet.findUnique.mockResolvedValue({ ...pet, tutorId: 'other' });
 
@@ -311,6 +340,16 @@ describe('PetService', () => {
       expect(prisma.pet.delete).toHaveBeenCalledWith({
         where: { id: 'pet-1' },
       });
+    });
+
+    it('apaga a foto do pet excluído (AUD API-10)', async () => {
+      const foto = 'https://bucket.s3.us-east-1.amazonaws.com/pets/rex.png';
+      prisma.pet.findUnique.mockResolvedValue({ ...pet, photoUrl: foto });
+      prisma.pet.delete.mockResolvedValue(pet);
+
+      await service.remove('pet-1', 'tutor-1');
+
+      expect(uploadService.discardFile).toHaveBeenCalledWith(foto);
     });
   });
 

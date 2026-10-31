@@ -36,6 +36,7 @@ describe('VeterinarioService', () => {
       delete: jest.Mock;
     };
   };
+  let uploadService: { assertBucketUrl: jest.Mock; discardFile: jest.Mock };
 
   const vetFixture = {
     id: 'vet-1',
@@ -64,11 +65,16 @@ describe('VeterinarioService', () => {
       },
     };
 
+    uploadService = {
+      assertBucketUrl: jest.fn(),
+      discardFile: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         VeterinarioService,
         { provide: PrismaService, useValue: prisma },
-        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
+        { provide: UploadService, useValue: uploadService },
       ],
     }).compile();
 
@@ -125,6 +131,34 @@ describe('VeterinarioService', () => {
       expect(dadosGravados()).toEqual({
         photoUrl: 'https://bucket.s3.us-east-1.amazonaws.com/vets/foto.png',
       });
+    });
+
+    it('apaga a foto antiga quando a foto muda (AUD API-10)', async () => {
+      const antiga =
+        'https://bucket.s3.us-east-1.amazonaws.com/vets/antiga.png';
+      prisma.veterinario.findUnique.mockResolvedValueOnce({
+        ...vetFixture,
+        photoUrl: antiga,
+      });
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+
+      await service.update('vet-1', {
+        foto_url: 'https://bucket.s3.us-east-1.amazonaws.com/vets/nova.png',
+      });
+
+      expect(uploadService.discardFile).toHaveBeenCalledWith(antiga);
+    });
+
+    it('não apaga a foto quando ela não vem no corpo (AUD API-10)', async () => {
+      prisma.veterinario.findUnique.mockResolvedValueOnce({
+        ...vetFixture,
+        photoUrl: 'https://bucket.s3.us-east-1.amazonaws.com/vets/antiga.png',
+      });
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+
+      await service.update('vet-1', { nome: 'Dr. Carlos Lima' });
+
+      expect(uploadService.discardFile).not.toHaveBeenCalled();
     });
 
     it('devolve a foto salva em foto_url, não photoUrl', async () => {
@@ -305,6 +339,19 @@ describe('VeterinarioService', () => {
       await expect(service.remove('missing')).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('apaga a foto do vet excluído (AUD API-10)', async () => {
+      const foto = 'https://bucket.s3.us-east-1.amazonaws.com/vets/carlos.png';
+      prisma.veterinario.findUnique.mockResolvedValue({
+        ...vetFixture,
+        photoUrl: foto,
+      });
+      prisma.veterinario.delete.mockResolvedValue(vetFixture);
+
+      await service.remove('vet-1');
+
+      expect(uploadService.discardFile).toHaveBeenCalledWith(foto);
     });
   });
 });

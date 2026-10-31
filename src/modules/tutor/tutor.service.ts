@@ -93,8 +93,18 @@ export class TutorService {
    * nome e CRMV do autor são copiados na gravação, não referenciados.
    */
   async removeById(id: string): Promise<void> {
-    await this.findById(id);
+    const tutor = await this.buscarOuFalhar(id);
+    // Lidas antes: os pets saem em cascata junto com o tutor.
+    const pets = await this.prisma.pet.findMany({
+      where: { tutorId: id },
+      select: { photoUrl: true },
+    });
     await this.prisma.tutor.delete({ where: { id } });
+    await Promise.all(
+      [tutor.profileImageUrl, ...pets.map((pet) => pet.photoUrl)].map((url) =>
+        this.uploadService.discardFile(url),
+      ),
+    );
   }
 
   async findByEmail(email: string): Promise<Tutor | null> {
@@ -135,6 +145,12 @@ export class TutorService {
         ...(trocouDeEmail ? { emailVerifiedAt: null } : {}),
       },
     });
+    if (
+      data.profile_image_url !== undefined &&
+      data.profile_image_url !== atual.profileImageUrl
+    ) {
+      await this.uploadService.discardFile(atual.profileImageUrl);
+    }
     return semSenha(tutor);
   }
 

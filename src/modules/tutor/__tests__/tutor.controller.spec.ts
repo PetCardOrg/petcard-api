@@ -16,6 +16,7 @@ describe('TutorController (integração)', () => {
   let prisma: {
     tutor: { findUnique: jest.Mock; update: jest.Mock; delete: jest.Mock };
     petAtendido: { findFirst: jest.Mock };
+    pet: { findMany: jest.Mock };
   };
 
   const tutor = {
@@ -36,6 +37,7 @@ describe('TutorController (integração)', () => {
     prisma = {
       tutor: { findUnique: jest.fn(), update: jest.fn(), delete: jest.fn() },
       petAtendido: { findFirst: jest.fn() },
+      pet: { findMany: jest.fn().mockResolvedValue([]) },
     };
 
     harness = await createControllerTestApp({
@@ -43,7 +45,10 @@ describe('TutorController (integração)', () => {
       providers: [
         TutorService,
         { provide: PrismaService, useValue: prisma },
-        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
+        {
+          provide: UploadService,
+          useValue: { assertBucketUrl: jest.fn(), discardFile: jest.fn() },
+        },
       ],
     });
   });

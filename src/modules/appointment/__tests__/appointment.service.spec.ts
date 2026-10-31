@@ -103,6 +103,19 @@ describe('AppointmentService', () => {
       });
     });
 
+    it('responde com o agendamento salvo se a fila estiver fora, e ele fica PENDING_CREATE (AUD API-08)', async () => {
+      prisma.appointment.create.mockResolvedValue(appointment);
+      publisher.publish.mockRejectedValue(new Error('broker down'));
+
+      const result = await service.create('tutor-1', {
+        title: 'Consulta de rotina',
+        scheduled_at: '2026-06-01T14:00:00Z',
+      });
+
+      expect(result.id).toBe('appt-1');
+      expect(result.sync_status).toBe('PENDING_CREATE');
+    });
+
     it('confere a posse do pet antes de criar o agendamento', async () => {
       prisma.appointment.create.mockResolvedValue(appointment);
 
@@ -242,6 +255,23 @@ describe('AppointmentService', () => {
       expect(result.title).toBe('Reagendada');
     });
 
+    it('responde com o agendamento salvo se a fila estiver fora, e ele fica PENDING_UPDATE (AUD API-08)', async () => {
+      prisma.appointment.findUnique.mockResolvedValue(appointment);
+      prisma.appointment.update.mockResolvedValue({
+        ...appointment,
+        title: 'Reagendada',
+        syncStatus: 'PENDING_UPDATE',
+      });
+      publisher.publish.mockRejectedValue(new Error('broker down'));
+
+      const result = await service.update('appt-1', 'tutor-1', {
+        title: 'Reagendada',
+      });
+
+      expect(result.sync_status).toBe('PENDING_UPDATE');
+      expect(result.title).toBe('Reagendada');
+    });
+
     it('confere a posse do novo pet_id antes de atualizar', async () => {
       prisma.appointment.findUnique.mockResolvedValue(appointment);
       prisma.appointment.update.mockResolvedValue(appointment);
@@ -340,6 +370,22 @@ describe('AppointmentService', () => {
 
       expect(publisher.publish).not.toHaveBeenCalled();
       expect(prisma.appointment.delete).toHaveBeenCalled();
+    });
+
+    it('exclui mesmo se a fila estiver fora (AUD API-08)', async () => {
+      prisma.appointment.findUnique.mockResolvedValue({
+        ...appointment,
+        googleEventId: 'gcal-123',
+      });
+      prisma.appointment.delete.mockResolvedValue(appointment);
+      publisher.publish.mockRejectedValue(new Error('broker down'));
+
+      await expect(
+        service.remove('appt-1', 'tutor-1'),
+      ).resolves.toBeUndefined();
+      expect(prisma.appointment.delete).toHaveBeenCalledWith({
+        where: { id: 'appt-1' },
+      });
     });
 
     it('lança ForbiddenException e não deleta de não-dono', async () => {

@@ -242,6 +242,26 @@ export class UploadService {
     }
   }
 
+  /**
+   * Apaga, por melhor esforço, a foto que deixou de ser usada (troca de foto,
+   * exclusão de pet, tutor ou vet). Sem isto o bucket só crescia: o
+   * `deleteFile` existia, mas ninguém o chamava. A troca ou a exclusão já foi
+   * gravada quando isto roda; falhar aqui só deixa um arquivo a mais, então
+   * loga e segue.
+   */
+  async discardFile(fileUrl: string | null | undefined): Promise<void> {
+    if (!fileUrl) return;
+    try {
+      await this.deleteFile(fileUrl);
+    } catch (error) {
+      this.logger.warn(
+        `Foto antiga não apagada do S3 (${fileUrl}): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
   private validateFile(file: Express.Multer.File): void {
     if (!file) {
       throw new BadRequestException('No file provided');

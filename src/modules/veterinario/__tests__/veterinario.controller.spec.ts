@@ -72,7 +72,10 @@ describe('VeterinarioController (integração)', () => {
         VeterinarioService,
         { provide: PrismaService, useValue: prisma },
         { provide: CrmvVerificationService, useValue: crmv },
-        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
+        {
+          provide: UploadService,
+          useValue: { assertBucketUrl: jest.fn(), discardFile: jest.fn() },
+        },
       ],
     });
   });
