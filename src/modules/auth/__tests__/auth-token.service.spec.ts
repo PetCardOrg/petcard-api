@@ -15,7 +15,7 @@ describe('AuthTokenService', () => {
       create: jest.Mock;
       deleteMany: jest.Mock;
       findUnique: jest.Mock;
-      update: jest.Mock;
+      updateMany: jest.Mock;
     };
     $transaction: jest.Mock;
   };
@@ -26,7 +26,7 @@ describe('AuthTokenService', () => {
         create: jest.fn(),
         deleteMany: jest.fn(),
         findUnique: jest.fn(),
-        update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       $transaction: jest.fn((ops: unknown[]) => Promise.all(ops)),
     };
@@ -88,8 +88,8 @@ describe('AuthTokenService', () => {
       );
 
       expect(tutorId).toBe('tutor-1');
-      expect(prisma.authToken.update).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'token-1' } }),
+      expect(prisma.authToken.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'token-1', usedAt: null } }),
       );
     });
 
@@ -110,7 +110,7 @@ describe('AuthTokenService', () => {
       await expect(
         service.consume('raw', AuthTokenPurpose.PASSWORD_RESET),
       ).rejects.toThrow(BadRequestException);
-      expect(prisma.authToken.update).not.toHaveBeenCalled();
+      expect(prisma.authToken.updateMany).not.toHaveBeenCalled();
     });
 
     it('recusa token já usado', async () => {
@@ -118,6 +118,16 @@ describe('AuthTokenService', () => {
         ...base,
         usedAt: new Date(),
       });
+
+      await expect(
+        service.consume('raw', AuthTokenPurpose.PASSWORD_RESET),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    // Duas requisições leem o token ainda sem uso; só uma pode consumi-lo.
+    it('recusa quando outra requisição consumiu o token entre a leitura e a escrita (AUD API-18)', async () => {
+      prisma.authToken.findUnique.mockResolvedValue(base);
+      prisma.authToken.updateMany.mockResolvedValue({ count: 0 });
 
       await expect(
         service.consume('raw', AuthTokenPurpose.PASSWORD_RESET),

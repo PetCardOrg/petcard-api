@@ -64,10 +64,15 @@ export class AuthTokenService {
       throw new BadRequestException('Link inválido ou expirado.');
     }
 
-    await this.prisma.authToken.update({
-      where: { id: record.id },
+    // Escrita condicional: duas requisições podem ter lido o token ainda sem
+    // uso, e só a primeira a gravar leva (AUD API-18).
+    const { count } = await this.prisma.authToken.updateMany({
+      where: { id: record.id, usedAt: null },
       data: { usedAt: new Date() },
     });
+    if (count === 0) {
+      throw new BadRequestException('Link inválido ou expirado.');
+    }
 
     return record.tutorId;
   }
