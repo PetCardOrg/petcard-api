@@ -42,7 +42,7 @@ describe('Agendamento — exclusão leva as notificações (e2e)', () => {
       .set('Authorization', `Bearer ${tutorToken}`)
       .send({
         title: 'Consulta de rotina',
-        scheduled_at: '2026-12-01T14:00:00Z',
+        scheduled_at: '2099-12-01T14:00:00Z',
       })
       .expect(201);
     appointmentId = appt.body.id as string;
@@ -87,7 +87,7 @@ describe('Agendamento — exclusão leva as notificações (e2e)', () => {
     await request(app.getHttpServer())
       .patch(`/appointments/${appointmentId}`)
       .set('Authorization', `Bearer ${tutorToken}`)
-      .send({ scheduled_at: '2026-12-05T10:00:00Z' })
+      .send({ scheduled_at: '2099-12-05T10:00:00Z' })
       .expect(200);
 
     const updated = await prisma.appointment.findUnique({

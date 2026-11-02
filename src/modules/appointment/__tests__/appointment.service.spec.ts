@@ -1,5 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PetService } from '../../pet/pet.service';
@@ -63,6 +67,14 @@ describe('AppointmentService', () => {
     }).compile();
 
     service = module.get<AppointmentService>(AppointmentService);
+
+    // As datas dos casos são relativas a `now`: sem fixar o relógio, o
+    // agendamento de junho de 2026 vira passado e a regra do API-27 recusa.
+    jest.spyOn(Date, 'now').mockReturnValue(now.getTime());
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   describe('create', () => {
@@ -398,6 +410,63 @@ describe('AppointmentService', () => {
         ForbiddenException,
       );
       expect(prisma.appointment.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('horário no passado (AUD API-27)', () => {
+    const ontem = '2026-04-30T10:00:00Z';
+    const passado = { ...appointment, scheduledAt: new Date(ontem) };
+
+    it('recusa criar agendamento para ontem, sem gravar nada', async () => {
+      await expect(
+        service.create('tutor-1', {
+          title: 'Consulta',
+          scheduled_at: ontem,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.appointment.create).not.toHaveBeenCalled();
+    });
+
+    it('aceita alguns minutos de atraso do relógio do aparelho', async () => {
+      prisma.appointment.create.mockResolvedValue(appointment);
+
+      await service.create('tutor-1', {
+        title: 'Consulta',
+        scheduled_at: '2026-05-01T09:58:00Z',
+      });
+
+      expect(prisma.appointment.create).toHaveBeenCalled();
+    });
+
+    it('recusa remarcar para o passado', async () => {
+      prisma.appointment.findUnique.mockResolvedValue(appointment);
+
+      await expect(
+        service.update('appt-1', 'tutor-1', { scheduled_at: ontem }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.appointment.update).not.toHaveBeenCalled();
+    });
+
+    it('deixa editar só o título de um compromisso que já passou', async () => {
+      prisma.appointment.findUnique.mockResolvedValue(passado);
+      prisma.appointment.update.mockResolvedValue(passado);
+
+      await service.update('appt-1', 'tutor-1', { title: 'Retorno' });
+
+      expect(prisma.appointment.update).toHaveBeenCalled();
+    });
+
+    // O app manda o formulário inteiro na edição, com o mesmo scheduled_at.
+    it('aceita o mesmo horário passado reenviado junto com outros campos', async () => {
+      prisma.appointment.findUnique.mockResolvedValue(passado);
+      prisma.appointment.update.mockResolvedValue(passado);
+
+      await service.update('appt-1', 'tutor-1', {
+        title: 'Retorno',
+        scheduled_at: '2026-04-30T10:00:00.000Z',
+      });
+
+      expect(prisma.appointment.update).toHaveBeenCalled();
     });
   });
 });
