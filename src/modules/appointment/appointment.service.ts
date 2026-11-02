@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -25,6 +26,21 @@ export type AppointmentResponse = {
   created_at: Date;
   updated_at: Date;
 };
+
+/**
+ * Folga para o relógio do aparelho atrasado: o app só deixa escolher horário
+ * futuro, mas o relógio dele não é o do servidor.
+ */
+const TOLERANCIA_DO_PASSADO_MS = 5 * 60_000;
+
+/** Recusa agendar para um horário que já passou (AUD API-27). */
+function recusarHorarioNoPassado(scheduledAt: Date): void {
+  if (scheduledAt.getTime() < Date.now() - TOLERANCIA_DO_PASSADO_MS) {
+    throw new BadRequestException(
+      'O horário do agendamento já passou. Escolha uma data e hora futuras.',
+    );
+  }
+}
 
 type AppointmentWithPet = Appointment & {
   pet?: { name: string } | null;
@@ -60,6 +76,7 @@ export class AppointmentService {
     userId: string,
     dto: CreateAppointmentDto,
   ): Promise<AppointmentResponse> {
+    recusarHorarioNoPassado(new Date(dto.scheduled_at));
     if (dto.pet_id) {
       await this.petService.assertOwnership(dto.pet_id, userId);
     }
@@ -117,7 +134,15 @@ export class AppointmentService {
     userId: string,
     dto: UpdateAppointmentDto,
   ): Promise<AppointmentResponse> {
-    await this.findAndAssertOwnership(id, userId);
+    const atual = await this.findAndAssertOwnership(id, userId);
+    // Só vale quando o horário muda: um compromisso que já passou continua
+    // editável (título, local), e o app reenvia o mesmo scheduled_at.
+    if (dto.scheduled_at) {
+      const novo = new Date(dto.scheduled_at);
+      if (novo.getTime() !== atual.scheduledAt.getTime()) {
+        recusarHorarioNoPassado(novo);
+      }
+    }
     if (dto.pet_id) {
       await this.petService.assertOwnership(dto.pet_id, userId);
     }

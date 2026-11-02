@@ -87,7 +87,7 @@ describe('AppointmentController (integração)', () => {
         .post('/appointments')
         .send({
           title: 'Consulta de rotina',
-          scheduled_at: '2026-06-01T14:00:00Z',
+          scheduled_at: '2099-06-01T14:00:00Z',
         })
         .expect(201);
 
@@ -115,7 +115,7 @@ describe('AppointmentController (integração)', () => {
         .post('/appointments')
         .send({
           title: 'Consulta de rotina',
-          scheduled_at: '2026-06-01T14:00:00Z',
+          scheduled_at: '2099-06-01T14:00:00Z',
           pet_id: '123e4567-e89b-12d3-a456-426614174000',
         })
         .expect(403);
@@ -128,8 +128,19 @@ describe('AppointmentController (integração)', () => {
 
       await request(harness.app.getHttpServer())
         .post('/appointments')
-        .send({ title: 'Consulta', scheduled_at: '2026-06-01T14:00:00Z' })
+        .send({ title: 'Consulta', scheduled_at: '2099-06-01T14:00:00Z' })
         .expect(403);
+    });
+
+    it('recusa agendar para ontem (400) e não grava nada (AUD API-27)', async () => {
+      const ontem = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+
+      await request(harness.app.getHttpServer())
+        .post('/appointments')
+        .send({ title: 'Consulta de rotina', scheduled_at: ontem })
+        .expect(400);
+
+      expect(prisma.appointment.create).not.toHaveBeenCalled();
     });
   });
 
@@ -190,6 +201,23 @@ describe('AppointmentController (integração)', () => {
         .expect(200);
 
       expect(res.body.title).toBe('Reagendada');
+    });
+
+    it('edita só o título de um compromisso que já passou (200) (AUD API-27)', async () => {
+      const passado = {
+        ...appointment,
+        scheduledAt: new Date(Date.now() - 24 * 60 * 60_000),
+      };
+      prisma.appointment.findUnique.mockResolvedValue(passado);
+      prisma.appointment.update.mockResolvedValue({
+        ...passado,
+        title: 'Retorno',
+      });
+
+      await request(harness.app.getHttpServer())
+        .patch('/appointments/appt-1')
+        .send({ title: 'Retorno' })
+        .expect(200);
     });
   });
 
