@@ -45,7 +45,7 @@ function parseAppLinkBase(raw: string | undefined, nodeEnv: string): string {
  *
  * Sem `BREVO_API_KEY` nem `SMTP_HOST`, o `MailService` cai no modo de log e
  * escreve o link de redefinição, com o token dentro, na saída do processo: no
- * CloudWatch, em texto claro, para quem tiver acesso aos logs. Ao mesmo tempo,
+ * nos logs do Render, em texto claro, para quem tiver acesso a eles. Ao mesmo tempo,
  * nenhum e-mail chega ao usuário, então ninguém percebe. Mesma escolha do
  * `JWT_SECRET` e do `CORS_ORIGINS`: em produção, faltar = não sobe.
  */
