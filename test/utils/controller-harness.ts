@@ -6,10 +6,11 @@ import {
   UnauthorizedException,
   ValidationPipe,
 } from '@nestjs/common';
-import { APP_GUARD, Reflector } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ThrottlerModule } from '@nestjs/throttler';
 import type { App } from 'supertest/types';
+import { PrismaUniqueFilter } from '../../src/common/http/prisma-unique.filter';
 import { IS_PUBLIC_KEY } from '../../src/modules/auth/decorators/public.decorator';
 import { JwtAuthGuard } from '../../src/modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../src/modules/auth/guards/roles.guard';
@@ -115,6 +116,8 @@ export async function createControllerTestApp(opts: {
         inject: [Reflector],
       },
       { provide: APP_GUARD, useClass: RolesGuard },
+      // Como no AppModule: unique violada no banco responde 409 (AUD API-19).
+      { provide: APP_FILTER, useClass: PrismaUniqueFilter },
     ],
   })
     .overrideGuard(JwtAuthGuard)

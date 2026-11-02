@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_FILTER } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { PrismaUniqueFilter } from './common/http/prisma-unique.filter';
 import { appConfig } from './config/app.config';
 import { authConfig } from './config/auth.config';
 import { awsConfig } from './config/aws.config';
@@ -115,6 +117,9 @@ import { PrismaModule } from './prisma/prisma.module';
     HistoricoModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    { provide: APP_FILTER, useClass: PrismaUniqueFilter },
+  ],
 })
 export class AppModule {}
