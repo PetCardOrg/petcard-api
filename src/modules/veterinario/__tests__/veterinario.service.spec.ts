@@ -404,9 +404,35 @@ describe('VeterinarioService', () => {
     it('should throw NotFoundException when veterinario does not exist', async () => {
       prisma.veterinario.findUnique.mockResolvedValue(null);
 
-      await expect(service.remove('missing')).rejects.toThrow(
-        NotFoundException,
+      await expect(
+        service.remove('missing', { senha_atual: 'SenhaAtual1!' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('recusa com a senha errada e não apaga a conta (AUD API-28)', async () => {
+      prisma.veterinario.findUnique.mockResolvedValue(vetFixture);
+      bcrypt.compare.mockResolvedValue(false);
+
+      await expect(
+        service.remove('vet-1', { senha_atual: 'chute' }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(prisma.veterinario.delete).not.toHaveBeenCalled();
+    });
+
+    it('apaga com a senha certa (AUD API-28)', async () => {
+      prisma.veterinario.findUnique.mockResolvedValue(vetFixture);
+      prisma.veterinario.delete.mockResolvedValue(vetFixture);
+      bcrypt.compare.mockResolvedValue(true);
+
+      await service.remove('vet-1', { senha_atual: 'SenhaAtual1!' });
+
+      expect(bcrypt.compare).toHaveBeenCalledWith(
+        'SenhaAtual1!',
+        vetFixture.password,
       );
+      expect(prisma.veterinario.delete).toHaveBeenCalledWith({
+        where: { id: 'vet-1' },
+      });
     });
 
     it('apaga a foto do vet excluído (AUD API-10)', async () => {
@@ -416,8 +442,9 @@ describe('VeterinarioService', () => {
         photoUrl: foto,
       });
       prisma.veterinario.delete.mockResolvedValue(vetFixture);
+      bcrypt.compare.mockResolvedValue(true);
 
-      await service.remove('vet-1');
+      await service.remove('vet-1', { senha_atual: 'SenhaAtual1!' });
 
       expect(uploadService.discardFile).toHaveBeenCalledWith(foto);
     });

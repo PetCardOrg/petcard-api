@@ -28,6 +28,7 @@ import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import {
   AdicionarPetAtendidoDto,
+  DeleteVeterinarioDto,
   PetAtendidoResponseDto,
   UpdateVeterinarioDto,
 } from '@petcardorg/shared';
@@ -116,9 +117,17 @@ export class VeterinarioController {
   @Delete('me')
   @Auth(Role.VET)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Excluir minha conta de veterinário' })
-  async removeMe(@CurrentUser() user: JwtPayload): Promise<void> {
-    return this.veterinarioService.remove(user.sub);
+  @ApiOperation({
+    summary: 'Excluir minha conta de veterinário',
+    description:
+      'Exige `senha_atual` no corpo: só o token não basta para uma ação ' +
+      'irreversível. Sem a senha responde 400; com a senha errada, 401.',
+  })
+  async removeMe(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: DeleteVeterinarioDto,
+  ): Promise<void> {
+    return this.veterinarioService.remove(user.sub, dto);
   }
 
   @Get('dashboard/pets')
