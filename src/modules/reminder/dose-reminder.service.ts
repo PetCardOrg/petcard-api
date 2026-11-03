@@ -22,6 +22,31 @@ interface DueRecord {
   pet: { name: string; tutorId: string; tutor: { timezone: string } };
 }
 
+/** O que muda entre vacina, vermífugo e medicação; o resto é comum. */
+interface ReminderKind<R extends DueRecord> {
+  model: ReminderModel;
+  referenceType: string;
+  title: string;
+  /** Registros cuja data de referência cai dentro da janela. */
+  records: () => Promise<R[]>;
+  body: (record: R) => string;
+}
+
+/**
+ * A parte do delegate do Prisma que o claim e o release usam. Os três modelos
+ * têm a mesma forma aqui, então um tipo só serve para todos.
+ */
+interface ReminderDelegate {
+  updateMany(args: {
+    where: { id: string; OR: Array<{ lastNotifiedAt: null | { lt: Date } }> };
+    data: { lastNotifiedAt: Date };
+  }): Promise<{ count: number }>;
+  update(args: {
+    where: { id: string };
+    data: { lastNotifiedAt: Date | null };
+  }): Promise<unknown>;
+}
+
 /** `pet` como todo `findMany` daqui precisa: dono, nome e fuso do tutor. */
 const PET_SELECT = {
   select: {
@@ -76,21 +101,58 @@ export class DoseReminderService {
     const now = new Date();
     const windowEnd = new Date(now.getTime() + windowDays * DAY_MS);
 
-    const vaccine = await this.processVaccineReminders(
-      now,
-      windowEnd,
-      windowDays,
-    );
-    const deworming = await this.processDewormingReminders(
-      now,
-      windowEnd,
-      windowDays,
-    );
-    const medication = await this.processMedicationReminders(
-      now,
-      windowEnd,
-      windowDays,
-    );
+    // Registro excluído não gera lembrete (api#117).
+    const vaccine = await this.processReminders(now, windowDays, {
+      model: 'vaccineRecord',
+      referenceType: 'VACCINE_RECORD',
+      title: 'Vacina chegando',
+      records: () =>
+        this.prisma.vaccineRecord.findMany({
+          where: { nextDoseAt: { gte: now, lte: windowEnd }, deletedAt: null },
+          include: { pet: PET_SELECT },
+        }),
+      body: (record) => this.describe(record, 'vacina'),
+    });
+    const deworming = await this.processReminders(now, windowDays, {
+      model: 'dewormingRecord',
+      referenceType: 'DEWORMING_RECORD',
+      title: 'Vermifugo chegando',
+      records: () =>
+        this.prisma.dewormingRecord.findMany({
+          where: { nextDoseAt: { gte: now, lte: windowEnd }, deletedAt: null },
+          include: { pet: PET_SELECT },
+        }),
+      body: (record) => this.describe(record, 'vermifugo'),
+    });
+    // Lembrete de medicação (api#111): um único aviso quando o tratamento
+    // começa, não um aviso recorrente por dose — `startDate` faz o papel de
+    // `nextDoseAt` para reaproveitar `isDue`/`notify` sem duplicar a lógica.
+    const medication = await this.processReminders(now, windowDays, {
+      model: 'medicationRecord',
+      referenceType: 'MEDICATION_RECORD',
+      title: 'Medicacao chegando',
+      records: async () => {
+        const records = await this.prisma.medicationRecord.findMany({
+          where: { startDate: { gte: now, lte: windowEnd }, deletedAt: null },
+          include: { pet: PET_SELECT },
+        });
+        return records.map((record) => ({
+          id: record.id,
+          petId: record.petId,
+          nextDoseAt: record.startDate,
+          lastNotifiedAt: record.lastNotifiedAt,
+          pet: record.pet,
+          medicationName: record.medicationName,
+        }));
+      },
+      body: (record) => {
+        const date = formatDateInTimeZone(
+          record.nextDoseAt,
+          record.pet.tutor.timezone,
+        );
+        return `${record.pet.name}: inicio do tratamento com ${record.medicationName} previsto para ${date}.`;
+      },
+    });
 
     this.logger.log(
       `Dose reminders: ${vaccine} vaccine + ${deworming} deworming + ${medication} medication notification(s) scheduled`,
@@ -98,98 +160,24 @@ export class DoseReminderService {
     return { vaccine, deworming, medication };
   }
 
-  private async processVaccineReminders(
+  /** Avisa cada registro da janela uma vez e devolve quantos avisos saíram. */
+  private async processReminders<R extends DueRecord>(
     now: Date,
-    windowEnd: Date,
     windowDays: number,
+    kind: ReminderKind<R>,
   ): Promise<number> {
-    const records = await this.prisma.vaccineRecord.findMany({
-      // Registro excluído não gera lembrete (api#117).
-      where: { nextDoseAt: { gte: now, lte: windowEnd }, deletedAt: null },
-      include: { pet: PET_SELECT },
-    });
+    const records = await kind.records();
 
     let scheduled = 0;
     for (const record of records) {
       const enviado = await this.notifyOnce(
-        'vaccineRecord',
+        kind.model,
         record,
         windowDays,
         now,
-        'VACCINE_RECORD',
-        'Vacina chegando',
-        () => this.describe(record, 'vacina'),
-      );
-      if (enviado) scheduled++;
-    }
-    return scheduled;
-  }
-
-  private async processDewormingReminders(
-    now: Date,
-    windowEnd: Date,
-    windowDays: number,
-  ): Promise<number> {
-    const records = await this.prisma.dewormingRecord.findMany({
-      where: { nextDoseAt: { gte: now, lte: windowEnd }, deletedAt: null },
-      include: { pet: PET_SELECT },
-    });
-
-    let scheduled = 0;
-    for (const record of records) {
-      const enviado = await this.notifyOnce(
-        'dewormingRecord',
-        record,
-        windowDays,
-        now,
-        'DEWORMING_RECORD',
-        'Vermifugo chegando',
-        () => this.describe(record, 'vermifugo'),
-      );
-      if (enviado) scheduled++;
-    }
-    return scheduled;
-  }
-
-  /**
-   * Lembrete de medicação (api#111): um único aviso quando o tratamento
-   * começa, não um aviso recorrente por dose — `startDate` faz o papel de
-   * `nextDoseAt` para reaproveitar `isDue`/`notify` sem duplicar a lógica.
-   */
-  private async processMedicationReminders(
-    now: Date,
-    windowEnd: Date,
-    windowDays: number,
-  ): Promise<number> {
-    const records = await this.prisma.medicationRecord.findMany({
-      where: { startDate: { gte: now, lte: windowEnd }, deletedAt: null },
-      include: { pet: PET_SELECT },
-    });
-
-    let scheduled = 0;
-    for (const record of records) {
-      const dueRecord: DueRecord = {
-        id: record.id,
-        petId: record.petId,
-        nextDoseAt: record.startDate,
-        lastNotifiedAt: record.lastNotifiedAt,
-        pet: record.pet,
-      };
-
-      const enviado = await this.notifyOnce(
-        'medicationRecord',
-        dueRecord,
-        windowDays,
-        now,
-        'MEDICATION_RECORD',
-        'Medicacao chegando',
-        () => {
-          const date = formatDateInTimeZone(
-            record.startDate,
-            record.pet.tutor.timezone,
-          );
-          return `${record.pet.name}: inicio do tratamento com ${record.medicationName} previsto para ${date}.`;
-        },
+        kind.referenceType,
+        kind.title,
+        () => kind.body(record),
       );
       if (enviado) scheduled++;
     }
@@ -247,32 +235,11 @@ export class DoseReminderService {
     windowDays: number,
     now: Date,
   ): Promise<boolean> {
-    const where = { id: record.id, ...this.pendingWhere(record, windowDays) };
-    const data = { lastNotifiedAt: now };
-
-    switch (model) {
-      case 'vaccineRecord': {
-        const { count } = await this.prisma.vaccineRecord.updateMany({
-          where,
-          data,
-        });
-        return count > 0;
-      }
-      case 'dewormingRecord': {
-        const { count } = await this.prisma.dewormingRecord.updateMany({
-          where,
-          data,
-        });
-        return count > 0;
-      }
-      case 'medicationRecord': {
-        const { count } = await this.prisma.medicationRecord.updateMany({
-          where,
-          data,
-        });
-        return count > 0;
-      }
-    }
+    const { count } = await this.delegate(model).updateMany({
+      where: { id: record.id, ...this.pendingWhere(record, windowDays) },
+      data: { lastNotifiedAt: now },
+    });
+    return count > 0;
   }
 
   /** Devolve `lastNotifiedAt` ao valor anterior quando o push não saiu. */
@@ -280,22 +247,14 @@ export class DoseReminderService {
     model: ReminderModel,
     record: DueRecord,
   ): Promise<void> {
-    const args = {
+    await this.delegate(model).update({
       where: { id: record.id },
       data: { lastNotifiedAt: record.lastNotifiedAt },
-    };
+    });
+  }
 
-    switch (model) {
-      case 'vaccineRecord':
-        await this.prisma.vaccineRecord.update(args);
-        return;
-      case 'dewormingRecord':
-        await this.prisma.dewormingRecord.update(args);
-        return;
-      case 'medicationRecord':
-        await this.prisma.medicationRecord.update(args);
-        return;
-    }
+  private delegate(model: ReminderModel): ReminderDelegate {
+    return this.prisma[model];
   }
 
   /** O `isDue` escrito como filtro de banco, para o claim ser atômico. */
