@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { calendar_v3 } from 'googleapis';
+import type { calendar_v3 } from '@googleapis/calendar';
 import { PrismaService } from '../../prisma/prisma.service';
 import { resolveTimeZone } from '../../common/time/timezone';
 import type { HealthRecordType } from '../queue/dto/calendar-sync.message';

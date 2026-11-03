@@ -19,15 +19,13 @@ const mockCalendarEvents = {
 const mockOAuth2Ctor = jest.fn(() => mockOAuth2Instance);
 const mockCalendarFactory = jest.fn(() => ({ events: mockCalendarEvents }));
 
-jest.mock('googleapis', () => ({
-  google: {
-    auth: {
-      OAuth2: function (...args: unknown[]) {
-        return mockOAuth2Ctor(...args);
-      },
-    },
-    calendar: (...args: unknown[]) => mockCalendarFactory(...args),
+jest.mock('google-auth-library', () => ({
+  OAuth2Client: function (...args: unknown[]) {
+    return mockOAuth2Ctor(...args);
   },
+}));
+jest.mock('@googleapis/calendar', () => ({
+  calendar: (...args: unknown[]) => mockCalendarFactory(...args),
 }));
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
