@@ -19,6 +19,7 @@ import { ColeiraService } from '../coleira/coleira.service';
 import { QrCodePublisher } from '../queue/qr-code.publisher';
 import { TutorService } from '../tutor/tutor.service';
 import { UploadService } from '../upload/upload.service';
+import { descartarArquivosDosPets, lerArquivosDosPets } from './pet-arquivos';
 
 type PetWithCard = Pet & { carteiraDigital: CarteiraDigital | null };
 
@@ -170,9 +171,11 @@ export class PetService {
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    const pet = await this.assertOwnership(id, userId);
+    await this.assertOwnership(id, userId);
+    // Lidos antes: carteira, coleira e anexos saem em cascata com o pet.
+    const arquivos = await lerArquivosDosPets(this.prisma, { id });
     await this.prisma.pet.delete({ where: { id } });
-    await this.uploadService.discardFile(pet.photoUrl);
+    await descartarArquivosDosPets(this.uploadService, arquivos);
   }
 
   async assertOwnership(petId: string, userId: string): Promise<Pet> {

@@ -8,6 +8,10 @@ import { Tutor } from '@prisma/client';
 import { UpdateTutorDto, normalizeEmail } from '@petcardorg/shared';
 import { temVinculoComTutor } from '../../common/authorization/pet-atendido';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  descartarArquivosDosPets,
+  lerArquivosDosPets,
+} from '../pet/pet-arquivos';
 import { UploadService } from '../upload/upload.service';
 
 /** Tutor sem o hash da senha — o que pode sair da API. */
@@ -95,16 +99,12 @@ export class TutorService {
   async removeById(id: string): Promise<void> {
     const tutor = await this.buscarOuFalhar(id);
     // Lidas antes: os pets saem em cascata junto com o tutor.
-    const pets = await this.prisma.pet.findMany({
-      where: { tutorId: id },
-      select: { photoUrl: true },
-    });
+    const pets = await lerArquivosDosPets(this.prisma, { tutorId: id });
     await this.prisma.tutor.delete({ where: { id } });
-    await Promise.all(
-      [tutor.profileImageUrl, ...pets.map((pet) => pet.photoUrl)].map((url) =>
-        this.uploadService.discardFile(url),
-      ),
-    );
+    await Promise.all([
+      this.uploadService.discardFile(tutor.profileImageUrl),
+      descartarArquivosDosPets(this.uploadService, pets),
+    ]);
   }
 
   async findByEmail(email: string): Promise<Tutor | null> {
