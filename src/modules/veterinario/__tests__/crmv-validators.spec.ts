@@ -1,4 +1,4 @@
-import { HttpException } from '@nestjs/common';
+import { HttpException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InfosimplesCrmvValidator } from '../crmv/infosimples-crmv.validator';
 import { StubCrmvValidator } from '../crmv/stub-crmv.validator';
@@ -54,6 +54,7 @@ describe('InfosimplesCrmvValidator', () => {
   afterEach(() => {
     global.fetch = originalFetch;
     jest.clearAllMocks();
+    jest.restoreAllMocks();
   });
 
   it('falha claramente quando o token não está configurado', async () => {
@@ -143,6 +144,25 @@ describe('InfosimplesCrmvValidator', () => {
     await expect(validator.validate('12345', 'SP')).rejects.toThrow(
       /não foi possível consultar/i,
     );
+  });
+
+  it('converte resposta que não é JSON em 502, não em 500', async () => {
+    // Ex.: página HTML de erro de um proxy na frente da Infosimples.
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: () => Promise.reject(new SyntaxError('Unexpected token <')),
+    });
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const validator = new InfosimplesCrmvValidator(makeConfig('tok'));
+
+    expect.assertions(2);
+    try {
+      await validator.validate('12345', 'SP');
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(502);
+    }
   });
 
   it('envia token, crmv e uf no corpo de um POST, como a API documenta', async () => {

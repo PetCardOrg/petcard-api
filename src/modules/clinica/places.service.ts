@@ -178,17 +178,11 @@ export class PlacesService {
       );
     }
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new HttpException(
-        `Erro ao buscar clínicas no Google Places: ${errorBody}`,
-        HttpStatus.BAD_GATEWAY,
-      );
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const raw = await response.json();
-    const data = raw as NearbySearchResponse;
+    const data = await this.readPlacesResponse<NearbySearchResponse>(
+      response,
+      'buscar clínicas',
+      'Não foi possível buscar clínicas agora. Tente novamente.',
+    );
     if (!data.places || data.places.length === 0) {
       return [];
     }
@@ -262,17 +256,11 @@ export class PlacesService {
       );
     }
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new HttpException(
-        `Erro ao sugerir locais no Google Places: ${errorBody}`,
-        HttpStatus.BAD_GATEWAY,
-      );
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const raw = await response.json();
-    const data = raw as AutocompleteResponse;
+    const data = await this.readPlacesResponse<AutocompleteResponse>(
+      response,
+      'sugerir locais',
+      'Não foi possível sugerir locais agora. Tente novamente.',
+    );
 
     return (data.suggestions ?? [])
       .map((suggestion) => suggestion.placePrediction)
@@ -333,6 +321,37 @@ export class PlacesService {
       : 'application/octet-stream';
     const body = Buffer.from(await response.arrayBuffer());
     return { contentType, body };
+  }
+
+  /**
+   * Lê o JSON de uma resposta do Google Places. O status e o corpo de um erro
+   * vão só para o log: o corpo pode trazer detalhes da conta do Google e não
+   * ajuda quem chamou a API, que recebe a mensagem genérica. Um corpo que não
+   * é JSON (página de erro de um proxy, por exemplo) também vira 502, em vez
+   * de estourar como 500.
+   */
+  private async readPlacesResponse<T>(
+    response: Response,
+    acao: string,
+    mensagemCliente: string,
+  ): Promise<T> {
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      this.logger.error(
+        `Erro ao ${acao} no Google Places (HTTP ${response.status}): ${errorBody}`,
+      );
+      throw new HttpException(mensagemCliente, HttpStatus.BAD_GATEWAY);
+    }
+
+    try {
+      return (await response.json()) as T;
+    } catch (error) {
+      this.logger.error(
+        `Resposta inválida do Google Places ao ${acao}`,
+        error instanceof Error ? error.stack : error,
+      );
+      throw new HttpException(mensagemCliente, HttpStatus.BAD_GATEWAY);
+    }
   }
 
   /** Monta o `photoUrl` público a partir do `name` da foto no Google. */
