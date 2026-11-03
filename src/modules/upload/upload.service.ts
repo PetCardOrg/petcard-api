@@ -164,7 +164,8 @@ export class UploadService {
 
   /**
    * Desfaz um `putPrivate` cuja gravação no banco falhou. Não serve para
-   * apagar comprovante: esses são preservados (exclusão lógica).
+   * apagar comprovante avulso: esses são preservados (exclusão lógica). Só
+   * saem do bucket quando o pet sai, ver `discardPrivate`.
    */
   async removePrivate(key: string): Promise<void> {
     if (!this.s3Client || !this.bucket) {
@@ -256,6 +257,23 @@ export class UploadService {
     } catch (error) {
       this.logger.warn(
         `Foto antiga não apagada do S3 (${fileUrl}): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Apaga, por melhor esforço, o objeto privado de um anexo cuja linha saiu em
+   * cascata com o pet ou o tutor (AUD API-26). Como no `discardFile`, a
+   * exclusão já foi gravada: falhar aqui só deixa um arquivo a mais.
+   */
+  async discardPrivate(key: string): Promise<void> {
+    try {
+      await this.removePrivate(key);
+    } catch (error) {
+      this.logger.warn(
+        `Anexo não apagado do S3 (${key}): ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

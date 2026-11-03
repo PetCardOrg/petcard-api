@@ -292,6 +292,20 @@ describe('UploadService', () => {
         input: { Bucket: 'petcard-bucket', Key: 'anexos/p/a.pdf' },
       });
     });
+
+    // Exclusão de pet ou tutor (AUD API-26): a linha já saiu quando isto
+    // roda, então falhar no S3 só deixa um arquivo a mais.
+    it('discardPrivate apaga o objeto e não propaga falha do S3', async () => {
+      mockSend.mockRejectedValue(new Error('network'));
+
+      await expect(
+        service.discardPrivate('anexos/p/a.pdf'),
+      ).resolves.toBeUndefined();
+      expect(mockSend.mock.calls[0][0]).toMatchObject({
+        __kind: 'Delete',
+        input: { Bucket: 'petcard-bucket', Key: 'anexos/p/a.pdf' },
+      });
+    });
   });
 
   describe('quando o S3 NÃO está configurado', () => {

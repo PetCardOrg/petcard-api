@@ -26,7 +26,11 @@ describe('PetService', () => {
   let qrCodePublisher: { publishGenerate: jest.Mock };
   let cardService: { rotateTokenForPet: jest.Mock };
   let coleiraService: { rotateTokenForPet: jest.Mock };
-  let uploadService: { assertBucketUrl: jest.Mock; discardFile: jest.Mock };
+  let uploadService: {
+    assertBucketUrl: jest.Mock;
+    discardFile: jest.Mock;
+    discardPrivate: jest.Mock;
+  };
 
   const tutor = { id: 'tutor-1' };
   const now = new Date('2025-01-15T12:00:00Z');
@@ -81,6 +85,7 @@ describe('PetService', () => {
     uploadService = {
       assertBucketUrl: jest.fn(),
       discardFile: jest.fn().mockResolvedValue(undefined),
+      discardPrivate: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -331,6 +336,10 @@ describe('PetService', () => {
   });
 
   describe('remove', () => {
+    beforeEach(() => {
+      prisma.pet.findMany.mockResolvedValue([]);
+    });
+
     it('should delete owned pets', async () => {
       prisma.pet.findUnique.mockResolvedValue(pet);
       prisma.pet.delete.mockResolvedValue(pet);
@@ -342,14 +351,41 @@ describe('PetService', () => {
       });
     });
 
-    it('apaga a foto do pet excluído (AUD API-10)', async () => {
-      const foto = 'https://bucket.s3.us-east-1.amazonaws.com/pets/rex.png';
-      prisma.pet.findUnique.mockResolvedValue({ ...pet, photoUrl: foto });
+    // Carteira, coleira e anexos saem em cascata com o pet: as URLs e chaves
+    // precisam ser lidas antes do delete, senão os arquivos ficam no bucket.
+    it('apaga a foto, os QRs e os anexos do pet excluído (AUD API-10, API-26)', async () => {
+      const s3 = 'https://bucket.s3.us-east-1.amazonaws.com';
+      prisma.pet.findUnique.mockResolvedValue(pet);
+      prisma.pet.findMany.mockResolvedValue([
+        {
+          photoUrl: `${s3}/pets/rex.png`,
+          carteiraDigital: { qrCodeUrl: `${s3}/qr-codes/pet-1.png` },
+          tagColeira: { qrCodeUrl: `${s3}/qr-codes/coleira-pet-1.png` },
+          anexosClinicos: [{ s3Key: 'anexos/pet-1/a.pdf' }],
+        },
+      ]);
       prisma.pet.delete.mockResolvedValue(pet);
 
       await service.remove('pet-1', 'tutor-1');
 
-      expect(uploadService.discardFile).toHaveBeenCalledWith(foto);
+      expect(prisma.pet.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'pet-1' } }),
+      );
+      expect(prisma.pet.findMany.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.pet.delete.mock.invocationCallOrder[0],
+      );
+      expect(uploadService.discardFile).toHaveBeenCalledWith(
+        `${s3}/pets/rex.png`,
+      );
+      expect(uploadService.discardFile).toHaveBeenCalledWith(
+        `${s3}/qr-codes/pet-1.png`,
+      );
+      expect(uploadService.discardFile).toHaveBeenCalledWith(
+        `${s3}/qr-codes/coleira-pet-1.png`,
+      );
+      expect(uploadService.discardPrivate).toHaveBeenCalledWith(
+        'anexos/pet-1/a.pdf',
+      );
     });
   });
 

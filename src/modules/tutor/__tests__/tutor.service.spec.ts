@@ -11,7 +11,11 @@ describe('TutorService: fotos que deixam de ser usadas (AUD API-10)', () => {
     tutor: { findUnique: jest.Mock; update: jest.Mock; delete: jest.Mock };
     pet: { findMany: jest.Mock };
   };
-  let uploadService: { assertBucketUrl: jest.Mock; discardFile: jest.Mock };
+  let uploadService: {
+    assertBucketUrl: jest.Mock;
+    discardFile: jest.Mock;
+    discardPrivate: jest.Mock;
+  };
 
   const tutor = {
     id: 'tutor-1',
@@ -38,6 +42,7 @@ describe('TutorService: fotos que deixam de ser usadas (AUD API-10)', () => {
     uploadService = {
       assertBucketUrl: jest.fn(),
       discardFile: jest.fn().mockResolvedValue(undefined),
+      discardPrivate: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -67,22 +72,40 @@ describe('TutorService: fotos que deixam de ser usadas (AUD API-10)', () => {
     expect(uploadService.discardFile).not.toHaveBeenCalled();
   });
 
-  it('ao excluir a conta, apaga a foto de perfil e as dos pets (que saem em cascata)', async () => {
+  it('ao excluir a conta, apaga a foto de perfil e os arquivos dos pets (que saem em cascata) (AUD API-26)', async () => {
     prisma.pet.findMany.mockResolvedValue([
-      { photoUrl: `${BUCKET}/pets/rex.png` },
-      { photoUrl: null },
+      {
+        photoUrl: `${BUCKET}/pets/rex.png`,
+        carteiraDigital: { qrCodeUrl: `${BUCKET}/qr-codes/pet-1.png` },
+        tagColeira: { qrCodeUrl: `${BUCKET}/qr-codes/coleira-pet-1.png` },
+        anexosClinicos: [{ s3Key: 'anexos/pet-1/a.pdf' }],
+      },
+      {
+        photoUrl: null,
+        carteiraDigital: null,
+        tagColeira: null,
+        anexosClinicos: [],
+      },
     ]);
 
     await service.removeById('tutor-1');
 
+    expect(prisma.pet.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tutorId: 'tutor-1' } }),
+    );
     expect(prisma.tutor.delete).toHaveBeenCalledWith({
       where: { id: 'tutor-1' },
     });
-    expect(uploadService.discardFile).toHaveBeenCalledWith(
+    for (const url of [
       `${BUCKET}/tutors/antiga.png`,
-    );
-    expect(uploadService.discardFile).toHaveBeenCalledWith(
       `${BUCKET}/pets/rex.png`,
+      `${BUCKET}/qr-codes/pet-1.png`,
+      `${BUCKET}/qr-codes/coleira-pet-1.png`,
+    ]) {
+      expect(uploadService.discardFile).toHaveBeenCalledWith(url);
+    }
+    expect(uploadService.discardPrivate).toHaveBeenCalledWith(
+      'anexos/pet-1/a.pdf',
     );
   });
 });

@@ -83,7 +83,11 @@ describe('PetController (integração)', () => {
         },
         {
           provide: UploadService,
-          useValue: { assertBucketUrl: jest.fn(), discardFile: jest.fn() },
+          useValue: {
+            assertBucketUrl: jest.fn(),
+            discardFile: jest.fn(),
+            discardPrivate: jest.fn(),
+          },
         },
       ],
     });
@@ -234,6 +238,7 @@ describe('PetController (integração)', () => {
   describe('DELETE /pets/:id', () => {
     it('remove o pet do dono (204)', async () => {
       prisma.pet.findUnique.mockResolvedValue(pet);
+      prisma.pet.findMany.mockResolvedValue([]);
       prisma.pet.delete.mockResolvedValue(pet);
 
       await request(harness.app.getHttpServer())

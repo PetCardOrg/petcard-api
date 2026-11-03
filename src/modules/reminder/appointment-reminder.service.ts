@@ -58,6 +58,8 @@ export class AppointmentReminderService {
       where: {
         scheduledAt: { gte: now, lte: windowEnd },
         lastNotifiedAt: null,
+        // Excluído pelo tutor, à espera de sair do Google (AUD API-25).
+        syncStatus: { not: 'PENDING_DELETE' },
       },
       include: {
         pet: { select: { name: true } },
