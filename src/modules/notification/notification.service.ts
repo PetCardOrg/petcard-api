@@ -51,6 +51,15 @@ export class NotificationService {
     });
   }
 
+  /**
+   * Descadastro pedido pelo app (logout). Recortado pelo tutor: quem soubesse
+   * o token de outra pessoa não pode desligar o push dela. Idempotente — token
+   * inexistente ou de outro tutor não é erro (AUD API-23).
+   */
+  async unregisterDevice(tutorId: string, token: string): Promise<void> {
+    await this.prisma.deviceToken.deleteMany({ where: { token, tutorId } });
+  }
+
   async deleteByToken(token: string): Promise<void> {
     await this.prisma.deviceToken.deleteMany({ where: { token } });
   }
