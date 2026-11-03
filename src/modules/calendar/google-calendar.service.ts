@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { google, calendar_v3 } from 'googleapis';
+import { calendar, calendar_v3 } from '@googleapis/calendar';
 import { OAuth2Client } from 'google-auth-library';
 import { Appointment } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -149,11 +149,7 @@ export class GoogleCalendarService {
   }
 
   private createOAuth2Client(): OAuth2Client {
-    return new google.auth.OAuth2(
-      this.clientId,
-      this.clientSecret,
-      this.redirectUri,
-    );
+    return new OAuth2Client(this.clientId, this.clientSecret, this.redirectUri);
   }
 
   /**
@@ -269,6 +265,11 @@ export class GoogleCalendarService {
     // atualizar eventos que não são dela em vez de criar os novos.
     await this.prisma.healthCalendarEvent.deleteMany({
       where: { tutorId },
+    });
+    // Exclusões que esperavam apagar o evento na agenda que acabou de sair:
+    // não há mais o que apagar, e a linha escondida ficaria para sempre.
+    await this.prisma.appointment.deleteMany({
+      where: { tutorId, syncStatus: 'PENDING_DELETE' },
     });
   }
 
@@ -445,7 +446,9 @@ export class GoogleCalendarService {
     const appointment = await this.prisma.appointment.findUnique({
       where: { id: appointmentId },
     });
-    if (!appointment) return;
+    // Excluído com a fila fora (AUD API-25): um CREATE/UPDATE ainda na fila
+    // não pode recriar o evento nem marcar a linha SYNCED.
+    if (!appointment || appointment.syncStatus === 'PENDING_DELETE') return;
 
     await this.syncOne(tutorId, appointment);
   }
@@ -499,7 +502,9 @@ export class GoogleCalendarService {
     const pending = await this.prisma.appointment.findMany({
       where: {
         tutorId,
-        syncStatus: { in: ['PENDING_CREATE', 'PENDING_UPDATE', 'FAILED'] },
+        syncStatus: {
+          in: ['PENDING_CREATE', 'PENDING_UPDATE', 'FAILED', 'PENDING_DELETE'],
+        },
       },
     });
     if (pending.length === 0) return 0;
@@ -509,7 +514,18 @@ export class GoogleCalendarService {
     let synced = 0;
     for (const appointment of pending) {
       try {
-        await this.syncOne(tutorId, appointment, timeZone);
+        if (appointment.syncStatus === 'PENDING_DELETE') {
+          // Excluído com a fila fora (AUD API-25): a linha só esperava o
+          // evento sair do Google. Se o Google falhar, ela fica para a próxima.
+          if (appointment.googleEventId) {
+            await this.deleteEvent(tutorId, appointment.googleEventId);
+          }
+          await this.prisma.appointment.delete({
+            where: { id: appointment.id },
+          });
+        } else {
+          await this.syncOne(tutorId, appointment, timeZone);
+        }
         synced++;
       } catch (error) {
         // syncStatus=FAILED is already persisted inside createEvent/updateEvent.
@@ -569,6 +585,6 @@ export class GoogleCalendarService {
       });
     });
 
-    return google.calendar({ version: 'v3', auth: oauth2Client });
+    return calendar({ version: 'v3', auth: oauth2Client });
   }
 }

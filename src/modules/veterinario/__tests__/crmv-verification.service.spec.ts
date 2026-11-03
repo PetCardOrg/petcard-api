@@ -1,7 +1,10 @@
 import { ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { CrmvVerificationService } from '../crmv/crmv-verification.service';
+import {
+  CrmvVerificationService,
+  SITUACAO_NOME_DIVERGENTE,
+} from '../crmv/crmv-verification.service';
 
 const makeConfig = (ttlDays = 180): ConfigService =>
   ({ get: jest.fn().mockReturnValue(ttlDays) }) as unknown as ConfigService;
@@ -90,6 +93,54 @@ describe('CrmvVerificationService', () => {
         crmvVerifiedAt: null,
         crmvSituacao: 'Suspenso',
       });
+    });
+
+    /**
+     * O CRMV é público: um registro regular de outra pessoa não pode
+     * verificar a conta. Vale no cadastro e na revalidação, que passam os
+     * dois por aqui.
+     */
+    it('recusa o registro regular cujo titular não é o vet cadastrado', async () => {
+      prisma.veterinario.findUnique.mockResolvedValue({
+        nome: 'Marcos Andrade',
+        crmv: 'CRMV-SP 12345',
+        crmvVerifiedAt: null,
+        crmvSituacao: null,
+      });
+      validator.validate.mockResolvedValue({
+        valid: true,
+        situacao: 'Ativo',
+        nome: 'CAMILA FERREIRA DE SOUZA',
+      });
+
+      const resultado = await service.verify('vet-1');
+
+      expect(resultado.verified).toBe(false);
+      expect(resultado.situacao).toBe(SITUACAO_NOME_DIVERGENTE);
+      const [[update]] = prisma.veterinario.update.mock.calls as Array<
+        [{ data: { crmvVerifiedAt: Date | null; crmvSituacao?: string } }]
+      >;
+      expect(update.data.crmvVerifiedAt).toBeNull();
+      expect(update.data.crmvSituacao).toBe(SITUACAO_NOME_DIVERGENTE);
+    });
+
+    it('verifica quando o titular é o vet, mesmo com o nome do meio omitido', async () => {
+      prisma.veterinario.findUnique.mockResolvedValue({
+        nome: 'Dra. Camila Souza',
+        crmv: 'CRMV-SP 12345',
+        crmvVerifiedAt: null,
+        crmvSituacao: null,
+      });
+      validator.validate.mockResolvedValue({
+        valid: true,
+        situacao: 'Ativo',
+        nome: 'CAMILA FERREIRA DE SOUZA',
+      });
+
+      const resultado = await service.verify('vet-1');
+
+      expect(resultado.verified).toBe(true);
+      expect(resultado.situacao).toBe('Ativo');
     });
 
     it('reaproveita verificação dentro do prazo — a consulta é paga', async () => {
@@ -215,6 +266,8 @@ describe('CrmvVerificationService', () => {
       });
       await service.lookup('CRMV-SP 12345');
       prisma.veterinario.findUnique.mockResolvedValue({
+        // O formulário pré-preenche com o nome do registro.
+        nome: 'Carlos da Silva',
         crmv: 'CRMV-SP 12345',
         crmvVerifiedAt: null,
         crmvSituacao: null,

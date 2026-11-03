@@ -189,6 +189,40 @@ describe('UploadService', () => {
       );
       expect(mockSend).not.toHaveBeenCalled();
     });
+
+    describe('discardFile (AUD API-10)', () => {
+      it('apaga a foto que deixou de ser usada', async () => {
+        mockSend.mockResolvedValue({});
+        await service.discardFile(
+          'https://petcard-bucket.s3.us-east-1.amazonaws.com/pets/antiga.png',
+        );
+        expect(mockSend.mock.calls[0][0].input).toMatchObject({
+          Key: 'pets/antiga.png',
+        });
+      });
+
+      it('não faz nada sem foto', async () => {
+        await service.discardFile(null);
+        await service.discardFile(undefined);
+        expect(mockSend).not.toHaveBeenCalled();
+      });
+
+      it('falha do S3 não derruba quem chamou', async () => {
+        mockSend.mockRejectedValue(new Error('network'));
+        await expect(
+          service.discardFile(
+            'https://petcard-bucket.s3.us-east-1.amazonaws.com/pets/a.png',
+          ),
+        ).resolves.toBeUndefined();
+      });
+
+      it('URL fora do bucket não derruba quem chamou e não apaga nada', async () => {
+        await expect(
+          service.discardFile('https://example.com/pets/a.png'),
+        ).resolves.toBeUndefined();
+        expect(mockSend).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('objetos privados (comprovantes)', () => {
@@ -253,6 +287,20 @@ describe('UploadService', () => {
 
       await service.removePrivate('anexos/p/a.pdf');
 
+      expect(mockSend.mock.calls[0][0]).toMatchObject({
+        __kind: 'Delete',
+        input: { Bucket: 'petcard-bucket', Key: 'anexos/p/a.pdf' },
+      });
+    });
+
+    // Exclusão de pet ou tutor (AUD API-26): a linha já saiu quando isto
+    // roda, então falhar no S3 só deixa um arquivo a mais.
+    it('discardPrivate apaga o objeto e não propaga falha do S3', async () => {
+      mockSend.mockRejectedValue(new Error('network'));
+
+      await expect(
+        service.discardPrivate('anexos/p/a.pdf'),
+      ).resolves.toBeUndefined();
       expect(mockSend.mock.calls[0][0]).toMatchObject({
         __kind: 'Delete',
         input: { Bucket: 'petcard-bucket', Key: 'anexos/p/a.pdf' },

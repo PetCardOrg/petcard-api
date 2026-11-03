@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+import { Prisma } from '@prisma/client';
 import request from 'supertest';
 import {
   createControllerTestApp,
@@ -282,6 +283,67 @@ describe('AuthController (integração)', () => {
       await request(harness.app.getHttpServer())
         .get('/auth/veterinario/profile')
         .expect(403);
+    });
+  });
+
+  // O service confere a unique antes de gravar, mas duas requisições podem
+  // passar juntas pela checagem: a segunda estoura a constraint no banco e
+  // respondia 500 (AUD API-19).
+  describe('corrida na unique do banco (AUD API-19)', () => {
+    const unique = (target: string[]) =>
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target },
+      });
+
+    it('cadastro de tutor com e-mail recém-cadastrado responde 409', async () => {
+      auth.register.mockRejectedValue(unique(['email']));
+
+      const res = await request(harness.app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          name: 'Alice',
+          email: 'alice@petcard.com',
+          password: 'Senha123!',
+        })
+        .expect(409);
+
+      expect(res.body.message).toBe('Email already registered');
+    });
+
+    it('cadastro de veterinário com CRMV recém-cadastrado responde 409', async () => {
+      auth.registerVeterinario.mockRejectedValue(unique(['crmv']));
+
+      const res = await request(harness.app.getHttpServer())
+        .post('/auth/veterinario/register')
+        .send({
+          nome: 'Dr. Carlos',
+          email: 'carlos@vet.com',
+          password: 'Senha123!',
+          crmv: 'CRMV-SP 12345',
+        })
+        .expect(409);
+
+      expect(res.body.message).toBe('CRMV already registered');
+    });
+
+    it('outro erro conhecido do Prisma continua 500', async () => {
+      auth.register.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Record not found', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+
+      await request(harness.app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          name: 'Alice',
+          email: 'alice@petcard.com',
+          password: 'Senha123!',
+        })
+        .expect(500);
     });
   });
 });

@@ -81,6 +81,9 @@ export class VeterinarioService {
    * Trocar a senha exige apresentar a senha atual, e encerra as sessões
    * abertas — inclusive a de quem fez a troca, que entra de novo com a senha
    * nova. Ver `passwordChangedAt` e `JwtStrategy`.
+   *
+   * Trocar o e-mail também exige a senha atual (AUD API-04): com só o token,
+   * quem o pegasse trocava o e-mail e recuperava a senha por ele.
    */
   async update(
     id: string,
@@ -89,6 +92,12 @@ export class VeterinarioService {
     const atual = await this.buscarOuFalhar(id);
     const email =
       dto.email === undefined ? undefined : normalizeEmail(dto.email);
+
+    // Antes da checagem de unicidade: sem a senha, a rota não pode dizer
+    // quais e-mails têm conta.
+    if (email !== undefined && email !== atual.email) {
+      await this.assertSenhaAtualConfere(atual, dto.senha_atual);
+    }
 
     if (email || dto.crmv) {
       await this.assertUniqueFields(email, dto.crmv, id);
@@ -117,12 +126,16 @@ export class VeterinarioService {
       where: { id },
       data,
     });
+    if (dto.foto_url !== undefined && dto.foto_url !== atual.photoUrl) {
+      await this.uploadService.discardFile(atual.photoUrl);
+    }
 
     return toResponse(vet);
   }
 
   /**
-   * Prova de que quem troca a senha é o dono da conta, não quem pegou o token.
+   * Prova de que quem troca a senha ou o e-mail é o dono da conta, não quem
+   * pegou o token.
    *
    * O token do veterinário vale 7 dias e a web o guarda em `localStorage`.
    * Sem esta prova, um token vazado trocava a senha e transformava um acesso
@@ -143,8 +156,9 @@ export class VeterinarioService {
   }
 
   async remove(id: string): Promise<void> {
-    await this.findById(id);
+    const vet = await this.buscarOuFalhar(id);
     await this.prisma.veterinario.delete({ where: { id } });
+    await this.uploadService.discardFile(vet.photoUrl);
   }
 
   /**

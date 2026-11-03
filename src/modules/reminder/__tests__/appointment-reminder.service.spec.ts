@@ -90,6 +90,15 @@ describe('AppointmentReminderService', () => {
       expect(queryArg.where.lastNotifiedAt).toBeNull();
     });
 
+    it('não lembra de agendamento que o tutor excluiu (AUD API-25)', async () => {
+      await service.runAppointmentReminders();
+
+      const [[queryArg]] = prisma.appointment.findMany.mock.calls as Array<
+        [{ where: { syncStatus: unknown } }]
+      >;
+      expect(queryArg.where.syncStatus).toEqual({ not: 'PENDING_DELETE' });
+    });
+
     it('schedules a push and stamps lastNotifiedAt for a due appointment', async () => {
       prisma.appointment.findMany.mockResolvedValue([appointment()]);
 
@@ -122,6 +131,29 @@ describe('AppointmentReminderService', () => {
         where: { id: 'appt-1' },
         data: { lastNotifiedAt: null },
       });
+    });
+
+    it('boot e disparo externo juntos não duplicam o push (AUD API-02)', async () => {
+      // Banco de mentira com estado: as duas execuções leem o agendamento
+      // antes de qualquer uma reivindicar, como no servidor que acorda pelo
+      // próprio request do disparo das 9h.
+      let lastNotifiedAt: Date | null = null;
+      prisma.appointment.findMany.mockImplementation(() =>
+        Promise.resolve([appointment({ lastNotifiedAt })]),
+      );
+      prisma.appointment.updateMany.mockImplementation(() => {
+        if (lastNotifiedAt !== null) return Promise.resolve({ count: 0 });
+        lastNotifiedAt = new Date();
+        return Promise.resolve({ count: 1 });
+      });
+
+      const [primeira, segunda] = await Promise.all([
+        service.runAppointmentReminders(),
+        service.runAppointmentReminders(),
+      ]);
+
+      expect(primeira + segunda).toBe(1);
+      expect(notificationService.schedulePush).toHaveBeenCalledTimes(1);
     });
 
     it('não envia o push quando outra instância já reivindicou o agendamento', async () => {

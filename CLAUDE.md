@@ -15,7 +15,7 @@ Backend do PetCard (carteira digital de saúde para pets). NestJS 11 + Prisma 6 
 - **AWS S3** para mídia.
 - **Auth:** JWT próprio (HS256 + bcrypt), roles `TUTOR`/`VET` no claim `role`, guards globais + `@Public()` (seguro por padrão, api#115), logins separados (`login` / `loginVeterinario`) e cadastro de vet público em `POST /auth/veterinario/register`, que valida o CRMV na criação (api#124). Rate limit nas rotas de autenticação + `helmet`/CSP (2026-08-24). **Auth0 abandonado (M0-#7) — não reintroduzir.** Sem refresh token.
 - **Acesso do veterinário a pet exige o vínculo `PetAtendido`** — o papel VET sozinho não dá mais acesso universal a qualquer pet (correção de segurança, 2026-08-24; o vínculo nasce do QR, ver web#42/#43). Não checar só `role === VET` num guard/service novo.
-- **DTOs:** `@petcardorg/shared@0.23.0` (GitHub Packages). Resolver exige `NODE_AUTH_TOKEN` (PAT com `read:packages`). DTOs locais duplicados foram removidos — não reintroduzir.
+- **DTOs:** `@petcardorg/shared@0.24.1` (GitHub Packages). Resolver exige `NODE_AUTH_TOKEN` (PAT com `read:packages`). DTOs locais duplicados foram removidos — não reintroduzir.
 - **Swagger/OpenAPI:** plugin `@nestjs/swagger` em `nest-cli.json`; UI em **`GET /docs`**. Documento gerado por `npm run openapi:json` (preview mode, sem subir infra).
 
 ## Padrões da API
@@ -23,7 +23,7 @@ Backend do PetCard (carteira digital de saúde para pets). NestJS 11 + Prisma 6 
 - **Investigar antes de codar.** Ler o módulo/serviço alvo e seus testes vizinhos antes de escrever.
 - **DTOs no shared.** Toda request/response nova vai como DTO no `@petcardorg/shared` (bump minor + publish). Respostas tipadas explícitas — o CLI plugin do Swagger **não** infere tipos de pacote externo.
 - **Auth.** `@Auth()` + `@Roles(Role.VET)`/`Role.TUTOR`; usuário via `@CurrentUser()`. **Nunca ler o claim JWT direto no controller.**
-- **Filas.** Toda fila nova precisa de DLX/DLQ + retry.
+- **Filas.** Toda fila nova precisa de DLX/DLQ + retry: entra na lista `FILAS` de `src/modules/queue/rmq.ts` (publicador, consumidor e topologia leem dali) e o consumidor usa o `retryOrDlq` compartilhado, que espera 1s/2s/4s antes de republicar (AUD API-09/11). **As DLQs não têm leitor:** o que esgota as tentativas fica parado lá e só aparece no painel do RabbitMQ.
 - **Migrations.** `npx prisma migrate dev --name <descricao_snake_case>`. SQL fora do Prisma: `--create-only` + edição manual.
 - **Configuração.** Variáveis sensíveis em `.env` com entrada no `.env.example`. Sem fallback hardcoded; em produção, faltar variável crítica = falha rápida no boot. API obriga `CORS_ORIGINS` em produção.
 - **Commits/branches/PRs:** ver as regras cross-repo na raiz (`../CLAUDE.md`). PR mira `develop`.
@@ -41,6 +41,8 @@ Backend do PetCard (carteira digital de saúde para pets). NestJS 11 + Prisma 6 
 - **`preview mode`** (`NestFactory.create(AppModule, { preview: true })`) monta o grafo de módulos e lê metadados sem instanciar providers nem rodar `onModuleInit` — gera o OpenAPI sem conectar Postgres/RabbitMQ.
 - Ao adicionar bloco `permissions:` num workflow, tudo não-listado vira `none` — incluir `packages: read`, senão `npm ci` falha (403) ao baixar `@petcardorg/shared`.
 - **O publish do `@petcardorg/shared` roda só em push para `main`** daquele repo. Bumpar a versão no `develop` não publica nada, e o `npm ci` da api quebra com `ETARGET`. O shared é o único repo cuja `main` acompanha o `develop` — o hold de `develop → main` vale para api, web, mobile e docs.
+- **`trust proxy` = 1 (`src/common/http/trust-proxy.ts`).** Atrás do proxy do Render todas as conexões chegam do mesmo IP; sem isso o rate limit põe todos os usuários num balde só e o login toma 429 para todo mundo (AUD API-01). Não trocar para `true`: o Express passaria a aceitar o primeiro IP do `X-Forwarded-For`, que o cliente forja à vontade. Se entrar outro proxy na frente (CDN), o número sobe.
+- **Lembretes não dependem só do `@Cron` (AUD API-02).** O Render gratuito dorme e o cron das 9h não roda com o processo parado. Saem também pelo workflow `reminders.yml` (12:00 UTC, chama `POST /internal/reminders/run` com `X-Reminders-Secret`) e pela execução no boot (`main.ts`, só entre 9h e 21h do fuso padrão). `REMINDERS_TRIGGER_SECRET` é obrigatório em produção e fica no Render e nos secrets do repo (com `REMINDERS_API_URL`). Repetir é seguro por causa da reivindicação; não remover o claim achando que o cron roda uma vez só.
 - **Consulta de CRMV é paga por chamada.** O `test/e2e/setup-env.ts` fixa `CRMV_PROVIDER=stub` por atribuição direta, justamente para um `.env` de desenvolvimento apontando para o provedor real não fazer o e2e gastar dinheiro. Não trocar para `??=`.
 
 ## Ambiente & comandos

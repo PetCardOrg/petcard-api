@@ -43,5 +43,10 @@ COPY package.json ./
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
 RUN chmod +x ./docker/entrypoint.sh
 
+# O processo não roda como root. A API não grava em disco (uploads vão
+# para o S3) e o `prisma migrate deploy` só lê o que está em /app; o
+# cache do npx fica no HOME do usuário node.
+USER node
+
 EXPOSE 3000
 ENTRYPOINT ["./docker/entrypoint.sh"]

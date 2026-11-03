@@ -12,7 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuthTokenPurpose, type Tutor } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { OAuth2Client } from 'google-auth-library';
+import { OAuth2Client, type TokenPayload } from 'google-auth-library';
 import { CreateVeterinarioDto, normalizeEmail } from '@petcardorg/shared';
 import { BCRYPT_ROUNDS } from '../../common/crypto/password.constants';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -109,38 +109,10 @@ export class AuthService {
    * Google confirma o endereço por nós.
    */
   async googleLogin(dto: GoogleLoginDto) {
-    const clientIds = this.config.get<string[]>('googleAuth.clientIds') ?? [];
-    if (clientIds.length === 0) {
-      throw new ServiceUnavailableException(
-        'Login com Google não está configurado no servidor.',
-      );
-    }
-
-    let email: string | undefined;
-    let googleId: string | undefined;
-    let name: string | undefined;
-    try {
-      const ticket = await this.googleClient.verifyIdToken({
-        idToken: dto.idToken,
-        audience: clientIds,
-      });
-      const payload = ticket.getPayload();
-      email = payload?.email ? normalizeEmail(payload.email) : undefined;
-      googleId = payload?.sub;
-      name = payload?.name;
-      if (!payload?.email_verified) {
-        throw new Error('e-mail não verificado no Google');
-      }
-    } catch (error) {
-      this.logger.warn(
-        `ID token do Google rejeitado: ${
-          error instanceof Error ? error.message : 'erro desconhecido'
-        }`,
-      );
-      throw new UnauthorizedException(
-        'Não foi possível validar a conta Google.',
-      );
-    }
+    const payload = await this.verifyGoogleIdToken(dto.idToken);
+    const email = payload.email ? normalizeEmail(payload.email) : undefined;
+    const googleId = payload.sub;
+    const name = payload.name;
 
     if (!email || !googleId) {
       throw new UnauthorizedException('Conta Google sem e-mail utilizável.');
@@ -160,16 +132,59 @@ export class AuthService {
         },
       });
     } else if (tutor.googleId !== googleId || tutor.emailVerifiedAt === null) {
+      // E-mail nunca verificado: nada prova que a senha é de quem é dono dele
+      // (o cadastro não exige verificar). O Google prova agora, então a senha
+      // cai e o novo carimbo derruba as sessões abertas com ela (AUD API-05).
+      const senhaSemDonoComprovado = tutor.emailVerifiedAt === null;
+      const agora = new Date();
       tutor = await this.prisma.tutor.update({
         where: { id: tutor.id },
         data: {
           googleId,
-          emailVerifiedAt: tutor.emailVerifiedAt ?? new Date(),
+          emailVerifiedAt: tutor.emailVerifiedAt ?? agora,
+          ...(senhaSemDonoComprovado
+            ? { password: null, passwordChangedAt: agora }
+            : {}),
         },
       });
     }
 
     return this.buildTutorSession(tutor);
+  }
+
+  /**
+   * Valida o ID token do Google: assinatura, `aud` contra os client IDs
+   * configurados e e-mail verificado. Serve ao login e à reautenticação da
+   * conta só-Google (AUD API-04), que ainda confere `sub` e `iat`.
+   */
+  async verifyGoogleIdToken(idToken: string): Promise<TokenPayload> {
+    const clientIds = this.config.get<string[]>('googleAuth.clientIds') ?? [];
+    if (clientIds.length === 0) {
+      throw new ServiceUnavailableException(
+        'Login com Google não está configurado no servidor.',
+      );
+    }
+
+    try {
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken,
+        audience: clientIds,
+      });
+      const payload = ticket.getPayload();
+      if (!payload?.email_verified) {
+        throw new Error('e-mail não verificado no Google');
+      }
+      return payload;
+    } catch (error) {
+      this.logger.warn(
+        `ID token do Google rejeitado: ${
+          error instanceof Error ? error.message : 'erro desconhecido'
+        }`,
+      );
+      throw new UnauthorizedException(
+        'Não foi possível validar a conta Google.',
+      );
+    }
   }
 
   /**

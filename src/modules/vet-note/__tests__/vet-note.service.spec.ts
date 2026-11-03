@@ -1,10 +1,15 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   acaoClinicaProvider,
   comTransacao,
 } from '../../../../test/utils/acao-clinica';
 import { NotificationKind } from '@prisma/client';
+import type { UpdateNotaClinicaDto } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { NotificationService } from '../../notification/notification.service';
 import { VetNoteService } from '../vet-note.service';
@@ -370,6 +375,37 @@ describe('VetNoteService', () => {
         }),
         expect.anything(),
       );
+    });
+
+    it('null limpa prescrição e observações (AUD API-24)', async () => {
+      prisma.notaClinica.findFirst.mockResolvedValue(notaFixture);
+      prisma.notaClinica.update.mockResolvedValue(notaFixture);
+
+      await service.update('nota-1', 'vet-1', {
+        prescricao: null,
+        observacoes: null,
+      } as unknown as UpdateNotaClinicaDto);
+
+      expect(prisma.notaClinica.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            prescricao: null,
+            observacoes: null,
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('recusa null no diagnóstico, que é obrigatório (AUD API-24)', async () => {
+      prisma.notaClinica.findFirst.mockResolvedValue(notaFixture);
+
+      // `@IsOptional` deixa `null` passar; sem a recusa, o Prisma estourava (500).
+      await expect(
+        service.update('nota-1', 'vet-1', {
+          diagnostico: null,
+        } as unknown as UpdateNotaClinicaDto),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.notaClinica.update).not.toHaveBeenCalled();
     });
 
     it('recusa a edição de nota de outro veterinário', async () => {

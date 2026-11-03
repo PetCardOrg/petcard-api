@@ -2,22 +2,24 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
-import {
-  CALENDAR_SYNC_DLQ_ROUTING_KEY,
-  NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
-  QR_CODE_DLQ_ROUTING_KEY,
-} from './modules/queue/queue.constants';
+import { confiarNoProxyReverso } from './common/http/trust-proxy';
+import { FILAS, rmqOptions } from './modules/queue/rmq';
+import { ReminderTriggerService } from './modules/reminder/reminder-trigger.service';
 
 /** Tamanho máximo de um corpo JSON aceito. Uploads vão por multipart. */
 const JSON_BODY_LIMIT = '1mb';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(ConfigService);
+
+  // Antes de tudo que lê `req.ip`, a começar pelo rate limit.
+  confiarNoProxyReverso(app);
 
   // Cabeçalhos de segurança (HSTS, X-Content-Type-Options, frame-ancestors e
   // afins). A API responde JSON e as duas páginas HTML do fluxo OAuth, que não
@@ -76,62 +78,32 @@ async function bootstrap() {
     SwaggerModule.setup('docs', app, document);
   }
 
-  app.connectMicroservice<MicroserviceOptions>({
-    transport: Transport.RMQ,
-    options: {
-      urls: [config.get<string>('rabbitmq.url')!],
-      queue: config.get<string>('rabbitmq.qrCodeQueue')!,
-      queueOptions: {
-        durable: true,
-        arguments: {
-          'x-dead-letter-exchange': config.get<string>('rabbitmq.qrCodeDlx')!,
-          'x-dead-letter-routing-key': QR_CODE_DLQ_ROUTING_KEY,
-        },
+  // Um consumidor por fila. As opções da fila saem do mesmo `rmqOptions` do
+  // `QueueModule`: publicador e consumidor precisam declará-la igual.
+  const rabbitUrl = config.get<string>('rabbitmq.url')!;
+  for (const fila of FILAS) {
+    app.connectMicroservice<MicroserviceOptions>({
+      transport: Transport.RMQ,
+      options: {
+        ...rmqOptions(
+          rabbitUrl,
+          config.get<string>(fila.queue)!,
+          config.get<string>(fila.dlx)!,
+          fila.dlqRoutingKey,
+        ),
+        noAck: false,
+        prefetchCount: 1,
       },
-      noAck: false,
-      prefetchCount: 1,
-    },
-  });
-
-  app.connectMicroservice<MicroserviceOptions>({
-    transport: Transport.RMQ,
-    options: {
-      urls: [config.get<string>('rabbitmq.url')!],
-      queue: config.get<string>('rabbitmq.notificationPushQueue')!,
-      queueOptions: {
-        durable: true,
-        arguments: {
-          'x-dead-letter-exchange': config.get<string>(
-            'rabbitmq.notificationPushDlx',
-          )!,
-          'x-dead-letter-routing-key': NOTIFICATION_PUSH_DLQ_ROUTING_KEY,
-        },
-      },
-      noAck: false,
-      prefetchCount: 1,
-    },
-  });
-
-  app.connectMicroservice<MicroserviceOptions>({
-    transport: Transport.RMQ,
-    options: {
-      urls: [config.get<string>('rabbitmq.url')!],
-      queue: config.get<string>('rabbitmq.calendarSyncQueue')!,
-      queueOptions: {
-        durable: true,
-        arguments: {
-          'x-dead-letter-exchange': config.get<string>(
-            'rabbitmq.calendarSyncDlx',
-          )!,
-          'x-dead-letter-routing-key': CALENDAR_SYNC_DLQ_ROUTING_KEY,
-        },
-      },
-      noAck: false,
-      prefetchCount: 1,
-    },
-  });
+    });
+  }
 
   await app.startAllMicroservices();
   await app.listen(process.env.PORT ?? 3000);
+
+  // O Render gratuito dorme e perde o `@Cron` das 9h (AUD API-02): ao acordar,
+  // roda o que ficou para trás. Sem `await`, para não segurar o request que
+  // acordou o servidor. Fica aqui, e não num hook do módulo, para não rodar
+  // nos testes nem no `scripts/run-reminders.ts`.
+  void app.get(ReminderTriggerService).runOnBoot();
 }
 void bootstrap();

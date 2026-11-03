@@ -102,7 +102,8 @@ export class VeterinarioController {
       'token, não da rota. Trocar o CRMV zera a verificação: o registro novo ' +
       'precisa ser verificado antes de liberar dado clínico de novo. ' +
       'Trocar a senha exige `senha_atual` e encerra as sessões abertas, ' +
-      'inclusive a que fez a troca — é preciso entrar de novo.',
+      'inclusive a que fez a troca — é preciso entrar de novo. Trocar o ' +
+      'e-mail também exige `senha_atual`.',
   })
   @ApiUnauthorizedResponse({ description: 'Senha atual incorreta' })
   async updateMe(

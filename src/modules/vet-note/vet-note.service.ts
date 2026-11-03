@@ -15,6 +15,7 @@ import { temVinculoComPet } from '../../common/authorization/pet-atendido';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 import { AcaoClinicaService } from '../historico/acao-clinica.service';
+import { assertObrigatoriosNaoNulos } from '../health/campos-anulaveis';
 import {
   CreateNotaClinicaDto,
   UpdateNotaClinicaDto,
@@ -173,6 +174,7 @@ export class VetNoteService {
     veterinarioId: string,
     dto: UpdateNotaClinicaDto,
   ): Promise<NotaClinicaResponseDto> {
+    assertObrigatoriosNaoNulos(dto, ['diagnostico']);
     const nota = await this.prisma.notaClinica.findFirst({
       where: { id, deletedAt: null },
     });

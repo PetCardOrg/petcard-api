@@ -36,6 +36,7 @@ describe('VeterinarioService', () => {
       delete: jest.Mock;
     };
   };
+  let uploadService: { assertBucketUrl: jest.Mock; discardFile: jest.Mock };
 
   const vetFixture = {
     id: 'vet-1',
@@ -64,11 +65,16 @@ describe('VeterinarioService', () => {
       },
     };
 
+    uploadService = {
+      assertBucketUrl: jest.fn(),
+      discardFile: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         VeterinarioService,
         { provide: PrismaService, useValue: prisma },
-        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
+        { provide: UploadService, useValue: uploadService },
       ],
     }).compile();
 
@@ -125,6 +131,34 @@ describe('VeterinarioService', () => {
       expect(dadosGravados()).toEqual({
         photoUrl: 'https://bucket.s3.us-east-1.amazonaws.com/vets/foto.png',
       });
+    });
+
+    it('apaga a foto antiga quando a foto muda (AUD API-10)', async () => {
+      const antiga =
+        'https://bucket.s3.us-east-1.amazonaws.com/vets/antiga.png';
+      prisma.veterinario.findUnique.mockResolvedValueOnce({
+        ...vetFixture,
+        photoUrl: antiga,
+      });
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+
+      await service.update('vet-1', {
+        foto_url: 'https://bucket.s3.us-east-1.amazonaws.com/vets/nova.png',
+      });
+
+      expect(uploadService.discardFile).toHaveBeenCalledWith(antiga);
+    });
+
+    it('não apaga a foto quando ela não vem no corpo (AUD API-10)', async () => {
+      prisma.veterinario.findUnique.mockResolvedValueOnce({
+        ...vetFixture,
+        photoUrl: 'https://bucket.s3.us-east-1.amazonaws.com/vets/antiga.png',
+      });
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+
+      await service.update('vet-1', { nome: 'Dr. Carlos Lima' });
+
+      expect(uploadService.discardFile).not.toHaveBeenCalled();
     });
 
     it('devolve a foto salva em foto_url, não photoUrl', async () => {
@@ -288,13 +322,81 @@ describe('VeterinarioService', () => {
       prisma.veterinario.findUnique
         .mockResolvedValueOnce(vetFixture)
         .mockResolvedValueOnce({ ...vetFixture, id: 'vet-2' });
+      bcrypt.compare.mockResolvedValue(true);
 
       await expect(
-        service.update('vet-1', { email: 'Outro@Vet.com' }),
+        service.update('vet-1', {
+          email: 'Outro@Vet.com',
+          senha_atual: 'SenhaAntiga1!',
+        }),
       ).rejects.toThrow(ConflictException);
       expect(prisma.veterinario.findUnique).toHaveBeenLastCalledWith({
         where: { email: 'outro@vet.com' },
       });
+    });
+  });
+
+  /**
+   * Trocar o e-mail também pede a senha atual (AUD API-04): com só o token,
+   * quem o pegasse trocava o e-mail, pedia "esqueci a senha" e ficava com a
+   * conta.
+   */
+  describe('troca de e-mail', () => {
+    it('recusa sem senha atual', async () => {
+      prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);
+
+      await expect(
+        service.update('vet-1', { email: 'novo@vet.com' }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(prisma.veterinario.update).not.toHaveBeenCalled();
+    });
+
+    it('recusa com senha atual errada, antes de checar se o e-mail está livre', async () => {
+      prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);
+      bcrypt.compare.mockResolvedValue(false);
+
+      await expect(
+        service.update('vet-1', {
+          email: 'novo@vet.com',
+          senha_atual: 'chute',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(prisma.veterinario.findUnique).toHaveBeenCalledTimes(1);
+      expect(prisma.veterinario.update).not.toHaveBeenCalled();
+    });
+
+    it('troca com a senha atual correta', async () => {
+      prisma.veterinario.findUnique
+        .mockResolvedValueOnce(vetFixture)
+        .mockResolvedValueOnce(null);
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+      bcrypt.compare.mockResolvedValue(true);
+
+      await service.update('vet-1', {
+        email: 'novo@vet.com',
+        senha_atual: 'SenhaAntiga1!',
+      });
+
+      expect(bcrypt.compare).toHaveBeenCalledWith(
+        'SenhaAntiga1!',
+        vetFixture.password,
+      );
+      expect(prisma.veterinario.update).toHaveBeenCalled();
+    });
+
+    it('não pede senha quando o e-mail enviado é o mesmo', async () => {
+      prisma.veterinario.findUnique
+        .mockResolvedValueOnce(vetFixture)
+        .mockResolvedValueOnce(vetFixture);
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+
+      // Salvar o perfil sem mexer no e-mail não é troca de identidade.
+      await service.update('vet-1', {
+        nome: 'Dr. Carlos S',
+        email: 'carlos@vet.com',
+      });
+
+      expect(bcrypt.compare).not.toHaveBeenCalled();
     });
   });
 
@@ -305,6 +407,19 @@ describe('VeterinarioService', () => {
       await expect(service.remove('missing')).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('apaga a foto do vet excluído (AUD API-10)', async () => {
+      const foto = 'https://bucket.s3.us-east-1.amazonaws.com/vets/carlos.png';
+      prisma.veterinario.findUnique.mockResolvedValue({
+        ...vetFixture,
+        photoUrl: foto,
+      });
+      prisma.veterinario.delete.mockResolvedValue(vetFixture);
+
+      await service.remove('vet-1');
+
+      expect(uploadService.discardFile).toHaveBeenCalledWith(foto);
     });
   });
 });

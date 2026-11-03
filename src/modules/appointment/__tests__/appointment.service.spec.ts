@@ -1,5 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PetService } from '../../pet/pet.service';
@@ -63,6 +67,14 @@ describe('AppointmentService', () => {
     }).compile();
 
     service = module.get<AppointmentService>(AppointmentService);
+
+    // As datas dos casos são relativas a `now`: sem fixar o relógio, o
+    // agendamento de junho de 2026 vira passado e a regra do API-27 recusa.
+    jest.spyOn(Date, 'now').mockReturnValue(now.getTime());
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   describe('create', () => {
@@ -101,6 +113,19 @@ describe('AppointmentService', () => {
         pet_name: 'Rex',
         sync_status: 'PENDING_CREATE',
       });
+    });
+
+    it('responde com o agendamento salvo se a fila estiver fora, e ele fica PENDING_CREATE (AUD API-08)', async () => {
+      prisma.appointment.create.mockResolvedValue(appointment);
+      publisher.publish.mockRejectedValue(new Error('broker down'));
+
+      const result = await service.create('tutor-1', {
+        title: 'Consulta de rotina',
+        scheduled_at: '2026-06-01T14:00:00Z',
+      });
+
+      expect(result.id).toBe('appt-1');
+      expect(result.sync_status).toBe('PENDING_CREATE');
     });
 
     it('confere a posse do pet antes de criar o agendamento', async () => {
@@ -171,10 +196,25 @@ describe('AppointmentService', () => {
       const result = await service.findAllForTutor('tutor-1');
 
       expect(prisma.appointment.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { tutorId: 'tutor-1' } }),
+        expect.objectContaining({
+          where: { tutorId: 'tutor-1', syncStatus: { not: 'PENDING_DELETE' } },
+        }),
       );
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe('appt-1');
+    });
+
+    it('esconde o agendamento com exclusão pendente das duas listagens (AUD API-25)', async () => {
+      prisma.appointment.findMany.mockResolvedValue([]);
+
+      await service.findAllForTutor('tutor-1');
+      await service.findUpcoming('tutor-1');
+
+      for (const [arg] of prisma.appointment.findMany.mock.calls as [
+        { where: { syncStatus: unknown } },
+      ][]) {
+        expect(arg.where.syncStatus).toEqual({ not: 'PENDING_DELETE' });
+      }
     });
 
     it('filtra apenas agendamentos futuros em findUpcoming', async () => {
@@ -217,6 +257,17 @@ describe('AppointmentService', () => {
         ForbiddenException,
       );
     });
+
+    it('lança NotFoundException para agendamento com exclusão pendente (AUD API-25)', async () => {
+      prisma.appointment.findUnique.mockResolvedValue({
+        ...appointment,
+        syncStatus: 'PENDING_DELETE',
+      });
+
+      await expect(service.findOne('appt-1', 'tutor-1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
   });
 
   describe('update', () => {
@@ -239,6 +290,23 @@ describe('AppointmentService', () => {
       expect(publisher.publish).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'UPDATE', appointment_id: 'appt-1' }),
       );
+      expect(result.title).toBe('Reagendada');
+    });
+
+    it('responde com o agendamento salvo se a fila estiver fora, e ele fica PENDING_UPDATE (AUD API-08)', async () => {
+      prisma.appointment.findUnique.mockResolvedValue(appointment);
+      prisma.appointment.update.mockResolvedValue({
+        ...appointment,
+        title: 'Reagendada',
+        syncStatus: 'PENDING_UPDATE',
+      });
+      publisher.publish.mockRejectedValue(new Error('broker down'));
+
+      const result = await service.update('appt-1', 'tutor-1', {
+        title: 'Reagendada',
+      });
+
+      expect(result.sync_status).toBe('PENDING_UPDATE');
       expect(result.title).toBe('Reagendada');
     });
 
@@ -342,6 +410,38 @@ describe('AppointmentService', () => {
       expect(prisma.appointment.delete).toHaveBeenCalled();
     });
 
+    // Apagar a linha com a fila fora deixava o evento órfão no Google: nada
+    // mais sabia o google_event_id. A linha fica para o syncAllPending.
+    it('com a fila fora, marca PENDING_DELETE em vez de apagar a linha (AUD API-25)', async () => {
+      prisma.appointment.findUnique.mockResolvedValue({
+        ...appointment,
+        googleEventId: 'gcal-123',
+      });
+      publisher.publish.mockRejectedValue(new Error('broker down'));
+
+      await expect(
+        service.remove('appt-1', 'tutor-1'),
+      ).resolves.toBeUndefined();
+      expect(prisma.appointment.update).toHaveBeenCalledWith({
+        where: { id: 'appt-1' },
+        data: { syncStatus: 'PENDING_DELETE' },
+      });
+      expect(prisma.appointment.delete).not.toHaveBeenCalled();
+    });
+
+    it('excluir de novo um agendamento com exclusão pendente dá 404 (AUD API-25)', async () => {
+      prisma.appointment.findUnique.mockResolvedValue({
+        ...appointment,
+        googleEventId: 'gcal-123',
+        syncStatus: 'PENDING_DELETE',
+      });
+
+      await expect(service.remove('appt-1', 'tutor-1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(publisher.publish).not.toHaveBeenCalled();
+    });
+
     it('lança ForbiddenException e não deleta de não-dono', async () => {
       prisma.appointment.findUnique.mockResolvedValue({
         ...appointment,
@@ -352,6 +452,63 @@ describe('AppointmentService', () => {
         ForbiddenException,
       );
       expect(prisma.appointment.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('horário no passado (AUD API-27)', () => {
+    const ontem = '2026-04-30T10:00:00Z';
+    const passado = { ...appointment, scheduledAt: new Date(ontem) };
+
+    it('recusa criar agendamento para ontem, sem gravar nada', async () => {
+      await expect(
+        service.create('tutor-1', {
+          title: 'Consulta',
+          scheduled_at: ontem,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.appointment.create).not.toHaveBeenCalled();
+    });
+
+    it('aceita alguns minutos de atraso do relógio do aparelho', async () => {
+      prisma.appointment.create.mockResolvedValue(appointment);
+
+      await service.create('tutor-1', {
+        title: 'Consulta',
+        scheduled_at: '2026-05-01T09:58:00Z',
+      });
+
+      expect(prisma.appointment.create).toHaveBeenCalled();
+    });
+
+    it('recusa remarcar para o passado', async () => {
+      prisma.appointment.findUnique.mockResolvedValue(appointment);
+
+      await expect(
+        service.update('appt-1', 'tutor-1', { scheduled_at: ontem }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.appointment.update).not.toHaveBeenCalled();
+    });
+
+    it('deixa editar só o título de um compromisso que já passou', async () => {
+      prisma.appointment.findUnique.mockResolvedValue(passado);
+      prisma.appointment.update.mockResolvedValue(passado);
+
+      await service.update('appt-1', 'tutor-1', { title: 'Retorno' });
+
+      expect(prisma.appointment.update).toHaveBeenCalled();
+    });
+
+    // O app manda o formulário inteiro na edição, com o mesmo scheduled_at.
+    it('aceita o mesmo horário passado reenviado junto com outros campos', async () => {
+      prisma.appointment.findUnique.mockResolvedValue(passado);
+      prisma.appointment.update.mockResolvedValue(passado);
+
+      await service.update('appt-1', 'tutor-1', {
+        title: 'Retorno',
+        scheduled_at: '2026-04-30T10:00:00.000Z',
+      });
+
+      expect(prisma.appointment.update).toHaveBeenCalled();
     });
   });
 });

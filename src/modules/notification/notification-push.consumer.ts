@@ -7,8 +7,8 @@ import type { NotificationPushMessage } from '../queue/dto/notification-push.mes
 import {
   NOTIFICATION_PUSH_MAX_RETRIES,
   NOTIFICATION_PUSH_PATTERN,
-  NOTIFICATION_PUSH_RETRY_HEADER,
 } from '../queue/queue.constants';
+import { retryOrDlq } from '../queue/rmq';
 import { FcmClient } from './fcm.client';
 import { NotificationService } from './notification.service';
 
@@ -109,44 +109,28 @@ export class NotificationPushConsumer {
     channel: Channel,
     message: ConsumeMessage,
   ): Promise<void> {
-    const retryCount = this.getRetryCount(message);
-
-    if (retryCount < NOTIFICATION_PUSH_MAX_RETRIES) {
-      this.logger.warn(
-        `Retry ${retryCount + 1}/${NOTIFICATION_PUSH_MAX_RETRIES} for notification ${notificationId}: ${errorCode}`,
-      );
-      channel.publish('', message.fields.routingKey, message.content, {
-        ...message.properties,
-        headers: {
-          ...message.properties.headers,
-          [NOTIFICATION_PUSH_RETRY_HEADER]: retryCount + 1,
-        },
-      });
-      channel.ack(message);
-      return;
-    }
-
-    this.logger.error(
-      `Exhausted retries for notification ${notificationId} (${errorCode}); routing to DLQ`,
-    );
-    try {
-      await this.notificationService.markFailed(notificationId, errorCode);
-    } catch (error) {
-      this.logger.error(
-        `Failed to mark notification ${notificationId} as FAILED`,
-        error instanceof Error ? error.stack : error,
-      );
-    }
-    channel.nack(message, false, false);
+    await retryOrDlq(channel, message, NOTIFICATION_PUSH_MAX_RETRIES, {
+      onRetry: (attempt) =>
+        this.logger.warn(
+          `Retry ${attempt}/${NOTIFICATION_PUSH_MAX_RETRIES} for notification ${notificationId}: ${errorCode}`,
+        ),
+      onExhausted: async () => {
+        this.logger.error(
+          `Exhausted retries for notification ${notificationId} (${errorCode}); routing to DLQ`,
+        );
+        try {
+          await this.notificationService.markFailed(notificationId, errorCode);
+        } catch (error) {
+          this.logger.error(
+            `Failed to mark notification ${notificationId} as FAILED`,
+            error instanceof Error ? error.stack : error,
+          );
+        }
+      },
+    });
   }
 
   private isUnregisteredTokenError(code: string): boolean {
     return NotificationPushConsumer.UNREGISTERED_TOKEN_CODES.has(code);
-  }
-
-  private getRetryCount(message: ConsumeMessage): number {
-    const raw: unknown =
-      message.properties.headers?.[NOTIFICATION_PUSH_RETRY_HEADER];
-    return typeof raw === 'number' ? raw : 0;
   }
 }

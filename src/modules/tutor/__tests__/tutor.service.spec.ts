@@ -1,0 +1,119 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import * as bcrypt from 'bcrypt';
+import { PrismaService } from '../../../prisma/prisma.service';
+import { AuthService } from '../../auth/auth.service';
+import { UploadService } from '../../upload/upload.service';
+import { TutorService } from '../tutor.service';
+
+const BUCKET = 'https://bucket.s3.us-east-1.amazonaws.com';
+
+describe('TutorService: fotos que deixam de ser usadas (AUD API-10)', () => {
+  let service: TutorService;
+  let prisma: {
+    tutor: { findUnique: jest.Mock; update: jest.Mock; delete: jest.Mock };
+    pet: { findMany: jest.Mock };
+  };
+  let uploadService: {
+    assertBucketUrl: jest.Mock;
+    discardFile: jest.Mock;
+    discardPrivate: jest.Mock;
+  };
+
+  const tutor = {
+    id: 'tutor-1',
+    name: 'Maria',
+    email: 'maria@example.com',
+    // Preenchido no beforeAll: excluir a conta confere a senha (AUD API-04).
+    password: '',
+    phone: null,
+    profileImageUrl: `${BUCKET}/tutors/antiga.png`,
+    googleId: null,
+    emailVerifiedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  beforeAll(async () => {
+    tutor.password = await bcrypt.hash('Senha@123', 4);
+  });
+
+  beforeEach(async () => {
+    prisma = {
+      tutor: {
+        findUnique: jest.fn().mockResolvedValue(tutor),
+        update: jest.fn().mockResolvedValue(tutor),
+        delete: jest.fn().mockResolvedValue(tutor),
+      },
+      pet: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    uploadService = {
+      assertBucketUrl: jest.fn(),
+      discardFile: jest.fn().mockResolvedValue(undefined),
+      discardPrivate: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        TutorService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: UploadService, useValue: uploadService },
+        { provide: AuthService, useValue: {} },
+      ],
+    }).compile();
+
+    service = module.get(TutorService);
+  });
+
+  it('apaga a foto de perfil antiga quando ela muda', async () => {
+    await service.updateById('tutor-1', {
+      profile_image_url: `${BUCKET}/tutors/nova.png`,
+    });
+
+    expect(uploadService.discardFile).toHaveBeenCalledWith(
+      `${BUCKET}/tutors/antiga.png`,
+    );
+  });
+
+  it('não apaga a foto quando ela não vem no corpo', async () => {
+    await service.updateById('tutor-1', { name: 'Maria Souza' });
+
+    expect(uploadService.discardFile).not.toHaveBeenCalled();
+  });
+
+  it('ao excluir a conta, apaga a foto de perfil e os arquivos dos pets (que saem em cascata) (AUD API-26)', async () => {
+    prisma.pet.findMany.mockResolvedValue([
+      {
+        photoUrl: `${BUCKET}/pets/rex.png`,
+        carteiraDigital: { qrCodeUrl: `${BUCKET}/qr-codes/pet-1.png` },
+        tagColeira: { qrCodeUrl: `${BUCKET}/qr-codes/coleira-pet-1.png` },
+        anexosClinicos: [{ s3Key: 'anexos/pet-1/a.pdf' }],
+      },
+      {
+        photoUrl: null,
+        carteiraDigital: null,
+        tagColeira: null,
+        anexosClinicos: [],
+      },
+    ]);
+
+    await service.removeById('tutor-1', { senha_atual: 'Senha@123' });
+
+    expect(prisma.pet.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tutorId: 'tutor-1' } }),
+    );
+    expect(prisma.tutor.delete).toHaveBeenCalledWith({
+      where: { id: 'tutor-1' },
+    });
+    for (const url of [
+      `${BUCKET}/tutors/antiga.png`,
+      `${BUCKET}/pets/rex.png`,
+      `${BUCKET}/qr-codes/pet-1.png`,
+      `${BUCKET}/qr-codes/coleira-pet-1.png`,
+    ]) {
+      expect(uploadService.discardFile).toHaveBeenCalledWith(url);
+    }
+    expect(uploadService.discardPrivate).toHaveBeenCalledWith(
+      'anexos/pet-1/a.pdf',
+    );
+  });
+});

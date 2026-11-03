@@ -54,6 +54,8 @@ export async function createE2EApp(): Promise<E2EApp> {
     ),
     // Usado por tutor/vet ao validar foto; sem foto no e2e, não é chamado.
     assertBucketUrl: jest.fn(),
+    // Troca e exclusão de pet/tutor/vet descartam a foto antiga (AUD API-10).
+    discardFile: jest.fn(() => Promise.resolve()),
   };
 
   const moduleRef: TestingModule = await Test.createTestingModule({

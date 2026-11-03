@@ -5,6 +5,7 @@ import { ColeiraService } from '../../coleira/coleira.service';
 import { UploadService } from '../../upload/upload.service';
 import { QrCodeConsumer } from '../qr-code.consumer';
 import { QR_CODE_MAX_RETRIES, QR_CODE_RETRY_HEADER } from '../queue.constants';
+import { backoff } from '../rmq';
 
 const QR_URL = 'https://bucket.s3.us-east-1.amazonaws.com/qr-codes/pet-1.png';
 
@@ -46,6 +47,8 @@ describe('QrCodeConsumer', () => {
   let channel: { ack: jest.Mock; nack: jest.Mock; publish: jest.Mock };
 
   beforeEach(async () => {
+    // Sem a espera real do backoff (AUD API-09), testada em `rmq.spec.ts`.
+    jest.spyOn(backoff, 'esperar').mockResolvedValue(undefined);
     cardService = {
       ensureTokenForPet: jest.fn().mockResolvedValue('tok-123'),
       generateQrCode: jest.fn().mockResolvedValue(Buffer.from('fake-png')),

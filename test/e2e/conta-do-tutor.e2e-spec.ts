@@ -59,6 +59,7 @@ describe('Conta do tutor — exclusão (e2e)', () => {
     await request(app.getHttpServer())
       .delete('/tutors/me')
       .set('Authorization', `Bearer ${tutorToken}`)
+      .send({ senha_atual: 'Senha123!' })
       .expect(204);
 
     expect(
@@ -76,6 +77,7 @@ describe('Conta do tutor — exclusão (e2e)', () => {
     await request(app.getHttpServer())
       .delete('/tutors/me')
       .set('Authorization', `Bearer ${tutorToken}`)
+      .send({ senha_atual: 'Senha123!' })
       .expect(204);
 
     // O veterinário continua existindo; some só o pet da lista dele.
@@ -85,16 +87,93 @@ describe('Conta do tutor — exclusão (e2e)', () => {
     ).not.toBeNull();
   });
 
+  it('não apaga nada com a senha atual errada (AUD API-04)', async () => {
+    await request(app.getHttpServer())
+      .delete('/tutors/me')
+      .set('Authorization', `Bearer ${tutorToken}`)
+      .send({ senha_atual: 'Chute123!' })
+      .expect(401);
+
+    expect(
+      await prisma.tutor.findUnique({ where: { id: tutorId } }),
+    ).not.toBeNull();
+    expect(await prisma.pet.count()).toBe(1);
+  });
+
   it('o token deixa de servir depois da exclusão', async () => {
     await request(app.getHttpServer())
       .delete('/tutors/me')
       .set('Authorization', `Bearer ${tutorToken}`)
+      .send({ senha_atual: 'Senha123!' })
       .expect(204);
 
     // O JWT continua com assinatura válida até expirar, mas não há mais conta
     // por trás dele. A recusa passou a vir da própria autenticação (401), não
     // mais de cada rota que resolvia o tutor e devolvia 404: a JwtStrategy
     // confere a conta antes de a request chegar ao controller.
+    await request(app.getHttpServer())
+      .get('/tutors/me')
+      .set('Authorization', `Bearer ${tutorToken}`)
+      .expect(401);
+  });
+});
+
+/**
+ * Trocar o e-mail é trocar a identidade da conta (AUD API-04): com só o token,
+ * quem o pegasse trocava o e-mail, pedia "esqueci a senha" e ficava com a
+ * conta.
+ */
+describe('Conta do tutor — troca de e-mail (e2e)', () => {
+  let ctx: E2EApp;
+  let app: INestApplication<App>;
+  let prisma: PrismaService;
+  let tutorToken: string;
+
+  beforeAll(async () => {
+    ctx = await createE2EApp();
+    ({ app, prisma } = ctx);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await resetDb(prisma);
+    tutorToken = (await registerTutor(app)).token;
+  });
+
+  it('recusa sem a senha atual (400) e com a senha errada (401)', async () => {
+    await request(app.getHttpServer())
+      .patch('/tutors/me')
+      .set('Authorization', `Bearer ${tutorToken}`)
+      .send({ email: 'novo@petcard.com' })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .patch('/tutors/me')
+      .set('Authorization', `Bearer ${tutorToken}`)
+      .send({ email: 'novo@petcard.com', senha_atual: 'Chute123!' })
+      .expect(401);
+
+    expect(
+      await prisma.tutor.count({ where: { email: 'novo@petcard.com' } }),
+    ).toBe(0);
+  });
+
+  it('troca com a senha atual correta e encerra a sessão anterior', async () => {
+    await request(app.getHttpServer())
+      .patch('/tutors/me')
+      .set('Authorization', `Bearer ${tutorToken}`)
+      .send({ email: 'novo@petcard.com', senha_atual: 'Senha123!' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'novo@petcard.com', password: 'Senha123!' })
+      .expect(201);
+
+    // A sessão de antes da troca cai junto — inclusive a de quem trocou.
     await request(app.getHttpServer())
       .get('/tutors/me')
       .set('Authorization', `Bearer ${tutorToken}`)

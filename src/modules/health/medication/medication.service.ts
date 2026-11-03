@@ -21,6 +21,7 @@ import {
   assertPodeRemover,
   nomeDoVeterinario,
 } from '../autoria-clinica';
+import { assertObrigatoriosNaoNulos, dataAnulavel } from '../campos-anulaveis';
 
 type MedicationInput = Omit<CreateMedicationRecordDto, 'pet_id'>;
 
@@ -138,6 +139,12 @@ export class MedicationService {
     isVet: boolean,
     dto: Omit<UpdateMedicationRecordDto, 'pet_id'>,
   ): Promise<MedicationRecordResponseDto> {
+    assertObrigatoriosNaoNulos(dto, [
+      'medication_name',
+      'dosage',
+      'frequency',
+      'start_date',
+    ]);
     const record = await this.getRecord(id);
     await this.petService.assertAccess(record.petId, userId, isVet);
     assertPodeEditar(record, userId, isVet);
@@ -151,7 +158,7 @@ export class MedicationService {
           frequency: dto.frequency,
           veterinarianName: dto.veterinarian_name,
           startDate: dto.start_date ? new Date(dto.start_date) : undefined,
-          endDate: dto.end_date ? new Date(dto.end_date) : undefined,
+          endDate: dataAnulavel(dto.end_date),
           notes: dto.notes,
         },
       });

@@ -10,6 +10,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { CardService } from '../../card/card.service';
 import { ColeiraService } from '../../coleira/coleira.service';
 import { QrCodePublisher } from '../../queue/qr-code.publisher';
+import { AuthService } from '../../auth/auth.service';
 import { TutorService } from '../../tutor/tutor.service';
 import { UploadService } from '../../upload/upload.service';
 import { PetController } from '../pet.controller';
@@ -71,6 +72,7 @@ describe('PetController (integração)', () => {
       providers: [
         PetService,
         TutorService,
+        { provide: AuthService, useValue: {} },
         { provide: PrismaService, useValue: prisma },
         { provide: QrCodePublisher, useValue: qrPublisher },
         {
@@ -81,7 +83,14 @@ describe('PetController (integração)', () => {
           provide: ColeiraService,
           useValue: { rotateTokenForPet: jest.fn().mockResolvedValue('tag') },
         },
-        { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
+        {
+          provide: UploadService,
+          useValue: {
+            assertBucketUrl: jest.fn(),
+            discardFile: jest.fn(),
+            discardPrivate: jest.fn(),
+          },
+        },
       ],
     });
   });
@@ -231,6 +240,7 @@ describe('PetController (integração)', () => {
   describe('DELETE /pets/:id', () => {
     it('remove o pet do dono (204)', async () => {
       prisma.pet.findUnique.mockResolvedValue(pet);
+      prisma.pet.findMany.mockResolvedValue([]);
       prisma.pet.delete.mockResolvedValue(pet);
 
       await request(harness.app.getHttpServer())

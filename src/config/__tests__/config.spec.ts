@@ -1,9 +1,12 @@
+import { Logger } from '@nestjs/common';
 import { appConfig } from '../app.config';
 import { cardConfig } from '../card.config';
 import { firebaseConfig } from '../firebase.config';
 import { authConfig } from '../auth.config';
 import { mailConfig } from '../mail.config';
 import { throttlerConfig } from '../throttler.config';
+import { crmvConfig } from '../crmv.config';
+import { reminderConfig } from '../reminder.config';
 
 /**
  * Só o que morde de verdade na configuração.
@@ -30,6 +33,8 @@ const CHAVES = [
   'BREVO_API_KEY',
   'APP_DEEP_LINK_BASE',
   'API_BASE_URL',
+  'CRMV_PROVIDER',
+  'REMINDERS_TRIGGER_SECRET',
 ] as const;
 
 describe('configuração de ambiente', () => {
@@ -221,7 +226,7 @@ describe('configuração de ambiente', () => {
       process.env.NODE_ENV = 'production';
 
       // Sem host, o MailService cai no modo de log: o link de redefinição, com
-      // o token dentro, vai para a saída do processo — CloudWatch, em texto
+      // o token dentro, vai para a saída do processo — logs do Render, em texto
       // claro — e nenhum e-mail chega a ninguém. Falha silenciosa dos dois
       // lados; por isso o boot para aqui.
       expect(() => mailConfig()).toThrow(/SMTP_HOST is required in production/);
@@ -281,6 +286,77 @@ describe('configuração de ambiente', () => {
       // Nunca mais para `petcard://`: scheme customizado não tem dono e, no
       // Android, outro app pode ser escolhido para abrir o link do e-mail.
       expect(mailConfig().appLinkBase).toBe('http://localhost:3000/auth');
+    });
+  });
+
+  /**
+   * Sem a variável, o provedor caía no stub, que aceita qualquer CRMV bem
+   * formado: um esquecimento no painel do deploy desligava a verificação de
+   * CRMV em produção sem ninguém perceber.
+   */
+  describe('provedor de CRMV', () => {
+    it('recusa subir em produção sem CRMV_PROVIDER', () => {
+      process.env.NODE_ENV = 'production';
+
+      expect(() => crmvConfig()).toThrow(/CRMV_PROVIDER is required/);
+    });
+
+    it('recusa valor desconhecido em produção, em vez de cair no stub', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CRMV_PROVIDER = 'infosimple';
+
+      expect(() => crmvConfig()).toThrow(/CRMV_PROVIDER/);
+    });
+
+    it('sobe em produção com stub explícito, avisando alto', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CRMV_PROVIDER = 'stub';
+      const aviso = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => {});
+
+      expect(crmvConfig().provider).toBe('stub');
+      expect(aviso).toHaveBeenCalledWith(expect.stringMatching(/stub/));
+      aviso.mockRestore();
+    });
+
+    it('usa o provedor real quando configurado', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CRMV_PROVIDER = 'infosimples';
+
+      expect(crmvConfig().provider).toBe('infosimples');
+    });
+
+    it('cai no stub fora de produção, para o CI e a demo', () => {
+      expect(crmvConfig().provider).toBe('stub');
+    });
+  });
+
+  describe('segredo do disparo externo dos lembretes', () => {
+    it('recusa subir em produção sem o segredo', () => {
+      // Sem ele o disparo das 9h não autentica e, com o Render dormindo,
+      // nenhum lembrete sai.
+      process.env.NODE_ENV = 'production';
+
+      expect(() => reminderConfig()).toThrow(/REMINDERS_TRIGGER_SECRET/);
+    });
+
+    it('recusa segredo curto demais em produção', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.REMINDERS_TRIGGER_SECRET = 'curto';
+
+      expect(() => reminderConfig()).toThrow(/at least 32 characters/);
+    });
+
+    it('aceita segredo longo em produção', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.REMINDERS_TRIGGER_SECRET = 'a'.repeat(32);
+
+      expect(reminderConfig().triggerSecret).toHaveLength(32);
+    });
+
+    it('fora de produção sobe sem segredo (disparo externo desligado)', () => {
+      expect(reminderConfig().triggerSecret).toBeUndefined();
     });
   });
 });

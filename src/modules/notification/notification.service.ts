@@ -51,6 +51,15 @@ export class NotificationService {
     });
   }
 
+  /**
+   * Descadastro pedido pelo app (logout). Recortado pelo tutor: quem soubesse
+   * o token de outra pessoa não pode desligar o push dela. Idempotente — token
+   * inexistente ou de outro tutor não é erro (AUD API-23).
+   */
+  async unregisterDevice(tutorId: string, token: string): Promise<void> {
+    await this.prisma.deviceToken.deleteMany({ where: { token, tutorId } });
+  }
+
   async deleteByToken(token: string): Promise<void> {
     await this.prisma.deviceToken.deleteMany({ where: { token } });
   }
@@ -86,6 +95,11 @@ export class NotificationService {
     });
   }
 
+  /**
+   * Cria uma notificação por aparelho e publica na fila. Devolve só as que
+   * foram publicadas; a que falhar na fila fica `FAILED`, para o lembrete
+   * (que decide pelo tamanho do retorno) soltar a reivindicação e tentar de novo.
+   */
   async schedulePush(input: SchedulePushInput): Promise<Notification[]> {
     const tokens = await this.prisma.deviceToken.findMany({
       where: { tutorId: input.tutorId },
@@ -117,7 +131,6 @@ export class NotificationService {
           status: NotificationStatus.PENDING,
         },
       });
-      notifications.push(notification);
 
       try {
         await this.publisher.publish({
@@ -129,11 +142,13 @@ export class NotificationService {
           body: input.body,
           data: input.data,
         });
+        notifications.push(notification);
       } catch (error) {
         this.logger.error(
-          `Failed to enqueue push for notification ${notification.id}; will stay PENDING`,
+          `Failed to enqueue push for notification ${notification.id}; marking FAILED`,
           error instanceof Error ? error.stack : error,
         );
+        await this.markFailed(notification.id, 'ENQUEUE_FAILED');
       }
     }
 

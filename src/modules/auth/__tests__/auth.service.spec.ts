@@ -571,6 +571,53 @@ describe('AuthService', () => {
       expect(updateArg.data.googleId).toBe('google-123');
     });
 
+    /**
+     * O login com senha não exige e-mail verificado: qualquer um cadastra
+     * `vitima@x.com` com uma senha sua. Quando a dona do e-mail entra pelo
+     * Google, as contas se unem — e a senha de quem cadastrou não pode
+     * continuar abrindo a conta dela.
+     */
+    it('descarta a senha e derruba as sessões ao vincular conta de e-mail não verificado', async () => {
+      prisma.tutor.findUnique
+        .mockResolvedValueOnce(null) // por googleId
+        .mockResolvedValueOnce({ ...tutorFixture, emailVerifiedAt: null }); // por email
+      prisma.tutor.update.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve({ ...tutorFixture, ...data }),
+      );
+
+      await service.googleLogin({ idToken: 'id-token' });
+
+      const [[updateArg]] = prisma.tutor.update.mock.calls as Array<
+        [{ data: { password?: string | null; passwordChangedAt?: Date } }]
+      >;
+      expect(updateArg.data.password).toBeNull();
+      // Novo carimbo: os tokens emitidos antes deixam de valer (JwtStrategy).
+      expect(updateArg.data.passwordChangedAt).toBeInstanceOf(Date);
+    });
+
+    it('preserva a senha ao vincular conta com e-mail já verificado', async () => {
+      // E-mail verificado prova que a senha é da dona do e-mail.
+      prisma.tutor.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          ...tutorFixture,
+          emailVerifiedAt: new Date('2026-01-01'),
+        });
+      prisma.tutor.update.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve({ ...tutorFixture, ...data }),
+      );
+
+      await service.googleLogin({ idToken: 'id-token' });
+
+      const [[updateArg]] = prisma.tutor.update.mock.calls as Array<
+        [{ data: Record<string, unknown> }]
+      >;
+      expect(updateArg.data).not.toHaveProperty('password');
+      expect(updateArg.data).not.toHaveProperty('passwordChangedAt');
+    });
+
     it('reaproveita a conta já vinculada por googleId', async () => {
       prisma.tutor.findUnique.mockResolvedValueOnce({
         ...tutorFixture,

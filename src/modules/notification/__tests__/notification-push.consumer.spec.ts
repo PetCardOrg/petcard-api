@@ -9,6 +9,7 @@ import {
 import { FcmClient } from '../fcm.client';
 import { NotificationPushConsumer } from '../notification-push.consumer';
 import { NotificationService } from '../notification.service';
+import { backoff } from '../../queue/rmq';
 
 const baseMessage: NotificationPushMessage = {
   notification_id: 'n1',
@@ -47,6 +48,8 @@ describe('NotificationPushConsumer', () => {
   let channel: { ack: jest.Mock; nack: jest.Mock; publish: jest.Mock };
 
   beforeEach(async () => {
+    // Sem a espera real do backoff (AUD API-09), testada em `rmq.spec.ts`.
+    jest.spyOn(backoff, 'esperar').mockResolvedValue(undefined);
     fcmClient = { send: jest.fn() };
     notificationService = {
       findStatus: jest.fn().mockResolvedValue(NotificationStatus.PENDING),
