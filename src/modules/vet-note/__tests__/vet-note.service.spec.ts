@@ -384,7 +384,7 @@ describe('VetNoteService', () => {
       await service.update('nota-1', 'vet-1', {
         prescricao: null,
         observacoes: null,
-      } as unknown as UpdateNotaClinicaDto);
+      });
 
       expect(prisma.notaClinica.update).toHaveBeenCalledWith(
         expect.objectContaining({
