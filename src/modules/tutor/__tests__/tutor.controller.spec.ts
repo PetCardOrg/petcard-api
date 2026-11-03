@@ -11,6 +11,9 @@ import { UploadService } from '../../upload/upload.service';
 import { TutorController } from '../tutor.controller';
 import { TutorService } from '../tutor.service';
 
+// Exigida pelo shared desde a 0.24 para trocar o e-mail e excluir a conta.
+const SENHA = 'Senha@123';
+
 describe('TutorController (integração)', () => {
   let harness: ControllerHarness;
   let prisma: {
@@ -144,7 +147,7 @@ describe('TutorController (integração)', () => {
 
         const res = await request(harness.app.getHttpServer())
           .patch('/tutors/me')
-          .send({ email: 'novo@petcard.com' })
+          .send({ email: 'novo@petcard.com', senha_atual: SENHA })
           .expect(200);
 
         expect(res.body.email_verified).toBe(false);
@@ -163,7 +166,7 @@ describe('TutorController (integração)', () => {
         // — sem como distinguir "endereço ocupado" de falha do servidor.
         await request(harness.app.getHttpServer())
           .patch('/tutors/me')
-          .send({ email: 'ocupado@petcard.com' })
+          .send({ email: 'ocupado@petcard.com', senha_atual: SENHA })
           .expect(409);
 
         expect(prisma.tutor.update).not.toHaveBeenCalled();
@@ -180,7 +183,7 @@ describe('TutorController (integração)', () => {
         // confirmar a conta de novo.
         await request(harness.app.getHttpServer())
           .patch('/tutors/me')
-          .send({ name: 'Alice B', email: tutor.email })
+          .send({ name: 'Alice B', email: tutor.email, senha_atual: SENHA })
           .expect(200);
 
         const [[chamada]] = prisma.tutor.update.mock.calls as Array<
@@ -197,7 +200,7 @@ describe('TutorController (integração)', () => {
 
         await request(harness.app.getHttpServer())
           .patch('/tutors/me')
-          .send({ email: 'Nova.Conta@PetCard.com' })
+          .send({ email: 'Nova.Conta@PetCard.com', senha_atual: SENHA })
           .expect(200);
 
         const [[chamada]] = prisma.tutor.update.mock.calls as Array<
@@ -261,6 +264,7 @@ describe('TutorController (integração)', () => {
 
       await request(harness.app.getHttpServer())
         .delete('/tutors/me')
+        .send({ senha_atual: SENHA })
         .expect(204);
 
       // Sempre a conta de quem está autenticado, nunca um id do corpo.
@@ -274,6 +278,7 @@ describe('TutorController (integração)', () => {
 
       await request(harness.app.getHttpServer())
         .delete('/tutors/me')
+        .send({ senha_atual: SENHA })
         .expect(403);
 
       expect(prisma.tutor.delete).not.toHaveBeenCalled();
@@ -284,6 +289,7 @@ describe('TutorController (integração)', () => {
 
       await request(harness.app.getHttpServer())
         .delete('/tutors/me')
+        .send({ senha_atual: SENHA })
         .expect(401);
     });
 
@@ -292,6 +298,7 @@ describe('TutorController (integração)', () => {
 
       await request(harness.app.getHttpServer())
         .delete('/tutors/me')
+        .send({ senha_atual: SENHA })
         .expect(404);
 
       expect(prisma.tutor.delete).not.toHaveBeenCalled();
