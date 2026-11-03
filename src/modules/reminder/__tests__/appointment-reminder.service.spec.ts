@@ -90,6 +90,15 @@ describe('AppointmentReminderService', () => {
       expect(queryArg.where.lastNotifiedAt).toBeNull();
     });
 
+    it('não lembra de agendamento que o tutor excluiu (AUD API-25)', async () => {
+      await service.runAppointmentReminders();
+
+      const [[queryArg]] = prisma.appointment.findMany.mock.calls as Array<
+        [{ where: { syncStatus: unknown } }]
+      >;
+      expect(queryArg.where.syncStatus).toEqual({ not: 'PENDING_DELETE' });
+    });
+
     it('schedules a push and stamps lastNotifiedAt for a due appointment', async () => {
       prisma.appointment.findMany.mockResolvedValue([appointment()]);
 

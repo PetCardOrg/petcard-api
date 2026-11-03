@@ -196,10 +196,25 @@ describe('AppointmentService', () => {
       const result = await service.findAllForTutor('tutor-1');
 
       expect(prisma.appointment.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { tutorId: 'tutor-1' } }),
+        expect.objectContaining({
+          where: { tutorId: 'tutor-1', syncStatus: { not: 'PENDING_DELETE' } },
+        }),
       );
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe('appt-1');
+    });
+
+    it('esconde o agendamento com exclusão pendente das duas listagens (AUD API-25)', async () => {
+      prisma.appointment.findMany.mockResolvedValue([]);
+
+      await service.findAllForTutor('tutor-1');
+      await service.findUpcoming('tutor-1');
+
+      for (const [arg] of prisma.appointment.findMany.mock.calls as [
+        { where: { syncStatus: unknown } },
+      ][]) {
+        expect(arg.where.syncStatus).toEqual({ not: 'PENDING_DELETE' });
+      }
     });
 
     it('filtra apenas agendamentos futuros em findUpcoming', async () => {
@@ -240,6 +255,17 @@ describe('AppointmentService', () => {
 
       await expect(service.findOne('appt-1', 'tutor-1')).rejects.toThrow(
         ForbiddenException,
+      );
+    });
+
+    it('lança NotFoundException para agendamento com exclusão pendente (AUD API-25)', async () => {
+      prisma.appointment.findUnique.mockResolvedValue({
+        ...appointment,
+        syncStatus: 'PENDING_DELETE',
+      });
+
+      await expect(service.findOne('appt-1', 'tutor-1')).rejects.toThrow(
+        NotFoundException,
       );
     });
   });
@@ -384,20 +410,36 @@ describe('AppointmentService', () => {
       expect(prisma.appointment.delete).toHaveBeenCalled();
     });
 
-    it('exclui mesmo se a fila estiver fora (AUD API-08)', async () => {
+    // Apagar a linha com a fila fora deixava o evento órfão no Google: nada
+    // mais sabia o google_event_id. A linha fica para o syncAllPending.
+    it('com a fila fora, marca PENDING_DELETE em vez de apagar a linha (AUD API-25)', async () => {
       prisma.appointment.findUnique.mockResolvedValue({
         ...appointment,
         googleEventId: 'gcal-123',
       });
-      prisma.appointment.delete.mockResolvedValue(appointment);
       publisher.publish.mockRejectedValue(new Error('broker down'));
 
       await expect(
         service.remove('appt-1', 'tutor-1'),
       ).resolves.toBeUndefined();
-      expect(prisma.appointment.delete).toHaveBeenCalledWith({
+      expect(prisma.appointment.update).toHaveBeenCalledWith({
         where: { id: 'appt-1' },
+        data: { syncStatus: 'PENDING_DELETE' },
       });
+      expect(prisma.appointment.delete).not.toHaveBeenCalled();
+    });
+
+    it('excluir de novo um agendamento com exclusão pendente dá 404 (AUD API-25)', async () => {
+      prisma.appointment.findUnique.mockResolvedValue({
+        ...appointment,
+        googleEventId: 'gcal-123',
+        syncStatus: 'PENDING_DELETE',
+      });
+
+      await expect(service.remove('appt-1', 'tutor-1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(publisher.publish).not.toHaveBeenCalled();
     });
 
     it('lança ForbiddenException e não deleta de não-dono', async () => {

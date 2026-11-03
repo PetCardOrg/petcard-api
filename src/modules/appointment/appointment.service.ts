@@ -42,6 +42,13 @@ function recusarHorarioNoPassado(scheduledAt: Date): void {
   }
 }
 
+/**
+ * Filtro das leituras do tutor. `PENDING_DELETE` é um agendamento excluído
+ * cujo evento ainda não saiu do Google: a linha só guarda o google_event_id
+ * para o `syncAllPending` (AUD API-25).
+ */
+const NAO_EXCLUIDO = { not: 'PENDING_DELETE' } as const;
+
 type AppointmentWithPet = Appointment & {
   pet?: { name: string } | null;
 };
@@ -105,7 +112,7 @@ export class AppointmentService {
 
   async findAllForTutor(userId: string): Promise<AppointmentResponse[]> {
     const appointments = await this.prisma.appointment.findMany({
-      where: { tutorId: userId },
+      where: { tutorId: userId, syncStatus: NAO_EXCLUIDO },
       include: { pet: { select: { name: true } } },
       orderBy: { scheduledAt: 'asc' },
     });
@@ -116,6 +123,7 @@ export class AppointmentService {
     const appointments = await this.prisma.appointment.findMany({
       where: {
         tutorId: userId,
+        syncStatus: NAO_EXCLUIDO,
         scheduledAt: { gte: new Date() },
       },
       include: { pet: { select: { name: true } } },
@@ -180,12 +188,22 @@ export class AppointmentService {
     // Capture the event id before deleting the row — the worker needs it to
     // call the Calendar API after the appointment is gone from the DB.
     if (appointment.googleEventId) {
-      await this.enqueueCalendarSync({
+      const publicado = await this.enqueueCalendarSync({
         action: 'DELETE',
         appointment_id: id,
         tutor_id: userId,
         google_event_id: appointment.googleEventId,
       });
+      // Com a fila fora, apagar a linha perderia o único registro do
+      // google_event_id e o evento ficaria órfão na agenda. A linha fica
+      // escondida até o `syncAllPending` apagar o evento e ela (AUD API-25).
+      if (!publicado) {
+        await this.prisma.appointment.update({
+          where: { id },
+          data: { syncStatus: 'PENDING_DELETE' },
+        });
+        return;
+      }
     }
 
     await this.prisma.appointment.delete({ where: { id } });
@@ -194,22 +212,21 @@ export class AppointmentService {
   /**
    * O agendamento já está salvo quando a sincronização é publicada: se a fila
    * estiver fora, responder 500 dizia ao cliente que nada foi salvo.
-   * CREATE e UPDATE deixam a linha `PENDING_*`, que o `syncAllPending`
-   * recupera. No DELETE a linha some logo depois, então o evento fica órfão
-   * na agenda do Google; o log diz qual é.
+   * A linha fica `PENDING_*`, que o `syncAllPending` recupera; devolve se a
+   * publicação deu certo.
    */
   private async enqueueCalendarSync(
     message: AppointmentSyncMessage,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await this.calendarSyncPublisher.publish(message);
+      return true;
     } catch {
       // O publisher já logou o erro com a stack; aqui só o destino da linha.
       this.logger.warn(
-        message.action === 'DELETE'
-          ? `Evento ${message.google_event_id} do agendamento ${message.appointment_id} ficou órfão no Google Calendar`
-          : `Agendamento ${message.appointment_id} fica pendente até o próximo syncAllPending`,
+        `Agendamento ${message.appointment_id} fica pendente (${message.action}) até o próximo syncAllPending`,
       );
+      return false;
     }
   }
 
@@ -221,7 +238,8 @@ export class AppointmentService {
       where: { id },
       include: { pet: { select: { name: true } } },
     });
-    if (!appointment) {
+    // Exclusão pendente (AUD API-25): para o tutor, o agendamento já não existe.
+    if (!appointment || appointment.syncStatus === 'PENDING_DELETE') {
       throw new NotFoundException(`Appointment with id ${id} not found`);
     }
     if (appointment.tutorId !== userId) {

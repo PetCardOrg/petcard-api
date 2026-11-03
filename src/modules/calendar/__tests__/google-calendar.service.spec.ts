@@ -59,6 +59,8 @@ describe('GoogleCalendarService', () => {
       update: jest.Mock;
       findUnique: jest.Mock;
       findMany: jest.Mock;
+      delete: jest.Mock;
+      deleteMany: jest.Mock;
     };
     tutor: { findUnique: jest.Mock };
   };
@@ -106,6 +108,8 @@ describe('GoogleCalendarService', () => {
         update: jest.fn().mockResolvedValue(undefined),
         findUnique: jest.fn(),
         findMany: jest.fn(),
+        delete: jest.fn().mockResolvedValue(undefined),
+        deleteMany: jest.fn().mockResolvedValue(undefined),
       },
       tutor: { findUnique: jest.fn() },
     };
@@ -404,6 +408,15 @@ describe('GoogleCalendarService', () => {
         where: { tutorId: 'tutor-1' },
       });
     });
+
+    // Sem a agenda, não há evento a apagar: a linha escondida sairia só numa
+    // reconexão que talvez nunca venha (AUD API-25).
+    it('disconnect apaga os agendamentos com exclusão pendente', async () => {
+      await service.disconnect('tutor-1');
+      expect(prisma.appointment.deleteMany).toHaveBeenCalledWith({
+        where: { tutorId: 'tutor-1', syncStatus: 'PENDING_DELETE' },
+      });
+    });
   });
 
   describe('createEvent', () => {
@@ -642,6 +655,26 @@ describe('GoogleCalendarService', () => {
       expect(mockCalendarEvents.update).toHaveBeenCalled();
       expect(mockCalendarEvents.insert).not.toHaveBeenCalled();
     });
+
+    // Um UPDATE ainda na fila não pode recriar nem marcar SYNCED o agendamento
+    // que o tutor já excluiu (AUD API-25).
+    it('não sincroniza agendamento com exclusão pendente', async () => {
+      prisma.appointment.findUnique.mockResolvedValue({
+        title: 'Consulta',
+        description: null,
+        scheduledAt: eventInput.startTime,
+        durationMinutes: 30,
+        location: null,
+        googleEventId: 'evt-1',
+        syncStatus: 'PENDING_DELETE',
+      });
+
+      await service.syncAppointment('tutor-1', 'appt-1');
+
+      expect(mockCalendarEvents.update).not.toHaveBeenCalled();
+      expect(mockCalendarEvents.insert).not.toHaveBeenCalled();
+      expect(prisma.appointment.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('syncAllPending', () => {
@@ -745,6 +778,65 @@ describe('GoogleCalendarService', () => {
 
       expect(count).toBe(1);
       expect(mockCalendarEvents.insert).toHaveBeenCalledTimes(2);
+    });
+
+    // A exclusão que não chegou à fila deixa a linha PENDING_DELETE: é daqui
+    // que o evento sai do Google e a linha sai do banco.
+    it('apaga o evento e a linha de um agendamento com exclusão pendente (AUD API-25)', async () => {
+      prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
+      prisma.appointment.findMany.mockResolvedValue([
+        {
+          ...pendingAppointment('appt-1'),
+          googleEventId: 'evt-1',
+          syncStatus: 'PENDING_DELETE',
+        },
+      ]);
+      prisma.tutor.findUnique.mockResolvedValue(null);
+      mockCalendarEvents.delete.mockResolvedValue(undefined);
+
+      const count = await service.syncAllPending('tutor-1');
+
+      expect(prisma.appointment.findMany).toHaveBeenCalledWith({
+        where: {
+          tutorId: 'tutor-1',
+          syncStatus: {
+            in: [
+              'PENDING_CREATE',
+              'PENDING_UPDATE',
+              'FAILED',
+              'PENDING_DELETE',
+            ],
+          },
+        },
+      });
+      expect(mockCalendarEvents.delete).toHaveBeenCalledWith({
+        calendarId: 'primary',
+        eventId: 'evt-1',
+      });
+      expect(prisma.appointment.delete).toHaveBeenCalledWith({
+        where: { id: 'appt-1' },
+      });
+      expect(mockCalendarEvents.insert).not.toHaveBeenCalled();
+      expect(mockCalendarEvents.update).not.toHaveBeenCalled();
+      expect(count).toBe(1);
+    });
+
+    it('mantém a linha PENDING_DELETE quando o Google falha ao apagar', async () => {
+      prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
+      prisma.appointment.findMany.mockResolvedValue([
+        {
+          ...pendingAppointment('appt-1'),
+          googleEventId: 'evt-1',
+          syncStatus: 'PENDING_DELETE',
+        },
+      ]);
+      prisma.tutor.findUnique.mockResolvedValue(null);
+      mockCalendarEvents.delete.mockRejectedValue(new Error('boom'));
+
+      const count = await service.syncAllPending('tutor-1');
+
+      expect(prisma.appointment.delete).not.toHaveBeenCalled();
+      expect(count).toBe(0);
     });
   });
 
