@@ -88,6 +88,31 @@ describe('NotificationService', () => {
     });
   });
 
+  /**
+   * O app descadastra o token no logout (MOB-01). Sem o recorte pelo tutor,
+   * quem soubesse o token de outra pessoa desligava o push dela (AUD API-23).
+   */
+  describe('unregisterDevice', () => {
+    it('apaga só o token do próprio tutor', async () => {
+      prisma.deviceToken.deleteMany.mockResolvedValue({ count: 1 });
+
+      await service.unregisterDevice('tutor-1', 'fcm-token-abc');
+
+      expect(prisma.deviceToken.deleteMany).toHaveBeenCalledWith({
+        where: { token: 'fcm-token-abc', tutorId: 'tutor-1' },
+      });
+    });
+
+    it('não falha quando o token não existe ou é de outro tutor', async () => {
+      // Para o banco, "de outro tutor" e "inexistente" são o mesmo: nada casa.
+      prisma.deviceToken.deleteMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.unregisterDevice('tutor-1', 'token-de-outra-pessoa'),
+      ).resolves.toBeUndefined();
+    });
+  });
+
   describe('schedulePush', () => {
     it('returns empty when tutor has no device tokens', async () => {
       prisma.deviceToken.findMany.mockResolvedValue([]);

@@ -13,8 +13,9 @@ import {
   ApiNotFoundResponse,
   ApiOperation,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { UpdateTutorDto } from '@petcardorg/shared';
+import { DeleteTutorDto, UpdateTutorDto } from '@petcardorg/shared';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '../auth/enums/role.enum';
@@ -35,7 +36,14 @@ export class TutorController {
 
   @Patch('me')
   @Auth(Role.TUTOR)
-  @ApiOperation({ summary: 'Atualizar dados do tutor autenticado' })
+  @ApiOperation({
+    summary: 'Atualizar dados do tutor autenticado',
+    description:
+      'Trocar o e-mail exige `senha_atual` (ou `google_id_token` recente, ' +
+      'na conta só-Google), zera a verificação e encerra as sessões abertas, ' +
+      'inclusive a que fez a troca — é preciso entrar de novo.',
+  })
+  @ApiUnauthorizedResponse({ description: 'Prova de identidade inválida' })
   async updateMe(
     @CurrentUser() user: JwtPayload,
     @Body() dto: UpdateTutorDto,
@@ -50,10 +58,15 @@ export class TutorController {
     summary: 'Excluir definitivamente a conta do tutor autenticado',
     description:
       'Apaga a conta e tudo que depende dela: pets, prontuário, carteira ' +
-      'digital, agendamentos e notificações. Não há desfazer.',
+      'digital, agendamentos e notificações. Não há desfazer. Exige ' +
+      '`senha_atual` (ou `google_id_token` recente, na conta só-Google).',
   })
-  async removeMe(@CurrentUser() user: JwtPayload): Promise<void> {
-    return this.tutorService.removeById(user.sub);
+  @ApiUnauthorizedResponse({ description: 'Prova de identidade inválida' })
+  async removeMe(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: DeleteTutorDto,
+  ): Promise<void> {
+    return this.tutorService.removeById(user.sub, dto);
   }
 
   // Declarada depois de 'me', senão a rota por id capturaria a palavra.

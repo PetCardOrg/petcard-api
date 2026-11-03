@@ -16,6 +16,7 @@ import { QrCodePublisher } from '../../../queue/qr-code.publisher';
 import { CardService } from '../../../card/card.service';
 import { ColeiraService } from '../../../coleira/coleira.service';
 import { PetService } from '../../../pet/pet.service';
+import { AuthService } from '../../../auth/auth.service';
 import { TutorService } from '../../../tutor/tutor.service';
 import { UploadService } from '../../../upload/upload.service';
 import { MedicationController } from '../medication.controller';
@@ -79,6 +80,7 @@ describe('MedicationController (integração)', () => {
         MedicationService,
         PetService,
         TutorService,
+        { provide: AuthService, useValue: {} },
         { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
         { provide: PrismaService, useValue: prisma },
         {
@@ -193,6 +195,46 @@ describe('MedicationController (integração)', () => {
 
     expect(res.body.dosage).toBe('250mg');
   });
+
+  /**
+   * `null` no PATCH limpa o campo opcional (AUD API-24); a web manda isso
+   * quando a pessoa apaga o campo no formulário (WEB-05). Antes a data nula
+   * virava `undefined` e o valor antigo ficava.
+   */
+  it('PATCH com null limpa os campos opcionais (200)', async () => {
+    prisma.medicationRecord.findFirst.mockResolvedValue(record);
+    prisma.medicationRecord.update.mockResolvedValue(record);
+
+    await request(harness.app.getHttpServer())
+      .patch('/medications/med-1')
+      .send({ end_date: null, notes: null, veterinarian_name: null })
+      .expect(200);
+
+    const [[chamada]] = prisma.medicationRecord.update.mock.calls as Array<
+      [{ data: Record<string, unknown> }]
+    >;
+    expect(chamada.data).toEqual(
+      expect.objectContaining({
+        endDate: null,
+        notes: null,
+        veterinarianName: null,
+      }),
+    );
+  });
+
+  it.each(['medication_name', 'dosage', 'frequency', 'start_date'])(
+    'PATCH recusa null no campo obrigatório %s (400)',
+    async (campo) => {
+      prisma.medicationRecord.findFirst.mockResolvedValue(record);
+
+      await request(harness.app.getHttpServer())
+        .patch('/medications/med-1')
+        .send({ [campo]: null })
+        .expect(400);
+
+      expect(prisma.medicationRecord.update).not.toHaveBeenCalled();
+    },
+  );
 
   it('DELETE remove o registro do dono (204)', async () => {
     prisma.medicationRecord.findFirst.mockResolvedValue(record);

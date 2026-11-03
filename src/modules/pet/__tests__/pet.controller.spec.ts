@@ -10,6 +10,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { CardService } from '../../card/card.service';
 import { ColeiraService } from '../../coleira/coleira.service';
 import { QrCodePublisher } from '../../queue/qr-code.publisher';
+import { AuthService } from '../../auth/auth.service';
 import { TutorService } from '../../tutor/tutor.service';
 import { UploadService } from '../../upload/upload.service';
 import { PetController } from '../pet.controller';
@@ -71,6 +72,7 @@ describe('PetController (integração)', () => {
       providers: [
         PetService,
         TutorService,
+        { provide: AuthService, useValue: {} },
         { provide: PrismaService, useValue: prisma },
         { provide: QrCodePublisher, useValue: qrPublisher },
         {

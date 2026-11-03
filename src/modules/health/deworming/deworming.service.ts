@@ -21,6 +21,7 @@ import {
   assertPodeRemover,
   nomeDoVeterinario,
 } from '../autoria-clinica';
+import { assertObrigatoriosNaoNulos, dataAnulavel } from '../campos-anulaveis';
 
 type DewormingInput = Omit<CreateDewormingRecordDto, 'pet_id'>;
 
@@ -131,6 +132,7 @@ export class DewormingService {
     isVet: boolean,
     dto: Omit<UpdateDewormingRecordDto, 'pet_id'>,
   ): Promise<DewormingRecordResponseDto> {
+    assertObrigatoriosNaoNulos(dto, ['product_name', 'applied_at']);
     const record = await this.getRecord(id);
     await this.petService.assertAccess(record.petId, userId, isVet);
     assertPodeEditar(record, userId, isVet);
@@ -141,7 +143,7 @@ export class DewormingService {
         data: {
           productName: dto.product_name,
           appliedAt: dto.applied_at ? new Date(dto.applied_at) : undefined,
-          nextDoseAt: dto.next_dose_at ? new Date(dto.next_dose_at) : undefined,
+          nextDoseAt: dataAnulavel(dto.next_dose_at),
           veterinarianName: dto.veterinarian_name,
           notes: dto.notes,
         },

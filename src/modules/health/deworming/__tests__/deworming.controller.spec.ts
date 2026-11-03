@@ -16,6 +16,7 @@ import { QrCodePublisher } from '../../../queue/qr-code.publisher';
 import { CardService } from '../../../card/card.service';
 import { ColeiraService } from '../../../coleira/coleira.service';
 import { PetService } from '../../../pet/pet.service';
+import { AuthService } from '../../../auth/auth.service';
 import { TutorService } from '../../../tutor/tutor.service';
 import { UploadService } from '../../../upload/upload.service';
 import { CrmvVerificationService } from '../../../veterinario/crmv/crmv-verification.service';
@@ -78,6 +79,7 @@ describe('DewormingController (integração)', () => {
         DewormingService,
         PetService,
         TutorService,
+        { provide: AuthService, useValue: {} },
         { provide: UploadService, useValue: { assertBucketUrl: jest.fn() } },
         { provide: PrismaService, useValue: prisma },
         {
@@ -196,6 +198,46 @@ describe('DewormingController (integração)', () => {
 
     expect(res.body.product_name).toBe('Drontal Plus');
   });
+
+  /**
+   * `null` no PATCH limpa o campo opcional (AUD API-24); a web manda isso
+   * quando a pessoa apaga o campo no formulário (WEB-05). Antes a data nula
+   * virava `undefined` e o valor antigo ficava.
+   */
+  it('PATCH com null limpa os campos opcionais (200)', async () => {
+    prisma.dewormingRecord.findFirst.mockResolvedValue(record);
+    prisma.dewormingRecord.update.mockResolvedValue(record);
+
+    await request(harness.app.getHttpServer())
+      .patch('/dewormings/dew-1')
+      .send({ next_dose_at: null, notes: null, veterinarian_name: null })
+      .expect(200);
+
+    const [[chamada]] = prisma.dewormingRecord.update.mock.calls as Array<
+      [{ data: Record<string, unknown> }]
+    >;
+    expect(chamada.data).toEqual(
+      expect.objectContaining({
+        nextDoseAt: null,
+        notes: null,
+        veterinarianName: null,
+      }),
+    );
+  });
+
+  it.each(['product_name', 'applied_at'])(
+    'PATCH recusa null no campo obrigatório %s (400)',
+    async (campo) => {
+      prisma.dewormingRecord.findFirst.mockResolvedValue(record);
+
+      await request(harness.app.getHttpServer())
+        .patch('/dewormings/dew-1')
+        .send({ [campo]: null })
+        .expect(400);
+
+      expect(prisma.dewormingRecord.update).not.toHaveBeenCalled();
+    },
+  );
 
   it('DELETE remove o registro do dono (204)', async () => {
     prisma.dewormingRecord.findFirst.mockResolvedValue(record);

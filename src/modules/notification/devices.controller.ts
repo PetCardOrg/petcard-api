@@ -1,4 +1,12 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { DeviceToken } from '@prisma/client';
 import { RegisterDeviceDto } from '@petcardorg/shared';
@@ -28,5 +36,21 @@ export class DevicesController {
   ): Promise<DeviceToken> {
     const tutor = await this.tutorService.findById(user.sub);
     return this.notificationService.registerDevice(tutor.id, dto);
+  }
+
+  @Delete(':token')
+  @Auth(Role.TUTOR)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Descadastrar token de device do tutor (logout)',
+    description:
+      'Só remove token do próprio tutor. Idempotente: responde 204 mesmo ' +
+      'se o token não existe. O token vai na rota com encodeURIComponent.',
+  })
+  async unregister(
+    @CurrentUser() user: JwtPayload,
+    @Param('token') token: string,
+  ): Promise<void> {
+    await this.notificationService.unregisterDevice(user.sub, token);
   }
 }

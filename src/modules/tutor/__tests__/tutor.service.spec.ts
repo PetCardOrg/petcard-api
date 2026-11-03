@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { AuthService } from '../../auth/auth.service';
 import { UploadService } from '../../upload/upload.service';
 import { TutorService } from '../tutor.service';
 
@@ -21,7 +23,8 @@ describe('TutorService: fotos que deixam de ser usadas (AUD API-10)', () => {
     id: 'tutor-1',
     name: 'Maria',
     email: 'maria@example.com',
-    password: 'hash',
+    // Preenchido no beforeAll: excluir a conta confere a senha (AUD API-04).
+    password: '',
     phone: null,
     profileImageUrl: `${BUCKET}/tutors/antiga.png`,
     googleId: null,
@@ -29,6 +32,10 @@ describe('TutorService: fotos que deixam de ser usadas (AUD API-10)', () => {
     createdAt: new Date(),
     updatedAt: new Date(),
   };
+
+  beforeAll(async () => {
+    tutor.password = await bcrypt.hash('Senha@123', 4);
+  });
 
   beforeEach(async () => {
     prisma = {
@@ -50,6 +57,7 @@ describe('TutorService: fotos que deixam de ser usadas (AUD API-10)', () => {
         TutorService,
         { provide: PrismaService, useValue: prisma },
         { provide: UploadService, useValue: uploadService },
+        { provide: AuthService, useValue: {} },
       ],
     }).compile();
 
@@ -88,7 +96,7 @@ describe('TutorService: fotos que deixam de ser usadas (AUD API-10)', () => {
       },
     ]);
 
-    await service.removeById('tutor-1');
+    await service.removeById('tutor-1', { senha_atual: 'Senha@123' });
 
     expect(prisma.pet.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { tutorId: 'tutor-1' } }),

@@ -322,13 +322,81 @@ describe('VeterinarioService', () => {
       prisma.veterinario.findUnique
         .mockResolvedValueOnce(vetFixture)
         .mockResolvedValueOnce({ ...vetFixture, id: 'vet-2' });
+      bcrypt.compare.mockResolvedValue(true);
 
       await expect(
-        service.update('vet-1', { email: 'Outro@Vet.com' }),
+        service.update('vet-1', {
+          email: 'Outro@Vet.com',
+          senha_atual: 'SenhaAntiga1!',
+        }),
       ).rejects.toThrow(ConflictException);
       expect(prisma.veterinario.findUnique).toHaveBeenLastCalledWith({
         where: { email: 'outro@vet.com' },
       });
+    });
+  });
+
+  /**
+   * Trocar o e-mail também pede a senha atual (AUD API-04): com só o token,
+   * quem o pegasse trocava o e-mail, pedia "esqueci a senha" e ficava com a
+   * conta.
+   */
+  describe('troca de e-mail', () => {
+    it('recusa sem senha atual', async () => {
+      prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);
+
+      await expect(
+        service.update('vet-1', { email: 'novo@vet.com' }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(prisma.veterinario.update).not.toHaveBeenCalled();
+    });
+
+    it('recusa com senha atual errada, antes de checar se o e-mail está livre', async () => {
+      prisma.veterinario.findUnique.mockResolvedValueOnce(vetFixture);
+      bcrypt.compare.mockResolvedValue(false);
+
+      await expect(
+        service.update('vet-1', {
+          email: 'novo@vet.com',
+          senha_atual: 'chute',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(prisma.veterinario.findUnique).toHaveBeenCalledTimes(1);
+      expect(prisma.veterinario.update).not.toHaveBeenCalled();
+    });
+
+    it('troca com a senha atual correta', async () => {
+      prisma.veterinario.findUnique
+        .mockResolvedValueOnce(vetFixture)
+        .mockResolvedValueOnce(null);
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+      bcrypt.compare.mockResolvedValue(true);
+
+      await service.update('vet-1', {
+        email: 'novo@vet.com',
+        senha_atual: 'SenhaAntiga1!',
+      });
+
+      expect(bcrypt.compare).toHaveBeenCalledWith(
+        'SenhaAntiga1!',
+        vetFixture.password,
+      );
+      expect(prisma.veterinario.update).toHaveBeenCalled();
+    });
+
+    it('não pede senha quando o e-mail enviado é o mesmo', async () => {
+      prisma.veterinario.findUnique
+        .mockResolvedValueOnce(vetFixture)
+        .mockResolvedValueOnce(vetFixture);
+      prisma.veterinario.update.mockResolvedValue(vetFixture);
+
+      // Salvar o perfil sem mexer no e-mail não é troca de identidade.
+      await service.update('vet-1', {
+        nome: 'Dr. Carlos S',
+        email: 'carlos@vet.com',
+      });
+
+      expect(bcrypt.compare).not.toHaveBeenCalled();
     });
   });
 
