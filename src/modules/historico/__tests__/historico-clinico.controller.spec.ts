@@ -52,7 +52,7 @@ describe('HistoricoClinicoController (integração)', () => {
       .expect(200);
 
     expect(res.body.pet_nome).toBe('Rex');
-    expect(historico.doPet).toHaveBeenCalledWith('pet-1', 'tutor-1', false);
+    expect(historico.doPet).toHaveBeenCalledWith('pet-1', 'tutor-1', false, {});
   });
 
   it('marca o solicitante como veterinário quando o papel é VET', async () => {
@@ -62,7 +62,7 @@ describe('HistoricoClinicoController (integração)', () => {
       .get('/pets/pet-1/historico-clinico')
       .expect(200);
 
-    expect(historico.doPet).toHaveBeenCalledWith('pet-1', 'vet-1', true);
+    expect(historico.doPet).toHaveBeenCalledWith('pet-1', 'vet-1', true, {});
   });
 
   it('exige autenticação (401)', async () => {

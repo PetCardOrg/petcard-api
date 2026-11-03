@@ -142,9 +142,24 @@ describe('Nota clínica — escrita reversa (e2e)', () => {
       .expect(201);
     const notaId = criada.body.id as string;
 
+    // Sem a senha (400) e com a errada (401), a conta fica (AUD API-28).
     await request(app.getHttpServer())
       .delete('/veterinarios/me')
       .set('Authorization', `Bearer ${vetToken}`)
+      .expect(400);
+    await request(app.getHttpServer())
+      .delete('/veterinarios/me')
+      .set('Authorization', `Bearer ${vetToken}`)
+      .send({ senha_atual: 'chute-errado' })
+      .expect(401);
+    expect(
+      await prisma.veterinario.findUnique({ where: { id: vetId } }),
+    ).not.toBeNull();
+
+    await request(app.getHttpServer())
+      .delete('/veterinarios/me')
+      .set('Authorization', `Bearer ${vetToken}`)
+      .send({ senha_atual: 'senha123' })
       .expect(204);
 
     expect(

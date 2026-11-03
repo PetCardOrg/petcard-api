@@ -312,4 +312,73 @@ describe('Histórico clínico (e2e)', () => {
     expect(item?.veterinarian_name).toBe('Dra. Camila');
     expect(item?.veterinario_crmv).toBe('CRMV-CE-1234');
   });
+
+  describe('paginação por cursor (AUD API-22)', () => {
+    /** Três registros, dois com o mesmo `createdAt` para exercitar o desempate. */
+    async function tresRegistros(): Promise<void> {
+      const medId = await prescreverMedicacao();
+      const vacina = await request(app.getHttpServer())
+        .post(`/pets/${petId}/vaccines`)
+        .set('Authorization', `Bearer ${tutorToken}`)
+        .send({ pet_id: petId, vaccine_name: 'V10', applied_at: '2026-02-01' })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/pets/${petId}/clinical-notes`)
+        .set('Authorization', `Bearer ${vetToken}`)
+        .send({ diagnostico: 'Otite externa' })
+        .expect(201);
+      const mesmoInstante = new Date('2026-03-01T12:00:00Z');
+      await prisma.medicationRecord.update({
+        where: { id: medId },
+        data: { createdAt: mesmoInstante },
+      });
+      await prisma.vaccineRecord.update({
+        where: { id: vacina.body.id as string },
+        data: { createdAt: mesmoInstante },
+      });
+    }
+
+    function historico(query = '') {
+      return request(app.getHttpServer())
+        .get(`/pets/${petId}/historico-clinico${query}`)
+        .set('Authorization', `Bearer ${tutorToken}`);
+    }
+
+    it('sem limit devolve tudo, sem cursor (como antes)', async () => {
+      await tresRegistros();
+
+      const res = await historico().expect(200);
+
+      expect(res.body.itens).toHaveLength(3);
+      expect(res.body.proximo_cursor).toBeUndefined();
+    });
+
+    it('as páginas juntas dão o histórico completo, na mesma ordem', async () => {
+      await tresRegistros();
+      const completo = (await historico().expect(200))
+        .body as HistoricoClinicoResponseDto;
+
+      const pagina1 = (await historico('?limit=2').expect(200))
+        .body as HistoricoClinicoResponseDto;
+      expect(pagina1.itens).toHaveLength(2);
+      expect(pagina1.proximo_cursor).toEqual(expect.any(String));
+
+      const pagina2 = (
+        await historico(
+          `?limit=2&cursor=${encodeURIComponent(pagina1.proximo_cursor!)}`,
+        ).expect(200)
+      ).body as HistoricoClinicoResponseDto;
+      expect(pagina2.itens).toHaveLength(1);
+      expect(pagina2.proximo_cursor).toBeUndefined();
+
+      expect(
+        [...pagina1.itens, ...pagina2.itens].map((i) => i.entidade_id),
+      ).toEqual(completo.itens.map((i) => i.entidade_id));
+    });
+
+    it('recusa limit fora do intervalo e cursor inválido (400)', async () => {
+      await historico('?limit=0').expect(400);
+      await historico('?limit=2&cursor=nao-e-um-cursor').expect(400);
+    });
+  });
 });

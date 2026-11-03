@@ -9,6 +9,7 @@ import * as bcrypt from 'bcrypt';
 import { BCRYPT_ROUNDS } from '../../common/crypto/password.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  DeleteVeterinarioDto,
   PetAtendidoResponseDto,
   UpdateVeterinarioDto,
   normalizeEmail,
@@ -155,8 +156,13 @@ export class VeterinarioService {
     }
   }
 
-  async remove(id: string): Promise<void> {
+  /**
+   * Excluir a conta é irreversível: além do token, exige a senha atual (AUD
+   * API-28), como na troca de e-mail e de senha.
+   */
+  async remove(id: string, dto: DeleteVeterinarioDto): Promise<void> {
     const vet = await this.buscarOuFalhar(id);
+    await this.assertSenhaAtualConfere(vet, dto.senha_atual);
     await this.prisma.veterinario.delete({ where: { id } });
     await this.uploadService.discardFile(vet.photoUrl);
   }
