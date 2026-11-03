@@ -28,16 +28,14 @@ import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import {
   AdicionarPetAtendidoDto,
+  CrmvStatusResponseDto,
   DeleteVeterinarioDto,
   PetAtendidoResponseDto,
   UpdateVeterinarioDto,
 } from '@petcardorg/shared';
 import { LIMITE_DE_ROTA_CARA } from '../../config/throttler.config';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
-import {
-  CrmvVerificationService,
-  type CrmvVerificationStatus,
-} from './crmv/crmv-verification.service';
+import { CrmvVerificationService } from './crmv/crmv-verification.service';
 import {
   DashboardPetItem,
   PaginatedResponse,
@@ -64,7 +62,7 @@ export class VeterinarioController {
   @ApiOperation({ summary: 'Situação da verificação do meu CRMV' })
   async crmvStatus(
     @CurrentUser() user: JwtPayload,
-  ): Promise<CrmvVerificationStatus> {
+  ): Promise<CrmvStatusResponseDto> {
     return this.crmvVerification.getStatus(user.sub);
   }
 
@@ -90,7 +88,7 @@ export class VeterinarioController {
   async verificarCrmv(
     @CurrentUser() user: JwtPayload,
     @Query('force') force?: string,
-  ): Promise<CrmvVerificationStatus> {
+  ): Promise<CrmvStatusResponseDto> {
     return this.crmvVerification.verify(user.sub, force === 'true');
   }
 
