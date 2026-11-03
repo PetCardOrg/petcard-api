@@ -1,8 +1,8 @@
 /**
  * Helpers para classificar erros da API do Google Calendar.
  *
- * O `googleapis` expõe o status ora em `code`, ora em `response.status`,
- * dependendo do caminho que levantou o erro.
+ * O cliente do Google (`@googleapis/calendar`) expõe o status ora em `code`,
+ * ora em `response.status`, dependendo do caminho que levantou o erro.
  */
 export function extractGoogleStatus(error: unknown): number | undefined {
   if (typeof error !== 'object' || error === null) return undefined;

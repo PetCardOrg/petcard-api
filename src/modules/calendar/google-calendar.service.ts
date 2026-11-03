@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { google, calendar_v3 } from 'googleapis';
+import { calendar, calendar_v3 } from '@googleapis/calendar';
 import { OAuth2Client } from 'google-auth-library';
 import { Appointment } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -149,11 +149,7 @@ export class GoogleCalendarService {
   }
 
   private createOAuth2Client(): OAuth2Client {
-    return new google.auth.OAuth2(
-      this.clientId,
-      this.clientSecret,
-      this.redirectUri,
-    );
+    return new OAuth2Client(this.clientId, this.clientSecret, this.redirectUri);
   }
 
   /**
@@ -589,6 +585,6 @@ export class GoogleCalendarService {
       });
     });
 
-    return google.calendar({ version: 'v3', auth: oauth2Client });
+    return calendar({ version: 'v3', auth: oauth2Client });
   }
 }
