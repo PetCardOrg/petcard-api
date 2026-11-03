@@ -1,5 +1,10 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
-import { ApiNotFoundResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import {
   HistoricoClinicoQueryDto,
   HistoricoClinicoResponseDto,
@@ -26,6 +31,8 @@ export class HistoricoClinicoController {
       'com `limit`, devolve até `limit` itens e, se houver mais, o ' +
       '`proximo_cursor` para a página seguinte. Sem `limit`, devolve tudo.',
   })
+  // O plugin do Swagger não infere tipos de pacote externo (DTOs do shared).
+  @ApiOkResponse({ type: HistoricoClinicoResponseDto })
   @ApiNotFoundResponse({ description: 'Pet não encontrado' })
   async doPet(
     @Param('petId') petId: string,
