@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-member-access */
-import { BadRequestException, HttpException } from '@nestjs/common';
+import { BadRequestException, HttpException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PlacesService } from '../places.service';
 
@@ -60,6 +60,7 @@ describe('PlacesService', () => {
   afterEach(() => {
     global.fetch = originalFetch;
     jest.clearAllMocks();
+    jest.restoreAllMocks();
   });
 
   it('lança erro no boot quando GOOGLE_MAPS_API_KEY está ausente', () => {
@@ -281,8 +282,40 @@ describe('PlacesService', () => {
   it('lança 502 (BAD_GATEWAY) quando a resposta do Google não é ok', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
+      status: 429,
       text: async () => 'quota exceeded',
     });
+    const logError = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+
+    const service = new PlacesService(makeConfig('key'));
+    expect.assertions(4);
+    try {
+      await service.searchNearbyVetClinics({
+        lat: userLat,
+        lng: userLng,
+        radiusMeters: 5000,
+      });
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(502);
+      // O corpo do Google fica no log, não na resposta ao cliente.
+      expect((error as HttpException).message).not.toContain('quota');
+      expect(logError).toHaveBeenCalledWith(
+        expect.stringContaining('quota exceeded'),
+      );
+    }
+  });
+
+  it('lança 502 quando o Google responde algo que não é JSON', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => {
+        throw new SyntaxError('Unexpected token <');
+      },
+    });
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
     const service = new PlacesService(makeConfig('key'));
     expect.assertions(2);
@@ -473,8 +506,35 @@ describe('PlacesService', () => {
     it('lança 502 quando a resposta do Google não é ok', async () => {
       global.fetch = jest.fn().mockResolvedValue({
         ok: false,
+        status: 429,
         text: async () => 'quota exceeded',
       });
+      const logError = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+
+      const service = new PlacesService(makeConfig('key'));
+      expect.assertions(4);
+      try {
+        await service.autocomplete({ input: 'petshop' });
+      } catch (error) {
+        expect(error).toBeInstanceOf(HttpException);
+        expect((error as HttpException).getStatus()).toBe(502);
+        expect((error as HttpException).message).not.toContain('quota');
+        expect(logError).toHaveBeenCalledWith(
+          expect.stringContaining('quota exceeded'),
+        );
+      }
+    });
+
+    it('lança 502 quando o Google responde algo que não é JSON', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => {
+          throw new SyntaxError('Unexpected token <');
+        },
+      });
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
       const service = new PlacesService(makeConfig('key'));
       expect.assertions(2);

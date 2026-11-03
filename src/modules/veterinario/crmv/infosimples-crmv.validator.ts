@@ -97,7 +97,21 @@ export class InfosimplesCrmvValidator implements CrmvValidator {
       );
     }
 
-    const body = (await response.json()) as InfosimplesResponse;
+    // Um corpo que não é JSON (página de erro de um proxy, por exemplo) é
+    // falha do serviço: vira 502 em vez de estourar como 500.
+    let body: InfosimplesResponse;
+    try {
+      body = (await response.json()) as InfosimplesResponse;
+    } catch (error) {
+      this.logger.error(
+        `Resposta inválida ao consultar o CRMV ${crmv}/${uf} (HTTP ${response.status})`,
+        error instanceof Error ? error.stack : error,
+      );
+      throw new HttpException(
+        'Serviço de validação de CRMV indisponível no momento.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
 
     // O HTTP é sempre 200; o resultado vem no `code` do corpo. A partir de 700
     // o problema é da conta (token inválido, sem crédito) — não é culpa do
