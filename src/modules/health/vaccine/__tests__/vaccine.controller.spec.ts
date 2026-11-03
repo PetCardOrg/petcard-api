@@ -199,6 +199,46 @@ describe('VaccineController (integração)', () => {
     expect(res.body.vaccine_name).toBe('Raiva Plus');
   });
 
+  /**
+   * `null` no PATCH limpa o campo opcional (AUD API-24); a web manda isso
+   * quando a pessoa apaga o campo no formulário (WEB-05). Antes a data nula
+   * virava `undefined` e o valor antigo ficava.
+   */
+  it('PATCH com null limpa os campos opcionais (200)', async () => {
+    prisma.vaccineRecord.findFirst.mockResolvedValue(record);
+    prisma.vaccineRecord.update.mockResolvedValue(record);
+
+    await request(harness.app.getHttpServer())
+      .patch('/vaccines/vac-1')
+      .send({ next_dose_at: null, notes: null, veterinarian_name: null })
+      .expect(200);
+
+    const [[chamada]] = prisma.vaccineRecord.update.mock.calls as Array<
+      [{ data: Record<string, unknown> }]
+    >;
+    expect(chamada.data).toEqual(
+      expect.objectContaining({
+        nextDoseAt: null,
+        notes: null,
+        veterinarianName: null,
+      }),
+    );
+  });
+
+  it.each(['vaccine_name', 'applied_at'])(
+    'PATCH recusa null no campo obrigatório %s (400)',
+    async (campo) => {
+      prisma.vaccineRecord.findFirst.mockResolvedValue(record);
+
+      await request(harness.app.getHttpServer())
+        .patch('/vaccines/vac-1')
+        .send({ [campo]: null })
+        .expect(400);
+
+      expect(prisma.vaccineRecord.update).not.toHaveBeenCalled();
+    },
+  );
+
   it('DELETE remove o registro do dono (204)', async () => {
     prisma.vaccineRecord.findFirst.mockResolvedValue(record);
     prisma.vaccineRecord.delete.mockResolvedValue(record);

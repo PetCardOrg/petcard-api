@@ -21,6 +21,7 @@ import {
   assertPodeRemover,
   nomeDoVeterinario,
 } from '../autoria-clinica';
+import { assertObrigatoriosNaoNulos, dataAnulavel } from '../campos-anulaveis';
 
 type VaccineInput = Omit<CreateVaccineRecordDto, 'pet_id'>;
 
@@ -132,6 +133,7 @@ export class VaccineService {
     isVet: boolean,
     dto: Omit<UpdateVaccineRecordDto, 'pet_id'>,
   ): Promise<VaccineRecordResponseDto> {
+    assertObrigatoriosNaoNulos(dto, ['vaccine_name', 'applied_at']);
     const record = await this.getRecord(id);
     await this.petService.assertAccess(record.petId, userId, isVet);
     assertPodeEditar(record, userId, isVet);
@@ -142,7 +144,7 @@ export class VaccineService {
         data: {
           vaccineName: dto.vaccine_name,
           appliedAt: dto.applied_at ? new Date(dto.applied_at) : undefined,
-          nextDoseAt: dto.next_dose_at ? new Date(dto.next_dose_at) : undefined,
+          nextDoseAt: dataAnulavel(dto.next_dose_at),
           veterinarianName: dto.veterinarian_name,
           notes: dto.notes,
         },
