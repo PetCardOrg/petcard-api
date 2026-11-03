@@ -60,6 +60,8 @@ export class VeterinarioController {
   @Get('me/crmv')
   @Auth(Role.VET)
   @ApiOperation({ summary: 'Situação da verificação do meu CRMV' })
+  // O plugin do Swagger não infere tipos de pacote externo (DTOs do shared).
+  @ApiOkResponse({ type: CrmvStatusResponseDto })
   async crmvStatus(
     @CurrentUser() user: JwtPayload,
   ): Promise<CrmvStatusResponseDto> {
@@ -85,6 +87,7 @@ export class VeterinarioController {
       'Rota com limite próprio, mais apertado que o das rotas de login.',
   })
   @ApiQuery({ name: 'force', required: false, type: Boolean })
+  @ApiOkResponse({ type: CrmvStatusResponseDto })
   async verificarCrmv(
     @CurrentUser() user: JwtPayload,
     @Query('force') force?: string,
