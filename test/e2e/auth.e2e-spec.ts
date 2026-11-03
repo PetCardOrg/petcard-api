@@ -447,6 +447,24 @@ describe('Auth (e2e)', () => {
           .expect(401);
       });
 
+      it('recusa a troca de e-mail com a senha atual errada (AUD API-04)', async () => {
+        const { token } = await createAndLoginVet(app, prisma, {
+          password: 'SenhaVet1!',
+        });
+
+        await request(app.getHttpServer())
+          .patch('/veterinarios/me')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ email: 'novo@petcard.com', senha_atual: 'chute' })
+          .expect(401);
+
+        await request(app.getHttpServer())
+          .patch('/veterinarios/me')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ email: 'novo@petcard.com', senha_atual: 'SenhaVet1!' })
+          .expect(200);
+      });
+
       it('editar outro campo não pede senha nem derruba a sessão', async () => {
         const { token } = await createAndLoginVet(app, prisma, {
           password: 'SenhaVet1!',

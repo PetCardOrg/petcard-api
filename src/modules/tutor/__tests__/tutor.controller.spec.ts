@@ -1,4 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+import * as bcrypt from 'bcrypt';
 import request from 'supertest';
 import {
   createControllerTestApp,
@@ -7,6 +8,7 @@ import {
   VET,
 } from '../../../../test/utils/controller-harness';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { AuthService } from '../../auth/auth.service';
 import { UploadService } from '../../upload/upload.service';
 import { TutorController } from '../tutor.controller';
 import { TutorService } from '../tutor.service';
@@ -27,8 +29,8 @@ describe('TutorController (integração)', () => {
     name: 'Alice',
     email: 'tutor@petcard.com',
     // O hash vem do banco em toda leitura; o que importa é ele não sair na
-    // resposta.
-    password: '$2b$12$hashdoTutor',
+    // resposta. Preenchido no beforeAll: a troca de e-mail confere a senha.
+    password: '',
     phone: null,
     profileImageUrl: null,
     role: 'TUTOR',
@@ -37,6 +39,7 @@ describe('TutorController (integração)', () => {
   };
 
   beforeAll(async () => {
+    tutor.password = await bcrypt.hash(SENHA, 4);
     prisma = {
       tutor: { findUnique: jest.fn(), update: jest.fn(), delete: jest.fn() },
       petAtendido: { findFirst: jest.fn() },
@@ -52,6 +55,7 @@ describe('TutorController (integração)', () => {
           provide: UploadService,
           useValue: { assertBucketUrl: jest.fn(), discardFile: jest.fn() },
         },
+        { provide: AuthService, useValue: {} },
       ],
     });
   });
@@ -153,8 +157,26 @@ describe('TutorController (integração)', () => {
         expect(res.body.email_verified).toBe(false);
         expect(prisma.tutor.update).toHaveBeenCalledWith({
           where: { id: 'tutor-1' },
-          data: { email: 'novo@petcard.com', emailVerifiedAt: null },
+          data: {
+            email: 'novo@petcard.com',
+            emailVerifiedAt: null,
+            passwordChangedAt: expect.any(Date),
+          },
         });
+      });
+
+      it('recusa a troca sem senha_atual (400) e com senha errada (401)', async () => {
+        await request(harness.app.getHttpServer())
+          .patch('/tutors/me')
+          .send({ email: 'novo@petcard.com' })
+          .expect(400);
+
+        await request(harness.app.getHttpServer())
+          .patch('/tutors/me')
+          .send({ email: 'novo@petcard.com', senha_atual: 'Errada@123' })
+          .expect(401);
+
+        expect(prisma.tutor.update).not.toHaveBeenCalled();
       });
 
       it('responde 409 quando o endereço já é de outra conta', async () => {
@@ -271,6 +293,19 @@ describe('TutorController (integração)', () => {
       expect(prisma.tutor.delete).toHaveBeenCalledWith({
         where: { id: 'tutor-1' },
       });
+    });
+
+    it('recusa sem senha_atual (400) e com senha errada (401)', async () => {
+      await request(harness.app.getHttpServer())
+        .delete('/tutors/me')
+        .expect(400);
+
+      await request(harness.app.getHttpServer())
+        .delete('/tutors/me')
+        .send({ senha_atual: 'Errada@123' })
+        .expect(401);
+
+      expect(prisma.tutor.delete).not.toHaveBeenCalled();
     });
 
     it('proíbe VET de apagar conta de tutor (403)', async () => {
