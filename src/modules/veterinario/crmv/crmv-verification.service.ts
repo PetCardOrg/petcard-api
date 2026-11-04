@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { CrmvMotivoRecusa, CrmvStatusResponseDto } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
   CRMV_VALIDATOR,
@@ -36,11 +37,25 @@ const CRMV_PATTERN =
 const CONSULTA_TTL_MS = 30 * 60 * 1000;
 const CONSULTA_MAX_ENTRADAS = 500;
 
-export type CrmvVerificationStatus = {
-  verified: boolean;
-  situacao?: string;
-  verified_at?: Date;
-};
+/**
+ * Resposta do status do CRMV, com o `motivo` estável da recusa quando há um
+ * que o cliente trata à parte (AUD WEB-17). O `motivo` sai da `situacao`
+ * gravada, então vale também para recusas antigas, sem migration.
+ */
+function paraStatus(
+  verified: boolean,
+  situacao: string | undefined,
+  verifiedAt: Date | undefined,
+): CrmvStatusResponseDto {
+  return {
+    verified,
+    situacao,
+    ...(situacao === SITUACAO_NOME_DIVERGENTE
+      ? { motivo: CrmvMotivoRecusa.NOME_DIVERGENTE }
+      : {}),
+    verified_at: verifiedAt,
+  };
+}
 
 /** Resposta de `GET /auth/veterinario/crmv` (cadastro com CRMV primeiro). */
 export type CrmvConsulta = {
@@ -93,18 +108,18 @@ export class CrmvVerificationService {
     return { numero, uf };
   }
 
-  async getStatus(veterinarioId: string): Promise<CrmvVerificationStatus> {
+  async getStatus(veterinarioId: string): Promise<CrmvStatusResponseDto> {
     const vet = await this.prisma.veterinario.findUnique({
       where: { id: veterinarioId },
       select: { crmvVerifiedAt: true, crmvSituacao: true },
     });
     if (!vet) throw new NotFoundException('Veterinário não encontrado');
 
-    return {
-      verified: this.isStillValid(vet.crmvVerifiedAt),
-      situacao: vet.crmvSituacao ?? undefined,
-      verified_at: vet.crmvVerifiedAt ?? undefined,
-    };
+    return paraStatus(
+      this.isStillValid(vet.crmvVerifiedAt),
+      vet.crmvSituacao ?? undefined,
+      vet.crmvVerifiedAt ?? undefined,
+    );
   }
 
   /**
@@ -116,7 +131,7 @@ export class CrmvVerificationService {
   async verify(
     veterinarioId: string,
     force = false,
-  ): Promise<CrmvVerificationStatus> {
+  ): Promise<CrmvStatusResponseDto> {
     const vet = await this.prisma.veterinario.findUnique({
       where: { id: veterinarioId },
       select: {
@@ -129,11 +144,11 @@ export class CrmvVerificationService {
     if (!vet) throw new NotFoundException('Veterinário não encontrado');
 
     if (!force && this.isStillValid(vet.crmvVerifiedAt)) {
-      return {
-        verified: true,
-        situacao: vet.crmvSituacao ?? undefined,
-        verified_at: vet.crmvVerifiedAt ?? undefined,
-      };
+      return paraStatus(
+        true,
+        vet.crmvSituacao ?? undefined,
+        vet.crmvVerifiedAt ?? undefined,
+      );
     }
 
     const { numero, uf } = this.parseCrmv(vet.crmv);
@@ -152,11 +167,11 @@ export class CrmvVerificationService {
       `CRMV ${vet.crmv} verificado: ${resultado.valid ? 'regular' : 'recusado'} (${resultado.situacao ?? 'sem situação'})`,
     );
 
-    return {
-      verified: resultado.valid,
-      situacao: resultado.situacao,
-      verified_at: verifiedAt ?? undefined,
-    };
+    return paraStatus(
+      resultado.valid,
+      resultado.situacao,
+      verifiedAt ?? undefined,
+    );
   }
 
   /**

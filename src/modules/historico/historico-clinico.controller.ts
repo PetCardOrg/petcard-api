@@ -1,6 +1,14 @@
-import { Controller, Get, Param } from '@nestjs/common';
-import { ApiNotFoundResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { HistoricoClinicoResponseDto } from '@petcardorg/shared';
+import { Controller, Get, Param, Query } from '@nestjs/common';
+import {
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
+import {
+  HistoricoClinicoQueryDto,
+  HistoricoClinicoResponseDto,
+} from '@petcardorg/shared';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
@@ -19,13 +27,18 @@ export class HistoricoClinicoController {
     description:
       'Linha do tempo com notas, vacinas, vermífugos e medicações. Inclui ' +
       'registros excluídos, marcados por `excluido`, e a trilha de ações de ' +
-      'cada um com o responsável e o CRMV.',
+      'cada um com o responsável e o CRMV. Paginação opcional por cursor: ' +
+      'com `limit`, devolve até `limit` itens e, se houver mais, o ' +
+      '`proximo_cursor` para a página seguinte. Sem `limit`, devolve tudo.',
   })
+  // O plugin do Swagger não infere tipos de pacote externo (DTOs do shared).
+  @ApiOkResponse({ type: HistoricoClinicoResponseDto })
   @ApiNotFoundResponse({ description: 'Pet não encontrado' })
   async doPet(
     @Param('petId') petId: string,
     @CurrentUser() user: JwtPayload,
+    @Query() query: HistoricoClinicoQueryDto,
   ): Promise<HistoricoClinicoResponseDto> {
-    return this.historico.doPet(petId, user.sub, user.role === Role.VET);
+    return this.historico.doPet(petId, user.sub, user.role === Role.VET, query);
   }
 }

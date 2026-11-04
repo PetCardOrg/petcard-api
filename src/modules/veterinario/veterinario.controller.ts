@@ -28,15 +28,14 @@ import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import {
   AdicionarPetAtendidoDto,
+  CrmvStatusResponseDto,
+  DeleteVeterinarioDto,
   PetAtendidoResponseDto,
   UpdateVeterinarioDto,
 } from '@petcardorg/shared';
 import { LIMITE_DE_ROTA_CARA } from '../../config/throttler.config';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
-import {
-  CrmvVerificationService,
-  type CrmvVerificationStatus,
-} from './crmv/crmv-verification.service';
+import { CrmvVerificationService } from './crmv/crmv-verification.service';
 import {
   DashboardPetItem,
   PaginatedResponse,
@@ -61,9 +60,11 @@ export class VeterinarioController {
   @Get('me/crmv')
   @Auth(Role.VET)
   @ApiOperation({ summary: 'Situação da verificação do meu CRMV' })
+  // O plugin do Swagger não infere tipos de pacote externo (DTOs do shared).
+  @ApiOkResponse({ type: CrmvStatusResponseDto })
   async crmvStatus(
     @CurrentUser() user: JwtPayload,
-  ): Promise<CrmvVerificationStatus> {
+  ): Promise<CrmvStatusResponseDto> {
     return this.crmvVerification.getStatus(user.sub);
   }
 
@@ -86,10 +87,11 @@ export class VeterinarioController {
       'Rota com limite próprio, mais apertado que o das rotas de login.',
   })
   @ApiQuery({ name: 'force', required: false, type: Boolean })
+  @ApiOkResponse({ type: CrmvStatusResponseDto })
   async verificarCrmv(
     @CurrentUser() user: JwtPayload,
     @Query('force') force?: string,
-  ): Promise<CrmvVerificationStatus> {
+  ): Promise<CrmvStatusResponseDto> {
     return this.crmvVerification.verify(user.sub, force === 'true');
   }
 
@@ -116,9 +118,17 @@ export class VeterinarioController {
   @Delete('me')
   @Auth(Role.VET)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Excluir minha conta de veterinário' })
-  async removeMe(@CurrentUser() user: JwtPayload): Promise<void> {
-    return this.veterinarioService.remove(user.sub);
+  @ApiOperation({
+    summary: 'Excluir minha conta de veterinário',
+    description:
+      'Exige `senha_atual` no corpo: só o token não basta para uma ação ' +
+      'irreversível. Sem a senha responde 400; com a senha errada, 401.',
+  })
+  async removeMe(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: DeleteVeterinarioDto,
+  ): Promise<void> {
+    return this.veterinarioService.remove(user.sub, dto);
   }
 
   @Get('dashboard/pets')

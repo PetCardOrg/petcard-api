@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { CrmvMotivoRecusa } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
   CrmvVerificationService,
@@ -117,6 +118,8 @@ describe('CrmvVerificationService', () => {
 
       expect(resultado.verified).toBe(false);
       expect(resultado.situacao).toBe(SITUACAO_NOME_DIVERGENTE);
+      // Código estável para o cliente, que não deve comparar o texto (AUD WEB-17).
+      expect(resultado.motivo).toBe(CrmvMotivoRecusa.NOME_DIVERGENTE);
       const [[update]] = prisma.veterinario.update.mock.calls as Array<
         [{ data: { crmvVerifiedAt: Date | null; crmvSituacao?: string } }]
       >;
@@ -211,9 +214,20 @@ describe('CrmvVerificationService', () => {
         crmvSituacao: 'Ativo',
       });
 
+      const status = await service.getStatus('vet-1');
+      expect(status).toMatchObject({ verified: true, situacao: 'Ativo' });
+      expect(status.motivo).toBeUndefined();
+    });
+
+    it('traz o motivo da recusa por nome divergente (AUD WEB-17)', async () => {
+      prisma.veterinario.findUnique.mockResolvedValue({
+        crmvVerifiedAt: null,
+        crmvSituacao: SITUACAO_NOME_DIVERGENTE,
+      });
+
       await expect(service.getStatus('vet-1')).resolves.toMatchObject({
-        verified: true,
-        situacao: 'Ativo',
+        verified: false,
+        motivo: CrmvMotivoRecusa.NOME_DIVERGENTE,
       });
     });
   });

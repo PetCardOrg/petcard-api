@@ -16,8 +16,13 @@ const mockCalendarEvents = {
   update: jest.fn(),
   delete: jest.fn(),
 };
-const mockOAuth2Ctor = jest.fn(() => mockOAuth2Instance);
-const mockCalendarFactory = jest.fn(() => ({ events: mockCalendarEvents }));
+const mockOAuth2Ctor = jest.fn<typeof mockOAuth2Instance, unknown[]>(
+  () => mockOAuth2Instance,
+);
+const mockCalendarFactory = jest.fn<
+  { events: typeof mockCalendarEvents },
+  unknown[]
+>(() => ({ events: mockCalendarEvents }));
 
 jest.mock('google-auth-library', () => ({
   OAuth2Client: function (...args: unknown[]) {

@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+import * as bcrypt from 'bcrypt';
 import request from 'supertest';
 import {
   createControllerTestApp,
@@ -232,17 +233,29 @@ describe('VeterinarioController (integração)', () => {
       );
     });
 
-    it('DELETE /veterinarios/me apaga a própria conta (204)', async () => {
-      prisma.veterinario.findUnique.mockResolvedValue(vet);
-      prisma.veterinario.delete.mockResolvedValue(vet);
+    it('DELETE /veterinarios/me apaga a própria conta com a senha (204)', async () => {
+      const comSenha = { ...vet, password: bcrypt.hashSync('SenhaAtual1!', 4) };
+      prisma.veterinario.findUnique.mockResolvedValue(comSenha);
+      prisma.veterinario.delete.mockResolvedValue(comSenha);
 
       await request(harness.app.getHttpServer())
         .delete('/veterinarios/me')
+        .send({ senha_atual: 'SenhaAtual1!' })
         .expect(204);
 
       expect(prisma.veterinario.delete).toHaveBeenCalledWith({
         where: { id: VET.sub },
       });
+    });
+
+    it('DELETE /veterinarios/me sem a senha responde 400 e não apaga (AUD API-28)', async () => {
+      prisma.veterinario.findUnique.mockResolvedValue(vet);
+
+      await request(harness.app.getHttpServer())
+        .delete('/veterinarios/me')
+        .expect(400);
+
+      expect(prisma.veterinario.delete).not.toHaveBeenCalled();
     });
 
     it('não expõe rota alguma para o cadastro de outro veterinário', async () => {

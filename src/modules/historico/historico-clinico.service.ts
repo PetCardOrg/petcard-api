@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   AcaoClinica,
   AnexoClinico,
   DewormingRecord,
   MedicationRecord,
   NotaClinica,
+  Prisma,
   VaccineRecord,
 } from '@prisma/client';
 import {
@@ -12,6 +13,7 @@ import {
   AcaoClinicaTipo,
   EntidadeClinica,
   HistoricoClinicoItemResponseDto,
+  HistoricoClinicoQueryDto,
   HistoricoClinicoResponseDto,
   Role,
 } from '@petcardorg/shared';
@@ -57,24 +59,45 @@ export class HistoricoClinicoService {
     petId: string,
     userId: string,
     isVet: boolean,
+    query: HistoricoClinicoQueryDto = {},
   ): Promise<HistoricoClinicoResponseDto> {
     const pet = await this.petService.assertAccess(petId, userId, isVet);
+
+    // Paginação opcional (AUD API-22). Cada tabela traz no máximo `limit + 1`
+    // registros depois do cursor: o topo da página está entre eles, e o que
+    // sobrar diz se há próxima. Sem `limit`, tudo, como antes.
+    const cursor =
+      query.cursor === undefined ? undefined : lerCursor(query.cursor);
+    const pagina = {
+      orderBy: ORDEM_DO_BANCO,
+      ...(query.limit === undefined ? {} : { take: query.limit + 1 }),
+    };
+    const onde = (entidade: EntidadeClinica) => ({
+      petId,
+      ...depoisDoCursor(entidade, cursor),
+    });
 
     const [notas, vacinas, vermifugos, medicacoes, acoes] = await Promise.all([
       // A nota traz a assinatura nas próprias colunas (ADR-009); os outros
       // três registros ainda dependem do vínculo com a conta.
-      this.prisma.notaClinica.findMany({ where: { petId } }),
+      this.prisma.notaClinica.findMany({
+        where: onde(EntidadeClinica.NOTA_CLINICA),
+        ...pagina,
+      }),
       this.prisma.vaccineRecord.findMany({
-        where: { petId },
+        where: onde(EntidadeClinica.VACINA),
         include: ASSINATURA_DO_VET,
+        ...pagina,
       }),
       this.prisma.dewormingRecord.findMany({
-        where: { petId },
+        where: onde(EntidadeClinica.VERMIFUGO),
         include: ASSINATURA_DO_VET,
+        ...pagina,
       }),
       this.prisma.medicationRecord.findMany({
-        where: { petId },
+        where: onde(EntidadeClinica.MEDICACAO),
         include: ASSINATURA_DO_VET,
+        ...pagina,
       }),
       this.prisma.acaoClinica.findMany({
         where: { petId },
@@ -87,14 +110,23 @@ export class HistoricoClinicoService {
     // Ordem de registro, não data clínica: o último lançamento é o topo da
     // pilha, seja ele nota, vacina, vermífugo ou medicação. Vacina aplicada
     // meses atrás e registrada agora entra no topo — foi o que aconteceu.
-    const itens: HistoricoClinicoItemResponseDto[] = [
+    const todos: HistoricoClinicoItemResponseDto[] = [
       ...notas.map((n) => this.itemDaNota(n, porEntidade)),
       ...vacinas.map((v) => this.itemDaVacina(v, porEntidade)),
       ...vermifugos.map((d) => this.itemDoVermifugo(d, porEntidade)),
       ...medicacoes.map((m) => this.itemDaMedicacao(m, porEntidade)),
-    ].sort((a, b) => b.registrado_em.getTime() - a.registrado_em.getTime());
+    ].sort(compararItens);
 
-    return { pet_id: pet.id, pet_nome: pet.name, itens };
+    if (query.limit === undefined || todos.length <= query.limit) {
+      return { pet_id: pet.id, pet_nome: pet.name, itens: todos };
+    }
+    const itens = todos.slice(0, query.limit);
+    return {
+      pet_id: pet.id,
+      pet_nome: pet.name,
+      itens,
+      proximo_cursor: escreverCursor(itens[itens.length - 1]),
+    };
   }
 
   private itemDaNota(
@@ -206,6 +238,89 @@ export class HistoricoClinicoService {
  */
 function diaDeCalendario(data: Date): string {
   return data.toISOString().split('T')[0];
+}
+
+/**
+ * Ordem da linha do tempo: o último registrado primeiro. O desempate existe
+ * para a ordem ser total: sem ele, dois registros do mesmo instante podiam
+ * trocar de lugar entre páginas e um deles sumir.
+ *
+ * Entre tabelas, desempata pelo tipo. Dentro de uma tabela, não compara o id
+ * aqui: mantém a ordem que o banco devolveu (o `sort` é estável). O banco
+ * compara texto pela collation (`en_US` ignora o hífen do UUID), e o cursor
+ * usa a mesma comparação, então a ordem precisa ser a dele.
+ */
+function compararItens(
+  a: HistoricoClinicoItemResponseDto,
+  b: HistoricoClinicoItemResponseDto,
+): number {
+  return (
+    b.registrado_em.getTime() - a.registrado_em.getTime() ||
+    compararTipos(a.entidade, b.entidade)
+  );
+}
+
+/** Os valores do enum são ASCII: a comparação simples é igual em todo lugar. */
+function compararTipos(a: EntidadeClinica, b: EntidadeClinica): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** A mesma ordem, dentro de uma tabela (o tipo é fixo). */
+const ORDEM_DO_BANCO = [
+  { createdAt: 'desc' },
+  { id: 'desc' },
+] satisfies Prisma.NotaClinicaOrderByWithRelationInput[];
+
+/** Posição do último item da página: onde a próxima começa. */
+type Cursor = { t: Date; e: EntidadeClinica; id: string };
+
+function escreverCursor(item: HistoricoClinicoItemResponseDto): string {
+  const dados = {
+    t: item.registrado_em.toISOString(),
+    e: item.entidade,
+    id: item.entidade_id,
+  };
+  return Buffer.from(JSON.stringify(dados)).toString('base64url');
+}
+
+function lerCursor(texto: string): Cursor {
+  try {
+    const dados = JSON.parse(
+      Buffer.from(texto, 'base64url').toString('utf8'),
+    ) as { t?: unknown; e?: unknown; id?: unknown };
+    const t = new Date(String(dados.t));
+    if (
+      Number.isNaN(t.getTime()) ||
+      !Object.values(EntidadeClinica).includes(dados.e as EntidadeClinica) ||
+      typeof dados.id !== 'string'
+    ) {
+      throw new Error('cursor malformado');
+    }
+    return { t, e: dados.e as EntidadeClinica, id: dados.id };
+  } catch {
+    throw new BadRequestException('Cursor de paginação inválido.');
+  }
+}
+
+/**
+ * Filtro de uma tabela para "depois do cursor" na ordem de `compararItens`:
+ * registrado antes, ou no mesmo instante e depois no desempate.
+ */
+function depoisDoCursor(
+  entidade: EntidadeClinica,
+  cursor: Cursor | undefined,
+): { OR?: Array<Record<string, unknown>> } {
+  if (!cursor) return {};
+  const mesmoInstante = compararTipos(entidade, cursor.e);
+  return {
+    OR: [
+      { createdAt: { lt: cursor.t } },
+      ...(mesmoInstante > 0 ? [{ createdAt: cursor.t }] : []),
+      ...(mesmoInstante === 0
+        ? [{ createdAt: cursor.t, id: { lt: cursor.id } }]
+        : []),
+    ],
+  };
 }
 
 function chave(entidade: EntidadeClinica, id: string): string {
