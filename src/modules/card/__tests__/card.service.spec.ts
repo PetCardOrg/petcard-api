@@ -236,7 +236,7 @@ describe('CardService', () => {
       // api#114: a carteira pública não expõe medicações nem notas clínicas.
       expect(result.medications).toEqual([]);
       expect(
-        (result as Record<string, unknown>).clinical_notes,
+        (result as unknown as Record<string, unknown>).clinical_notes,
       ).toBeUndefined();
     });
 
@@ -382,7 +382,7 @@ describe('CardService', () => {
       expect(result.dewormings[0].notes).toBeUndefined();
       expect(result.medications).toEqual([]);
       expect(
-        (result as Record<string, unknown>).clinical_notes,
+        (result as unknown as Record<string, unknown>).clinical_notes,
       ).toBeUndefined();
     });
 

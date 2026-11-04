@@ -21,6 +21,7 @@ describe('VaccineService', () => {
       update: jest.Mock;
       delete: jest.Mock;
     };
+    veterinario?: { findUnique: jest.Mock };
   };
   const calendarSync = { publishHealthRecord: jest.fn() };
   let petService: {
@@ -187,10 +188,9 @@ describe('VaccineService', () => {
   });
   describe('assinatura do veterinário (web#34)', () => {
     it('grava o nome do veterinário logado no registro', async () => {
-      prisma.veterinario = { findUnique: jest.fn() } as never;
-      (
-        prisma as unknown as { veterinario: { findUnique: jest.Mock } }
-      ).veterinario.findUnique.mockResolvedValue({ nome: 'Dra. Camila' });
+      prisma.veterinario = {
+        findUnique: jest.fn().mockResolvedValue({ nome: 'Dra. Camila' }),
+      };
       prisma.vaccineRecord.create.mockResolvedValue(record);
 
       await service.create('pet-1', 'vet-1', true, {
@@ -208,7 +208,7 @@ describe('VaccineService', () => {
     });
 
     it('respeita o nome digitado quando quem registra é o tutor', async () => {
-      prisma.veterinario = { findUnique: jest.fn() } as never;
+      prisma.veterinario = { findUnique: jest.fn() };
       prisma.vaccineRecord.create.mockResolvedValue(record);
 
       await service.create('pet-1', 'tutor-1', false, {
