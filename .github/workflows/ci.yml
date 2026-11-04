@@ -39,6 +39,8 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm run lint:check
+      # O build e o Jest não checam os tipos dos specs (AUD API-29).
+      - run: npm run typecheck
       - run: npm run test:cov
       - run: npm run test:e2e
       - run: npm run build
