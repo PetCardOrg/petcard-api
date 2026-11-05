@@ -269,9 +269,17 @@ async function login() {
 
   @Get('status')
   @Auth(Role.TUTOR)
-  @ApiOperation({ summary: 'Status da conexão com o Google Calendar' })
+  @ApiOperation({
+    summary: 'Status da conexão com o Google Calendar',
+    description:
+      'Só responde `connected: true` se o Google ainda aceita o token do ' +
+      'tutor. Um token revogado ou vencido é descartado aqui, e o app passa ' +
+      'a mostrar "conectar".',
+  })
   async status(@CurrentUser() user: JwtPayload) {
-    const connected = await this.googleCalendarService.isConnected(user.sub);
+    const connected = await this.googleCalendarService.hasWorkingConnection(
+      user.sub,
+    );
     return { connected };
   }
 

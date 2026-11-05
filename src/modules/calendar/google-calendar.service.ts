@@ -9,11 +9,11 @@ import { ConfigService } from '@nestjs/config';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { calendar, calendar_v3 } from '@googleapis/calendar';
 import { OAuth2Client } from 'google-auth-library';
-import { Appointment } from '@prisma/client';
+import { Appointment, GoogleOAuthToken } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EncryptionService } from '../../common/crypto/encryption.service';
 import { resolveTimeZone } from '../../common/time/timezone';
-import { isAlreadyGoneError } from './google-api-error';
+import { isAlreadyGoneError, isPermanentAuthError } from './google-api-error';
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
 
@@ -254,6 +254,45 @@ export class GoogleCalendarService {
       where: { tutorId },
     });
     return !!token;
+  }
+
+  /**
+   * A conexão existe e o Google ainda a aceita.
+   *
+   * `isConnected` só prova que há uma linha de token guardada. Um token morto
+   * (revogado, ou vencido aos 7 dias no modo "Testando") passava por conectado
+   * até um sync falhar, e o banner do app dizia "conectado" enquanto os
+   * agendamentos deixavam de ir para a agenda. Aqui o token é posto à prova:
+   * `getAccessToken` só chama o Google quando o access token já venceu.
+   *
+   * Recusa definitiva (`invalid_grant`, 401) descarta o token, e o app passa a
+   * mostrar "conectar". Falha passageira (rede, 5xx do Google) não prova nada
+   * sobre o token: mantém "conectado" em vez de desconectar o tutor por engano.
+   */
+  async hasWorkingConnection(tutorId: string): Promise<boolean> {
+    const token = await this.prisma.googleOAuthToken.findUnique({
+      where: { tutorId },
+    });
+    if (!token) return false;
+
+    try {
+      await this.authorizedClient(tutorId, token).getAccessToken();
+      return true;
+    } catch (error) {
+      if (isPermanentAuthError(error)) {
+        this.logger.warn(
+          `Token do Google Calendar recusado para o tutor ${tutorId}; descartando`,
+        );
+        await this.disconnect(tutorId);
+        return false;
+      }
+      this.logger.warn(
+        `Não foi possível validar o token do Google Calendar do tutor ${tutorId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return true;
+    }
   }
 
   async disconnect(tutorId: string): Promise<void> {
@@ -554,15 +593,14 @@ export class GoogleCalendarService {
     return resolveTimeZone(tutor?.timezone);
   }
 
-  /** Cliente autenticado da agenda do tutor; `null` se ele não conectou. */
-  async getCalendarClient(
+  /**
+   * Cliente OAuth com as credenciais do tutor. Quando o Google renova o access
+   * token, o novo valor é gravado (cifrado) para a próxima chamada.
+   */
+  private authorizedClient(
     tutorId: string,
-  ): Promise<calendar_v3.Calendar | null> {
-    const token = await this.prisma.googleOAuthToken.findUnique({
-      where: { tutorId },
-    });
-    if (!token) return null;
-
+    token: GoogleOAuthToken,
+  ): OAuth2Client {
     const oauth2Client = this.createOAuth2Client();
     oauth2Client.setCredentials({
       access_token: this.encryption.decrypt(token.accessToken),
@@ -585,6 +623,21 @@ export class GoogleCalendarService {
       });
     });
 
-    return calendar({ version: 'v3', auth: oauth2Client });
+    return oauth2Client;
+  }
+
+  /** Cliente autenticado da agenda do tutor; `null` se ele não conectou. */
+  async getCalendarClient(
+    tutorId: string,
+  ): Promise<calendar_v3.Calendar | null> {
+    const token = await this.prisma.googleOAuthToken.findUnique({
+      where: { tutorId },
+    });
+    if (!token) return null;
+
+    return calendar({
+      version: 'v3',
+      auth: this.authorizedClient(tutorId, token),
+    });
   }
 }
