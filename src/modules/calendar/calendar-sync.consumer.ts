@@ -13,7 +13,7 @@ import {
 import { retryOrDlq } from '../queue/rmq';
 import { GoogleCalendarService } from './google-calendar.service';
 import { HealthCalendarService } from './health-calendar.service';
-import { extractGoogleStatus, isAlreadyGoneError } from './google-api-error';
+import { isAlreadyGoneError, isPermanentAuthError } from './google-api-error';
 
 @Controller()
 export class CalendarSyncConsumer {
@@ -77,7 +77,7 @@ export class CalendarSyncConsumer {
       // Descarta o token morto para que /calendar/status pare de dizer que está
       // conectado: é assim que o banner do app vira "conectar" e o tutor
       // descobre que os agendamentos deixaram de ir para a agenda.
-      if (this.isPermanentAuthError(error)) {
+      if (isPermanentAuthError(error)) {
         this.logger.warn(
           `Calendar OAuth revoked for appointment ${data.appointment_id}; dropping stored token`,
         );
@@ -125,7 +125,7 @@ export class CalendarSyncConsumer {
     } catch (error) {
       // Acesso revogado: repetir não adianta. O token morto é descartado no
       // próximo sync de agendamento; o catch-up da reconexão recupera este.
-      if (this.isPermanentAuthError(error)) {
+      if (isPermanentAuthError(error)) {
         this.logger.warn(
           `Calendar OAuth revoked for ${data.record_type} ${data.record_id}; skipping`,
         );
@@ -161,15 +161,5 @@ export class CalendarSyncConsumer {
           `Exhausted retries for ${subject} (${action}): ${reason}; routing to DLQ`,
         ),
     });
-  }
-
-  private isPermanentAuthError(error: unknown): boolean {
-    if (extractGoogleStatus(error) === 401) return true;
-    if (!(error instanceof Error)) return false;
-    const message = error.message.toLowerCase();
-    return (
-      message.includes('invalid_grant') ||
-      message.includes('token has been expired or revoked')
-    );
   }
 }

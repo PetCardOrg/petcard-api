@@ -22,3 +22,18 @@ export function isAlreadyGoneError(error: unknown): boolean {
   const status = extractGoogleStatus(error);
   return status === 404 || status === 410;
 }
+
+/**
+ * O Google recusou a credencial do tutor de forma definitiva: o refresh token
+ * foi revogado ou expirou (comum em app no modo "Testando", que vence em 7
+ * dias). Repetir não adianta; só reconectar resolve.
+ */
+export function isPermanentAuthError(error: unknown): boolean {
+  if (extractGoogleStatus(error) === 401) return true;
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('invalid_grant') ||
+    message.includes('token has been expired or revoked')
+  );
+}
