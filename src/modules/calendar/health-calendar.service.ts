@@ -9,6 +9,17 @@ import { GoogleCalendarService } from './google-calendar.service';
 const MS_PER_DAY = 86_400_000;
 
 /**
+ * Marca gravada no evento (`extendedProperties.private`, invisível ao tutor)
+ * com o registro de origem. É o que permite achar de novo o evento na agenda
+ * depois que o vínculo local some, em vez de criar um segundo.
+ */
+const MARCA_ENTIDADE = 'petcardEntidade';
+const MARCA_REGISTRO = 'petcardRegistroId';
+
+/** Folga, em dias, ao procurar na agenda eventos criados antes da marca existir. */
+const FOLGA_BUSCA_DIAS = 2;
+
+/**
  * Evento de dia inteiro: lembrete às 9h da véspera. Em evento de dia inteiro
  * o Google conta os minutos a partir da meia-noite do dia do evento.
  */
@@ -159,12 +170,45 @@ export class HealthCalendarService {
         calendar,
         vinculo.googleEventId,
         desejado,
+        tipo,
+        registroId,
       );
       if (atualizado) return;
       // Tutor apagou o evento na agenda: recria em vez de desistir.
     }
 
-    const googleEventId = await this.criar(calendar, desejado);
+    // Sem vínculo, o evento ainda pode estar na agenda: desconectar apaga o
+    // vínculo local, mas não os eventos do Google. Reconectar na mesma conta e
+    // criar de novo duplicava cada próxima dose. Procura antes de criar.
+    const existente = await this.procurarNaAgenda(
+      calendar,
+      tipo,
+      registroId,
+      desejado,
+    );
+    if (
+      existente &&
+      (await this.atualizar(calendar, existente, desejado, tipo, registroId))
+    ) {
+      await this.prisma.healthCalendarEvent.upsert({
+        where: { entidade_registroId: { entidade: tipo, registroId } },
+        update: { googleEventId: existente, tutorId },
+        create: {
+          entidade: tipo,
+          registroId,
+          tutorId,
+          googleEventId: existente,
+        },
+      });
+      return;
+    }
+
+    const googleEventId = await this.criar(
+      calendar,
+      desejado,
+      tipo,
+      registroId,
+    );
     await this.prisma.healthCalendarEvent.upsert({
       where: { entidade_registroId: { entidade: tipo, registroId } },
       update: { googleEventId, tutorId },
@@ -255,7 +299,11 @@ export class HealthCalendarService {
     }
   }
 
-  private corpo(evento: HealthEvent): calendar_v3.Schema$Event {
+  private corpo(
+    evento: HealthEvent,
+    tipo: HealthRecordType,
+    registroId: string,
+  ): calendar_v3.Schema$Event {
     return {
       summary: evento.titulo,
       description: evento.descricao,
@@ -267,16 +315,62 @@ export class HealthCalendarService {
         useDefault: false,
         overrides: [{ method: 'popup', minutes: VESPERA_9H_MINUTOS }],
       },
+      extendedProperties: {
+        private: { [MARCA_ENTIDADE]: tipo, [MARCA_REGISTRO]: registroId },
+      },
     };
+  }
+
+  /**
+   * Evento que já representa este registro na agenda, ou `null`.
+   *
+   * Primeiro pela marca que o próprio PetCard grava. Depois, para o que foi
+   * criado antes da marca existir, por título, descrição e dia exatamente
+   * iguais: a descrição ("...registrada no PetCard") não é texto que o tutor
+   * escreveria, então um evento dele com o mesmo título não é tomado por nosso.
+   */
+  private async procurarNaAgenda(
+    calendar: calendar_v3.Calendar,
+    tipo: HealthRecordType,
+    registroId: string,
+    desejado: HealthEvent,
+  ): Promise<string | null> {
+    const marcados = await calendar.events.list({
+      calendarId: 'primary',
+      privateExtendedProperty: [
+        `${MARCA_ENTIDADE}=${tipo}`,
+        `${MARCA_REGISTRO}=${registroId}`,
+      ],
+      maxResults: 1,
+    });
+    const marcado = marcados.data.items?.[0]?.id;
+    if (marcado) return marcado;
+
+    const inicio = new Date(`${desejado.inicio}T00:00:00.000Z`).getTime();
+    const proximos = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin: new Date(inicio - FOLGA_BUSCA_DIAS * MS_PER_DAY).toISOString(),
+      timeMax: new Date(inicio + FOLGA_BUSCA_DIAS * MS_PER_DAY).toISOString(),
+      maxResults: 250,
+    });
+    const igual = proximos.data.items?.find(
+      (e) =>
+        e.summary === desejado.titulo &&
+        e.description === desejado.descricao &&
+        e.start?.date === desejado.inicio,
+    );
+    return igual?.id ?? null;
   }
 
   private async criar(
     calendar: calendar_v3.Calendar,
     evento: HealthEvent,
+    tipo: HealthRecordType,
+    registroId: string,
   ): Promise<string> {
     const res = await calendar.events.insert({
       calendarId: 'primary',
-      requestBody: this.corpo(evento),
+      requestBody: this.corpo(evento, tipo, registroId),
     });
     if (!res.data.id) {
       throw new Error('O Google não devolveu o id do evento criado.');
@@ -289,12 +383,14 @@ export class HealthCalendarService {
     calendar: calendar_v3.Calendar,
     eventId: string,
     evento: HealthEvent,
+    tipo: HealthRecordType,
+    registroId: string,
   ): Promise<boolean> {
     try {
       await calendar.events.update({
         calendarId: 'primary',
         eventId,
-        requestBody: this.corpo(evento),
+        requestBody: this.corpo(evento, tipo, registroId),
       });
       return true;
     } catch (error) {

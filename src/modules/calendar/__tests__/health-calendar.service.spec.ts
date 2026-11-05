@@ -69,7 +69,12 @@ describe('eventoDesejado', () => {
 
 describe('HealthCalendarService.reconcile', () => {
   let service: HealthCalendarService;
-  let events: { insert: jest.Mock; update: jest.Mock; delete: jest.Mock };
+  let events: {
+    insert: jest.Mock;
+    update: jest.Mock;
+    delete: jest.Mock;
+    list: jest.Mock;
+  };
   let google: { getCalendarClient: jest.Mock };
   let prisma: {
     vaccineRecord: { findUnique: jest.Mock; findMany: jest.Mock };
@@ -92,6 +97,8 @@ describe('HealthCalendarService.reconcile', () => {
       insert: jest.fn().mockResolvedValue({ data: { id: 'evt-novo' } }),
       update: jest.fn().mockResolvedValue({ data: {} }),
       delete: jest.fn().mockResolvedValue({}),
+      // Agenda vazia por padrão: nada a adotar, cria.
+      list: jest.fn().mockResolvedValue({ data: { items: [] } }),
     };
     google = { getCalendarClient: jest.fn().mockResolvedValue({ events }) };
     prisma = {
@@ -168,6 +175,140 @@ describe('HealthCalendarService.reconcile', () => {
         update: { googleEventId: 'evt-novo', tutorId: 'tutor-1' },
       }),
     );
+  });
+
+  describe('reconectar o Google Agenda não duplica o evento', () => {
+    const desejado = () => eventoDesejado('VACINA', vacina)!;
+
+    // O cenário real: o tutor desconecta (o vínculo local some, o evento
+    // continua na agenda) e conecta de novo na mesma conta.
+    it('adota o evento que a agenda já tem para o registro, em vez de criar outro', async () => {
+      events.list.mockResolvedValueOnce({
+        data: { items: [{ id: 'evt-antigo' }] },
+      });
+
+      await service.reconcile('VACINA', 'vac-1');
+
+      expect(events.list).toHaveBeenCalledWith(
+        expect.objectContaining({
+          privateExtendedProperty: [
+            'petcardEntidade=VACINA',
+            'petcardRegistroId=vac-1',
+          ],
+        }),
+      );
+      expect(events.insert).not.toHaveBeenCalled();
+      expect(events.update).toHaveBeenCalledWith(
+        expect.objectContaining({ eventId: 'evt-antigo' }),
+      );
+      expect(prisma.healthCalendarEvent.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: {
+            entidade: 'VACINA',
+            registroId: 'vac-1',
+            tutorId: 'tutor-1',
+            googleEventId: 'evt-antigo',
+          },
+        }),
+      );
+    });
+
+    // Eventos criados antes da marca existir não a têm.
+    it('adota o evento antigo, sem marca, quando título, descrição e dia batem', async () => {
+      const { titulo, descricao, inicio } = desejado();
+      events.list
+        .mockResolvedValueOnce({ data: { items: [] } })
+        .mockResolvedValueOnce({
+          data: {
+            items: [
+              {
+                id: 'evt-legado',
+                summary: titulo,
+                description: descricao,
+                start: { date: inicio },
+              },
+            ],
+          },
+        });
+
+      await service.reconcile('VACINA', 'vac-1');
+
+      expect(events.insert).not.toHaveBeenCalled();
+      expect(events.update).toHaveBeenCalledWith(
+        expect.objectContaining({ eventId: 'evt-legado' }),
+      );
+    });
+
+    // Não pode sobrescrever um evento do próprio tutor só porque o título é parecido.
+    it('não adota um evento do tutor que só tem o mesmo título', async () => {
+      const { titulo, inicio } = desejado();
+      events.list
+        .mockResolvedValueOnce({ data: { items: [] } })
+        .mockResolvedValueOnce({
+          data: {
+            items: [
+              {
+                id: 'evt-do-tutor',
+                summary: titulo,
+                description: 'anotação minha',
+                start: { date: inicio },
+              },
+            ],
+          },
+        });
+
+      await service.reconcile('VACINA', 'vac-1');
+
+      expect(events.update).not.toHaveBeenCalled();
+      expect(events.insert).toHaveBeenCalled();
+    });
+
+    it('não adota evento do mesmo título em outro dia', async () => {
+      const { titulo, descricao } = desejado();
+      events.list
+        .mockResolvedValueOnce({ data: { items: [] } })
+        .mockResolvedValueOnce({
+          data: {
+            items: [
+              {
+                id: 'evt-outro-dia',
+                summary: titulo,
+                description: descricao,
+                start: { date: '2026-12-01' },
+              },
+            ],
+          },
+        });
+
+      await service.reconcile('VACINA', 'vac-1');
+
+      expect(events.update).not.toHaveBeenCalled();
+      expect(events.insert).toHaveBeenCalled();
+    });
+
+    it('marca o evento criado com o registro de origem, para achá-lo depois', async () => {
+      await service.reconcile('VACINA', 'vac-1');
+
+      expect(events.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestBody: expect.objectContaining({
+            extendedProperties: {
+              private: {
+                petcardEntidade: 'VACINA',
+                petcardRegistroId: 'vac-1',
+              },
+            },
+          }) as object,
+        }),
+      );
+    });
+
+    it('um erro ao procurar sobe para o consumer, em vez de criar às cegas', async () => {
+      events.list.mockRejectedValue(new Error('503'));
+
+      await expect(service.reconcile('VACINA', 'vac-1')).rejects.toThrow('503');
+      expect(events.insert).not.toHaveBeenCalled();
+    });
   });
 
   it('apaga o evento quando o registro é apagado', async () => {
