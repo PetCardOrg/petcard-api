@@ -9,6 +9,7 @@ const mockOAuth2Instance = {
   generateAuthUrl: jest.fn(),
   getToken: jest.fn(),
   setCredentials: jest.fn(),
+  getAccessToken: jest.fn(),
   on: jest.fn(),
 };
 const mockCalendarEvents = {
@@ -420,6 +421,71 @@ describe('GoogleCalendarService', () => {
         where: { tutorId: 'tutor-1', syncStatus: 'PENDING_DELETE' },
       });
     });
+  });
+
+  describe('hasWorkingConnection', () => {
+    it('é false, sem chamar o Google, quando não há token salvo', async () => {
+      prisma.googleOAuthToken.findUnique.mockResolvedValue(null);
+
+      await expect(service.hasWorkingConnection('tutor-1')).resolves.toBe(
+        false,
+      );
+      expect(mockOAuth2Instance.getAccessToken).not.toHaveBeenCalled();
+    });
+
+    it('é true quando o Google aceita o token', async () => {
+      prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
+      mockOAuth2Instance.getAccessToken.mockResolvedValue({ token: 'novo' });
+
+      await expect(service.hasWorkingConnection('tutor-1')).resolves.toBe(true);
+      expect(prisma.googleOAuthToken.deleteMany).not.toHaveBeenCalled();
+    });
+
+    // Era o furo: o token morto seguia "conectado" e o agendamento ficava
+    // pendente sem o tutor saber.
+    it.each([
+      [
+        'invalid_grant',
+        new Error('invalid_grant: Token has been expired or revoked.'),
+      ],
+      [
+        '401 do Google',
+        Object.assign(new Error('Unauthorized'), { code: 401 }),
+      ],
+    ])(
+      'descarta o token e é false quando o Google recusa (%s)',
+      async (_caso, erro) => {
+        prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
+        mockOAuth2Instance.getAccessToken.mockRejectedValue(erro);
+
+        await expect(service.hasWorkingConnection('tutor-1')).resolves.toBe(
+          false,
+        );
+        expect(prisma.googleOAuthToken.deleteMany).toHaveBeenCalledWith({
+          where: { tutorId: 'tutor-1' },
+        });
+      },
+    );
+
+    // Rede fora ou 5xx não provam nada sobre o token: não desconecta ninguém.
+    it.each([
+      ['falha de rede', new Error('connect ECONNRESET')],
+      [
+        '5xx do Google',
+        Object.assign(new Error('Backend Error'), { code: 503 }),
+      ],
+    ])(
+      'mantém o token e é true diante de erro passageiro (%s)',
+      async (_caso, erro) => {
+        prisma.googleOAuthToken.findUnique.mockResolvedValue(tokenRow);
+        mockOAuth2Instance.getAccessToken.mockRejectedValue(erro);
+
+        await expect(service.hasWorkingConnection('tutor-1')).resolves.toBe(
+          true,
+        );
+        expect(prisma.googleOAuthToken.deleteMany).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('createEvent', () => {

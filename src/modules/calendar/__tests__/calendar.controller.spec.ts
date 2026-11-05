@@ -18,7 +18,7 @@ describe('CalendarController (integração)', () => {
     getAuthUrl: jest.Mock;
     resolveState: jest.Mock;
     handleCallback: jest.Mock;
-    isConnected: jest.Mock;
+    hasWorkingConnection: jest.Mock;
     disconnect: jest.Mock;
     syncAllPending: jest.Mock;
   };
@@ -30,7 +30,7 @@ describe('CalendarController (integração)', () => {
       getAuthUrl: jest.fn(),
       resolveState: jest.fn().mockReturnValue({ tutorId: 'tutor-1' }),
       handleCallback: jest.fn().mockResolvedValue(undefined),
-      isConnected: jest.fn(),
+      hasWorkingConnection: jest.fn(),
       disconnect: jest.fn().mockResolvedValue(undefined),
       syncAllPending: jest.fn(),
     };
@@ -234,13 +234,25 @@ describe('CalendarController (integração)', () => {
 
   describe('GET /calendar/status', () => {
     it('retorna o estado de conexão (200)', async () => {
-      calendar.isConnected.mockResolvedValue(true);
+      calendar.hasWorkingConnection.mockResolvedValue(true);
 
       const res = await request(harness.app.getHttpServer())
         .get('/calendar/status')
         .expect(200);
 
       expect(res.body.connected).toBe(true);
+      expect(calendar.hasWorkingConnection).toHaveBeenCalledWith('tutor-1');
+    });
+
+    // O banner do app lê isto: token morto não pode aparecer como conectado.
+    it('diz que não está conectado quando o Google recusa o token', async () => {
+      calendar.hasWorkingConnection.mockResolvedValue(false);
+
+      const res = await request(harness.app.getHttpServer())
+        .get('/calendar/status')
+        .expect(200);
+
+      expect(res.body.connected).toBe(false);
     });
   });
 
