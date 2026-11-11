@@ -1,5 +1,5 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
-import { Role } from '../../auth/enums/role.enum';
+import { Role } from '@petcardorg/shared';
 import { CrmvVerificationService } from '../crmv/crmv-verification.service';
 import { CrmvVerifiedGuard } from '../crmv/crmv-verified.guard';
 

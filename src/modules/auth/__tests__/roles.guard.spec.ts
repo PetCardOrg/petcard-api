@@ -1,8 +1,8 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { Role } from '@petcardorg/shared';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { ROLES_KEY, Roles } from '../decorators/roles.decorator';
-import { Role } from '../enums/role.enum';
 import { RolesGuard } from '../guards/roles.guard';
 import { JwtPayload } from '../strategies/jwt.strategy';
 

@@ -24,24 +24,21 @@ import {
 import { Auth } from '../auth/decorators/auth.decorator';
 import { AuthCrmvVerificado } from './crmv/auth-crmv.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import {
   AdicionarPetAtendidoDto,
   CrmvStatusResponseDto,
+  DashboardPetResponseDto,
+  DashboardQueryDto,
   DeleteVeterinarioDto,
+  PaginatedResponse,
   PetAtendidoResponseDto,
+  Role,
   UpdateVeterinarioDto,
 } from '@petcardorg/shared';
 import { LIMITE_DE_ROTA_CARA } from '../../config/throttler.config';
-import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { CrmvVerificationService } from './crmv/crmv-verification.service';
-import {
-  DashboardPetItem,
-  PaginatedResponse,
-  VeterinarioResponse,
-  VeterinarioService,
-} from './veterinario.service';
+import { VeterinarioResponse, VeterinarioService } from './veterinario.service';
 
 /**
  * Como em `auth.controller.ts`, o `ThrottlerGuard` avalia TODOS os throttlers
@@ -139,7 +136,7 @@ export class VeterinarioController {
   async dashboardPets(
     @CurrentUser() user: JwtPayload,
     @Query() query: DashboardQueryDto,
-  ): Promise<PaginatedResponse<DashboardPetItem>> {
+  ): Promise<PaginatedResponse<DashboardPetResponseDto>> {
     return this.veterinarioService.findAttendedPets(user.sub, query);
   }
 

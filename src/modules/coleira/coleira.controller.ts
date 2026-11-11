@@ -8,16 +8,18 @@ import {
   ApiTags,
   ApiTooManyRequestsResponse,
 } from '@nestjs/swagger';
+import {
+  ColeiraPublicResponseDto,
+  PetScanResponseDto,
+  RegistrarLeituraDto,
+  Role,
+  TagColeiraResponseDto,
+} from '@petcardorg/shared';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
-import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { ColeiraService } from './coleira.service';
-import { ColeiraPublicResponseDto } from './dto/coleira-public-response.dto';
-import { PetScanResponseDto } from './dto/pet-scan-response.dto';
-import { TagColeiraResponseDto } from './dto/tag-coleira-response.dto';
-import { RegistrarLeituraDto } from './dto/registrar-leitura.dto';
 
 @ApiTags('coleira')
 @Controller('coleira')

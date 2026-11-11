@@ -9,35 +9,19 @@ import * as bcrypt from 'bcrypt';
 import { BCRYPT_ROUNDS } from '../../common/crypto/password.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  DashboardPetResponseDto,
+  DashboardQueryDto,
   DeleteVeterinarioDto,
+  normalizeEmail,
+  PaginatedResponse,
   PetAtendidoResponseDto,
   UpdateVeterinarioDto,
-  normalizeEmail,
 } from '@petcardorg/shared';
 import { UploadService } from '../upload/upload.service';
-import { DashboardQueryDto } from './dto/dashboard-query.dto';
 
 export type VeterinarioResponse = Omit<Veterinario, 'password' | 'photoUrl'> & {
   foto_url: string | null;
 };
-
-export interface DashboardPetItem {
-  id: string;
-  name: string;
-  species: string;
-  breed?: string;
-  photo_url?: string;
-  tutor_name: string;
-  last_attended_at: Date;
-}
-
-export interface PaginatedResponse<T> {
-  items: T[];
-  total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
-}
 
 /**
  * `photoUrl` também precisa virar `foto_url` aqui: é o nome da coluna
@@ -177,7 +161,7 @@ export class VeterinarioService {
   async findAttendedPets(
     veterinarioId: string,
     query: DashboardQueryDto,
-  ): Promise<PaginatedResponse<DashboardPetItem>> {
+  ): Promise<PaginatedResponse<DashboardPetResponseDto>> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
     const search = query.search?.trim();
@@ -207,7 +191,7 @@ export class VeterinarioService {
       }),
     ]);
 
-    const items: DashboardPetItem[] = vinculos.map(
+    const items: DashboardPetResponseDto[] = vinculos.map(
       ({ pet, ultimoAcessoEm }) => ({
         id: pet.id,
         name: pet.name,

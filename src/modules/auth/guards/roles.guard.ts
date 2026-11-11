@@ -6,9 +6,9 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
+import { Role } from '@petcardorg/shared';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { ROLES_KEY } from '../decorators/roles.decorator';
-import { Role } from '../enums/role.enum';
 import { JwtPayload } from '../strategies/jwt.strategy';
 
 @Injectable()

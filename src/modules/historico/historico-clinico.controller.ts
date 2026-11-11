@@ -8,9 +8,9 @@ import {
 import {
   HistoricoClinicoQueryDto,
   HistoricoClinicoResponseDto,
+  Role,
 } from '@petcardorg/shared';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { AuthCrmvVerificado } from '../veterinario/crmv/auth-crmv.decorator';
 import { HistoricoClinicoService } from './historico-clinico.service';

@@ -13,22 +13,27 @@ import { JwtService } from '@nestjs/jwt';
 import { AuthTokenPurpose, type Tutor } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { OAuth2Client, type TokenPayload } from 'google-auth-library';
-import { CreateVeterinarioDto, normalizeEmail } from '@petcardorg/shared';
+import {
+  CreateVeterinarioDto,
+  CrmvConsultaResponseDto,
+  ForgotPasswordDto,
+  GoogleLoginDto,
+  LoginDto,
+  normalizeEmail,
+  RegisterDto,
+  ResetPasswordDto,
+  Role,
+  TutorSessionResponseDto,
+  VerifyEmailDto,
+  VeterinarioRegisterResponseDto,
+  VeterinarioSessionResponseDto,
+  VeterinarioSessionUserDto,
+} from '@petcardorg/shared';
 import { BCRYPT_ROUNDS } from '../../common/crypto/password.constants';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
-  CrmvVerificationService,
-  type CrmvConsulta,
-} from '../veterinario/crmv/crmv-verification.service';
+import { CrmvVerificationService } from '../veterinario/crmv/crmv-verification.service';
 import { MailService } from '../mail/mail.service';
 import { AuthTokenService } from './auth-token.service';
-import { ForgotPasswordDto } from './dto/forgot-password.dto';
-import { GoogleLoginDto } from './dto/google-login.dto';
-import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
-import { ResetPasswordDto } from './dto/reset-password.dto';
-import { VerifyEmailDto } from './dto/verify-email.dto';
-import { Role } from './enums/role.enum';
 
 /**
  * Hash descartável, com o mesmo custo dos reais, comparado quando o e-mail não
@@ -60,7 +65,7 @@ export class AuthService {
     private readonly crmvVerification: CrmvVerificationService,
   ) {}
 
-  async register(dto: RegisterDto) {
+  async register(dto: RegisterDto): Promise<TutorSessionResponseDto> {
     const email = normalizeEmail(dto.email);
     const existing = await this.prisma.tutor.findUnique({ where: { email } });
 
@@ -83,7 +88,7 @@ export class AuthService {
     return this.buildTutorSession(tutor);
   }
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto): Promise<TutorSessionResponseDto> {
     const tutor = await this.prisma.tutor.findUnique({
       where: { email: normalizeEmail(dto.email) },
     });
@@ -108,7 +113,7 @@ export class AuthService {
    * (vinculando a conta existente), senão criamos uma conta já verificada — o
    * Google confirma o endereço por nós.
    */
-  async googleLogin(dto: GoogleLoginDto) {
+  async googleLogin(dto: GoogleLoginDto): Promise<TutorSessionResponseDto> {
     const payload = await this.verifyGoogleIdToken(dto.idToken);
     const email = payload.email ? normalizeEmail(payload.email) : undefined;
     const googleId = payload.sub;
@@ -258,7 +263,7 @@ export class AuthService {
   }
 
   /** Primeiro passo do cadastro do vet: o CRMV antes dos demais campos. */
-  consultarCrmv(crmv: string): Promise<CrmvConsulta> {
+  consultarCrmv(crmv: string): Promise<CrmvConsultaResponseDto> {
     return this.crmvVerification.lookup(crmv);
   }
 
@@ -269,7 +274,9 @@ export class AuthService {
    * já entrar liberado em vez de esbarrar no bloqueio da api#113 no primeiro
    * atendimento.
    */
-  async registerVeterinario(dto: CreateVeterinarioDto) {
+  async registerVeterinario(
+    dto: CreateVeterinarioDto,
+  ): Promise<VeterinarioRegisterResponseDto> {
     const email = normalizeEmail(dto.email);
     const porEmail = await this.prisma.veterinario.findUnique({
       where: { email },
@@ -335,7 +342,9 @@ export class AuthService {
     };
   }
 
-  async loginVeterinario(dto: LoginDto) {
+  async loginVeterinario(
+    dto: LoginDto,
+  ): Promise<VeterinarioSessionResponseDto> {
     const vet = await this.prisma.veterinario.findUnique({
       where: { email: normalizeEmail(dto.email) },
     });
@@ -370,7 +379,7 @@ export class AuthService {
     };
   }
 
-  async getVeterinarioProfile(id: string) {
+  async getVeterinarioProfile(id: string): Promise<VeterinarioSessionUserDto> {
     const vet = await this.prisma.veterinario.findUnique({
       where: { id },
     });
@@ -425,7 +434,7 @@ export class AuthService {
     });
   }
 
-  private buildTutorSession(tutor: Tutor) {
+  private buildTutorSession(tutor: Tutor): TutorSessionResponseDto {
     return {
       access_token: this.signToken(
         tutor.id,
