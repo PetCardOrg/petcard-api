@@ -9,10 +9,9 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { DeviceToken } from '@prisma/client';
-import { RegisterDeviceDto } from '@petcardorg/shared';
+import { RegisterDeviceDto, Role } from '@petcardorg/shared';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { TutorService } from '../tutor/tutor.service';
 import { NotificationService } from './notification.service';

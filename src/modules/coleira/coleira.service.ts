@@ -3,12 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { NotificationKind, PetScan } from '@prisma/client';
 import * as QRCode from 'qrcode';
+import {
+  ColeiraPublicResponseDto,
+  PetScanResponseDto,
+  RegistrarLeituraDto,
+  TagColeiraResponseDto,
+} from '@petcardorg/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
-import { ColeiraPublicResponseDto } from './dto/coleira-public-response.dto';
-import { PetScanResponseDto } from './dto/pet-scan-response.dto';
-import { TagColeiraResponseDto } from './dto/tag-coleira-response.dto';
-import { RegistrarLeituraDto } from './dto/registrar-leitura.dto';
 
 /**
  * Janela de dedupe do push por pet (achado 2 da auditoria de rotas

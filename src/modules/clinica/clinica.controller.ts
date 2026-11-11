@@ -12,16 +12,16 @@ import {
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import {
+  AutocompleteQueryDto,
   FindNearbyPlacesQueryDto,
+  GeocodeQueryDto,
   GeocodeResponseDto,
   PlacesClinicResponseDto,
+  PlaceSuggestionResponseDto,
+  Role,
 } from '@petcardorg/shared';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { Public } from '../auth/decorators/public.decorator';
-import { Role } from '../auth/enums/role.enum';
-import { AutocompleteQueryDto } from './dto/autocomplete-query.dto';
-import { GeocodeQueryDto } from './dto/geocode-query.dto';
-import { PlaceSuggestionResponseDto } from './dto/place-suggestion-response.dto';
 import { GeocodingService } from './geocoding.service';
 import { PlacesService } from './places.service';
 

@@ -12,11 +12,11 @@ import {
   CarteiraDigitalClinicaResponseDto,
   CarteiraDigitalPublicResponseDto,
   CarteiraDigitalResponseDto,
+  Role,
 } from '@petcardorg/shared';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
-import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { AuthCrmvVerificado } from '../veterinario/crmv/auth-crmv.decorator';
 import { CardService } from './card.service';

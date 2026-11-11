@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+import { CreateAppointmentDto } from '@petcardorg/shared';
 import {
   BadRequestException,
   ForbiddenException,
@@ -9,7 +10,6 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { PetService } from '../../pet/pet.service';
 import { CalendarSyncPublisher } from '../../queue/calendar-sync.publisher';
 import { AppointmentService } from '../appointment.service';
-import { CreateAppointmentDto } from '../dto/create-appointment.dto';
 
 describe('AppointmentService', () => {
   let service: AppointmentService;

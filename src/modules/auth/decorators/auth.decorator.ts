@@ -4,9 +4,9 @@ import {
   ApiForbiddenResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Role } from '@petcardorg/shared';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
-import { Role } from '../enums/role.enum';
 import { Roles } from './roles.decorator';
 
 export const Auth = (...roles: Role[]): ReturnType<typeof applyDecorators> =>

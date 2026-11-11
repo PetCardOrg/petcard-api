@@ -11,26 +11,34 @@ import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiTags,
   ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { CreateVeterinarioDto } from '@petcardorg/shared';
+import {
+  CreateVeterinarioDto,
+  CrmvConsultaResponseDto,
+  ForgotPasswordDto,
+  GoogleLoginDto,
+  LoginDto,
+  RegisterDto,
+  ResetPasswordDto,
+  Role,
+  TutorSessionResponseDto,
+  VerifyEmailDto,
+  VeterinarioRegisterResponseDto,
+  VeterinarioSessionResponseDto,
+  VeterinarioSessionUserDto,
+} from '@petcardorg/shared';
 import { LIMITE_DE_ROTA_CARA } from '../../config/throttler.config';
-import type { CrmvConsulta } from '../veterinario/crmv/crmv-verification.service';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
-import { ForgotPasswordDto } from './dto/forgot-password.dto';
-import { GoogleLoginDto } from './dto/google-login.dto';
-import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
-import { ResetPasswordDto } from './dto/reset-password.dto';
-import { VerifyEmailDto } from './dto/verify-email.dto';
 import { Auth } from './decorators/auth.decorator';
 import { Public } from './decorators/public.decorator';
-import { Role } from './enums/role.enum';
 import type { JwtPayload } from './strategies/jwt.strategy';
 
 /**
@@ -47,6 +55,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
+  @ApiCreatedResponse({ type: TutorSessionResponseDto })
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
@@ -54,11 +63,12 @@ export class AuthController {
   @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({ summary: 'Registrar novo tutor' })
   @ApiConflictResponse({ description: 'Email já cadastrado' })
-  register(@Body() dto: RegisterDto) {
+  register(@Body() dto: RegisterDto): Promise<TutorSessionResponseDto> {
     return this.authService.register(dto);
   }
 
   @Post('login')
+  @ApiCreatedResponse({ type: TutorSessionResponseDto })
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
@@ -66,11 +76,12 @@ export class AuthController {
   @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({ summary: 'Login do tutor (JWT com role TUTOR)' })
   @ApiUnauthorizedResponse({ description: 'Credenciais inválidas' })
-  login(@Body() dto: LoginDto) {
+  login(@Body() dto: LoginDto): Promise<TutorSessionResponseDto> {
     return this.authService.login(dto);
   }
 
   @Post('google')
+  @ApiCreatedResponse({ type: TutorSessionResponseDto })
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
@@ -83,7 +94,9 @@ export class AuthController {
       'Conta criada por aqui nasce com o e-mail verificado.',
   })
   @ApiUnauthorizedResponse({ description: 'ID token inválido' })
-  loginWithGoogle(@Body() dto: GoogleLoginDto) {
+  loginWithGoogle(
+    @Body() dto: GoogleLoginDto,
+  ): Promise<TutorSessionResponseDto> {
     return this.authService.googleLogin(dto);
   }
 
@@ -157,6 +170,7 @@ export class AuthController {
   }
 
   @Get('veterinario/crmv')
+  @ApiOkResponse({ type: CrmvConsultaResponseDto })
   @Public()
   // Consulta paga por chamada numa rota pública: o teto é o das rotas caras,
   // não o do login. O cache curto do serviço faz o cadastro logo em seguida
@@ -174,11 +188,12 @@ export class AuthController {
   @ApiQuery({ name: 'crmv', example: 'CRMV-SP 12345' })
   @ApiBadRequestResponse({ description: 'CRMV em formato irreconhecível' })
   @ApiConflictResponse({ description: 'CRMV já cadastrado' })
-  consultarCrmv(@Query('crmv') crmv: string): Promise<CrmvConsulta> {
+  consultarCrmv(@Query('crmv') crmv: string): Promise<CrmvConsultaResponseDto> {
     return this.authService.consultarCrmv(crmv ?? '');
   }
 
   @Post('veterinario/register')
+  @ApiCreatedResponse({ type: VeterinarioRegisterResponseDto })
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
@@ -192,11 +207,14 @@ export class AuthController {
       'verificada — veja `crmv_verificado` na resposta.',
   })
   @ApiConflictResponse({ description: 'Email ou CRMV já cadastrado' })
-  registerVeterinario(@Body() dto: CreateVeterinarioDto) {
+  registerVeterinario(
+    @Body() dto: CreateVeterinarioDto,
+  ): Promise<VeterinarioRegisterResponseDto> {
     return this.authService.registerVeterinario(dto);
   }
 
   @Post('veterinario/login')
+  @ApiCreatedResponse({ type: VeterinarioSessionResponseDto })
   @Public()
   @UseGuards(ThrottlerGuard)
   @Throttle({ auth: {} })
@@ -204,14 +222,19 @@ export class AuthController {
   @ApiTooManyRequestsResponse({ description: 'Limite de tentativas excedido' })
   @ApiOperation({ summary: 'Login do veterinário (JWT com role VET)' })
   @ApiUnauthorizedResponse({ description: 'Credenciais inválidas' })
-  loginVeterinario(@Body() dto: LoginDto) {
+  loginVeterinario(
+    @Body() dto: LoginDto,
+  ): Promise<VeterinarioSessionResponseDto> {
     return this.authService.loginVeterinario(dto);
   }
 
   @Get('veterinario/profile')
+  @ApiOkResponse({ type: VeterinarioSessionUserDto })
   @Auth(Role.VET)
   @ApiOperation({ summary: 'Perfil do veterinário autenticado' })
-  getVeterinarioProfile(@CurrentUser() user: JwtPayload) {
+  getVeterinarioProfile(
+    @CurrentUser() user: JwtPayload,
+  ): Promise<VeterinarioSessionUserDto> {
     return this.authService.getVeterinarioProfile(user.sub);
   }
 }

@@ -6,26 +6,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Appointment } from '@prisma/client';
+import {
+  AppointmentResponseDto,
+  CreateAppointmentDto,
+  UpdateAppointmentDto,
+} from '@petcardorg/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PetService } from '../pet/pet.service';
 import { CalendarSyncPublisher } from '../queue/calendar-sync.publisher';
 import type { AppointmentSyncMessage } from '../queue/dto/calendar-sync.message';
-import { CreateAppointmentDto } from './dto/create-appointment.dto';
-import { UpdateAppointmentDto } from './dto/update-appointment.dto';
-
-export type AppointmentResponse = {
-  id: string;
-  title: string;
-  description?: string;
-  scheduled_at: string;
-  duration_minutes: number;
-  location?: string;
-  pet_id?: string;
-  pet_name?: string;
-  sync_status: string;
-  created_at: Date;
-  updated_at: Date;
-};
 
 /**
  * Folga para o relógio do aparelho atrasado: o app só deixa escolher horário
@@ -53,7 +42,7 @@ type AppointmentWithPet = Appointment & {
   pet?: { name: string } | null;
 };
 
-function toResponse(a: AppointmentWithPet): AppointmentResponse {
+function toResponse(a: AppointmentWithPet): AppointmentResponseDto {
   return {
     id: a.id,
     title: a.title,
@@ -82,7 +71,7 @@ export class AppointmentService {
   async create(
     userId: string,
     dto: CreateAppointmentDto,
-  ): Promise<AppointmentResponse> {
+  ): Promise<AppointmentResponseDto> {
     recusarHorarioNoPassado(new Date(dto.scheduled_at));
     if (dto.pet_id) {
       await this.petService.assertOwnership(dto.pet_id, userId);
@@ -110,7 +99,7 @@ export class AppointmentService {
     return toResponse(appointment);
   }
 
-  async findAllForTutor(userId: string): Promise<AppointmentResponse[]> {
+  async findAllForTutor(userId: string): Promise<AppointmentResponseDto[]> {
     const appointments = await this.prisma.appointment.findMany({
       where: { tutorId: userId, syncStatus: NAO_EXCLUIDO },
       include: { pet: { select: { name: true } } },
@@ -119,7 +108,7 @@ export class AppointmentService {
     return appointments.map(toResponse);
   }
 
-  async findUpcoming(userId: string): Promise<AppointmentResponse[]> {
+  async findUpcoming(userId: string): Promise<AppointmentResponseDto[]> {
     const appointments = await this.prisma.appointment.findMany({
       where: {
         tutorId: userId,
@@ -132,7 +121,7 @@ export class AppointmentService {
     return appointments.map(toResponse);
   }
 
-  async findOne(id: string, userId: string): Promise<AppointmentResponse> {
+  async findOne(id: string, userId: string): Promise<AppointmentResponseDto> {
     const appointment = await this.findAndAssertOwnership(id, userId);
     return toResponse(appointment);
   }
@@ -141,7 +130,7 @@ export class AppointmentService {
     id: string,
     userId: string,
     dto: UpdateAppointmentDto,
-  ): Promise<AppointmentResponse> {
+  ): Promise<AppointmentResponseDto> {
     const atual = await this.findAndAssertOwnership(id, userId);
     // Só vale quando o horário muda: um compromisso que já passou continua
     // editável (título, local), e o app reenvia o mesmo scheduled_at.

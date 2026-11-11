@@ -18,12 +18,12 @@ import {
 } from '@nestjs/swagger';
 import { AuthCrmvVerificado } from '../veterinario/crmv/auth-crmv.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import {
   CreateNotaClinicaDto,
-  UpdateNotaClinicaDto,
   NotaClinicaResponseDto,
+  Role,
+  UpdateNotaClinicaDto,
 } from '@petcardorg/shared';
 import { VetNoteService } from './vet-note.service';
 

@@ -1,9 +1,9 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import { Role } from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { JwtStrategy, JwtPayload } from '../strategies/jwt.strategy';
-import { Role } from '../enums/role.enum';
 
 /**
  * A JwtStrategy é o ponto onde uma sessão vira acesso: se ela recusar demais,

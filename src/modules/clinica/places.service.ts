@@ -7,8 +7,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { PlacesClinicResponseDto } from '@petcardorg/shared';
-import { PlaceSuggestionResponseDto } from './dto/place-suggestion-response.dto';
+import {
+  PlacesClinicResponseDto,
+  PlaceSuggestionResponseDto,
+} from '@petcardorg/shared';
 
 type NearbySearchParams = {
   lat: number;

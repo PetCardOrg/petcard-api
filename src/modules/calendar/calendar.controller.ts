@@ -12,16 +12,21 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   ApiExcludeEndpoint,
+  ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { randomBytes } from 'node:crypto';
 import type { Response } from 'express';
+import {
+  CalendarConnectResponseDto,
+  CalendarStatusResponseDto,
+  Role,
+} from '@petcardorg/shared';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
-import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { resultPage } from '../auth/auth-web.pages';
 import { calendarConnectedPage } from './calendar.pages';
@@ -52,6 +57,7 @@ export class CalendarController {
   ) {}
 
   @Get('connect')
+  @ApiOkResponse({ type: CalendarConnectResponseDto })
   @Auth(Role.TUTOR)
   @ApiOperation({
     summary: 'Obter URL de autorização OAuth do Google Calendar',
@@ -65,7 +71,7 @@ export class CalendarController {
   connect(
     @CurrentUser() user: JwtPayload,
     @Query('return_url') returnUrl?: string,
-  ) {
+  ): CalendarConnectResponseDto {
     const url = this.googleCalendarService.getAuthUrl(user.sub, returnUrl);
     if (!url) {
       return {
@@ -268,6 +274,7 @@ async function login() {
   }
 
   @Get('status')
+  @ApiOkResponse({ type: CalendarStatusResponseDto })
   @Auth(Role.TUTOR)
   @ApiOperation({
     summary: 'Status da conexão com o Google Calendar',
@@ -276,7 +283,9 @@ async function login() {
       'tutor. Um token revogado ou vencido é descartado aqui, e o app passa ' +
       'a mostrar "conectar".',
   })
-  async status(@CurrentUser() user: JwtPayload) {
+  async status(
+    @CurrentUser() user: JwtPayload,
+  ): Promise<CalendarStatusResponseDto> {
     const connected = await this.googleCalendarService.hasWorkingConnection(
       user.sub,
     );
