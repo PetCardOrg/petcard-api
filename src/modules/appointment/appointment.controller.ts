@@ -11,18 +11,23 @@ import {
   Query,
 } from '@nestjs/common';
 import {
+  ApiCreatedResponse,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import {
+  AppointmentResponseDto,
+  CreateAppointmentDto,
+  Role,
+  UpdateAppointmentDto,
+} from '@petcardorg/shared';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
-import { AppointmentResponse, AppointmentService } from './appointment.service';
-import { CreateAppointmentDto } from './dto/create-appointment.dto';
-import { UpdateAppointmentDto } from './dto/update-appointment.dto';
+import { AppointmentService } from './appointment.service';
 
 @ApiTags('appointments')
 @Controller('appointments')
@@ -30,6 +35,7 @@ export class AppointmentController {
   constructor(private readonly appointmentService: AppointmentService) {}
 
   @Post()
+  @ApiCreatedResponse({ type: AppointmentResponseDto })
   @Auth(Role.TUTOR)
   @ApiOperation({
     summary: 'Agendar compromisso do pet (sincroniza com Google Calendar)',
@@ -37,11 +43,12 @@ export class AppointmentController {
   async create(
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateAppointmentDto,
-  ): Promise<AppointmentResponse> {
+  ): Promise<AppointmentResponseDto> {
     return this.appointmentService.create(user.sub, dto);
   }
 
   @Get()
+  @ApiOkResponse({ type: AppointmentResponseDto, isArray: true })
   @Auth(Role.TUTOR)
   @ApiOperation({ summary: 'Listar compromissos do tutor autenticado' })
   @ApiQuery({
@@ -52,7 +59,7 @@ export class AppointmentController {
   async findAll(
     @CurrentUser() user: JwtPayload,
     @Query('upcoming') upcoming?: string,
-  ): Promise<AppointmentResponse[]> {
+  ): Promise<AppointmentResponseDto[]> {
     if (upcoming === 'true') {
       return this.appointmentService.findUpcoming(user.sub);
     }
@@ -60,17 +67,19 @@ export class AppointmentController {
   }
 
   @Get(':id')
+  @ApiOkResponse({ type: AppointmentResponseDto })
   @Auth(Role.TUTOR)
   @ApiOperation({ summary: 'Buscar compromisso por id' })
   @ApiNotFoundResponse({ description: 'Compromisso não encontrado' })
   async findOne(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
-  ): Promise<AppointmentResponse> {
+  ): Promise<AppointmentResponseDto> {
     return this.appointmentService.findOne(id, user.sub);
   }
 
   @Patch(':id')
+  @ApiOkResponse({ type: AppointmentResponseDto })
   @Auth(Role.TUTOR)
   @ApiOperation({ summary: 'Atualizar compromisso' })
   @ApiNotFoundResponse({ description: 'Compromisso não encontrado' })
@@ -78,7 +87,7 @@ export class AppointmentController {
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
     @Body() dto: UpdateAppointmentDto,
-  ): Promise<AppointmentResponse> {
+  ): Promise<AppointmentResponseDto> {
     return this.appointmentService.update(id, user.sub, dto);
   }
 

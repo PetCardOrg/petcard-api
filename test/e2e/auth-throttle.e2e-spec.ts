@@ -2,11 +2,11 @@ import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { App } from 'supertest/types';
 import request from 'supertest';
+import { Role } from '@petcardorg/shared';
 import { createE2EApp, E2EApp } from '../utils/e2e-app';
 import { resetDb } from '../utils/e2e-db';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { LIMITE_DE_ROTA_CARA } from '../../src/config/throttler.config';
-import { Role } from '../../src/modules/auth/enums/role.enum';
 
 const LIMITE = 3;
 

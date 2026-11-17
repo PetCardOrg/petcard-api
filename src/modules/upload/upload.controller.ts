@@ -13,19 +13,20 @@ import {
   ApiBadRequestResponse,
   ApiBody,
   ApiConsumes,
+  ApiCreatedResponse,
   ApiOperation,
   ApiQuery,
   ApiTags,
   ApiTooManyRequestsResponse,
 } from '@nestjs/swagger';
+import { Role, UploadImageResponseDto } from '@petcardorg/shared';
+import type { UploadFolder } from '@petcardorg/shared';
 import { LIMITE_DE_UPLOAD } from '../../config/throttler.config';
 import { Auth } from '../auth/decorators/auth.decorator';
-import { Role } from '../auth/enums/role.enum';
 import { MAX_FILE_SIZE_BYTES, UploadService } from './upload.service';
 import { UserThrottlerGuard } from './user-throttler.guard';
 
-const ALLOWED_FOLDERS = ['pets', 'tutors', 'vets'] as const;
-type AllowedFolder = (typeof ALLOWED_FOLDERS)[number];
+const ALLOWED_FOLDERS: readonly UploadFolder[] = ['pets', 'tutors', 'vets'];
 
 @ApiTags('upload')
 @Controller('upload')
@@ -33,6 +34,7 @@ export class UploadController {
   constructor(private readonly uploadService: UploadService) {}
 
   @Post('image')
+  @ApiCreatedResponse({ type: UploadImageResponseDto })
   @Auth(Role.TUTOR, Role.VET)
   // Mesmo balde `auth` do resto da API (contado por rota) com teto próprio.
   // Os outros throttlers nomeados são dispensados: o guard avalia todos.
@@ -69,8 +71,8 @@ export class UploadController {
   })
   async uploadImage(
     @UploadedFile() file: Express.Multer.File,
-    @Query('folder') folder: AllowedFolder = 'pets',
-  ): Promise<{ url: string }> {
+    @Query('folder') folder: UploadFolder = 'pets',
+  ): Promise<UploadImageResponseDto> {
     if (!ALLOWED_FOLDERS.includes(folder)) {
       throw new BadRequestException(
         `Invalid folder. Allowed: ${ALLOWED_FOLDERS.join(', ')}`,

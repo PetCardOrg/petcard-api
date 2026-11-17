@@ -12,7 +12,7 @@ import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { randomBytes } from 'node:crypto';
 import type { Response } from 'express';
-import { isStrongPassword } from '../../common/crypto/password.validators';
+import { isStrongPassword } from '@petcardorg/shared';
 import { AuthService } from './auth.service';
 import { Public } from './decorators/public.decorator';
 import { resetFormPage, resultPage } from './auth-web.pages';

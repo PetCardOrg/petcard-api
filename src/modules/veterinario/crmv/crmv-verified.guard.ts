@@ -5,7 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { Role } from '../../auth/enums/role.enum';
+import { Role } from '@petcardorg/shared';
 import type { JwtPayload } from '../../auth/strategies/jwt.strategy';
 import { CrmvVerificationService } from './crmv-verification.service';
 

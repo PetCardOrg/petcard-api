@@ -10,12 +10,12 @@ import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ThrottlerModule } from '@nestjs/throttler';
 import type { App } from 'supertest/types';
+import { Role } from '@petcardorg/shared';
 import { PrismaUniqueFilter } from '../../src/common/http/prisma-unique.filter';
 import { IS_PUBLIC_KEY } from '../../src/modules/auth/decorators/public.decorator';
 import { JwtAuthGuard } from '../../src/modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../src/modules/auth/guards/roles.guard';
 import { JwtPayload } from '../../src/modules/auth/strategies/jwt.strategy';
-import { Role } from '../../src/modules/auth/enums/role.enum';
 
 export type TestUser = Pick<JwtPayload, 'sub' | 'email' | 'role'>;
 

@@ -15,10 +15,9 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { DeleteTutorDto, UpdateTutorDto } from '@petcardorg/shared';
+import { DeleteTutorDto, Role, UpdateTutorDto } from '@petcardorg/shared';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { Role } from '../auth/enums/role.enum';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { TutorService, type TutorPublico } from './tutor.service';
 

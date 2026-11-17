@@ -7,7 +7,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CrmvMotivoRecusa, CrmvStatusResponseDto } from '@petcardorg/shared';
+import {
+  CrmvConsultaResponseDto,
+  CrmvMotivoRecusa,
+  CrmvStatusResponseDto,
+} from '@petcardorg/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
   CRMV_VALIDATOR,
@@ -56,19 +60,6 @@ function paraStatus(
     verified_at: verifiedAt,
   };
 }
-
-/** Resposta de `GET /auth/veterinario/crmv` (cadastro com CRMV primeiro). */
-export type CrmvConsulta = {
-  /** CRMV no formato canônico ("CRMV-SP 12345"), para o cadastro gravar. */
-  crmv: string;
-  uf: string;
-  numero: string;
-  /** Registro encontrado e em situação regular. */
-  valido: boolean;
-  /** Nome no cadastro do CFMV, para pré-preencher o formulário (editável). */
-  nome?: string;
-  situacao?: string;
-};
 
 @Injectable()
 export class CrmvVerificationService {
@@ -206,7 +197,7 @@ export class CrmvVerificationService {
    * CRMV já cadastrado responde 409 antes de consultar: além de avisar o vet
    * cedo, não paga uma consulta para um cadastro que não vai acontecer.
    */
-  async lookup(crmv: string): Promise<CrmvConsulta> {
+  async lookup(crmv: string): Promise<CrmvConsultaResponseDto> {
     const { numero, uf } = this.parseCrmv(crmv);
     const canonico = this.formatCrmv(crmv);
 
